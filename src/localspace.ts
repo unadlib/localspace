@@ -8,7 +8,12 @@ import type {
   DriverSupportMap,
   Serializer,
 } from './types';
-import { extend, isArray, includes, executeTwoCallbacks } from './utils/helpers';
+import {
+  extend,
+  isArray,
+  includes,
+  executeTwoCallbacks,
+} from './utils/helpers';
 import serializer from './utils/serializer';
 import idbDriver from './drivers/indexeddb';
 import localstorageDriver from './drivers/localstorage';
@@ -60,7 +65,9 @@ type DriverAugmentedInstance = ReadyAwareInstance &
     _initStorage?: (config: LocalspaceConfig) => Promise<void>;
   };
 
-const asErrorHandler = (callback?: Callback<unknown>): ((error: Error) => void) | undefined => {
+const asErrorHandler = (
+  callback?: Callback<unknown>
+): ((error: Error) => void) | undefined => {
   if (!callback) {
     return undefined;
   }
@@ -70,7 +77,10 @@ const asErrorHandler = (callback?: Callback<unknown>): ((error: Error) => void) 
   };
 };
 
-function callWhenReady(instance: ReadyAwareInstance, libraryMethod: string): void {
+function callWhenReady(
+  instance: ReadyAwareInstance,
+  libraryMethod: string
+): void {
   instance[libraryMethod] = function (...args: unknown[]) {
     return instance.ready().then(() => {
       const method = instance[libraryMethod] as ReadyWrappedMethod;
@@ -95,7 +105,8 @@ export class Localspace implements LocalspaceInstance {
     // Define default drivers
     for (const driverTypeKey in DefaultDrivers) {
       if (Object.prototype.hasOwnProperty.call(DefaultDrivers, driverTypeKey)) {
-        const driver = DefaultDrivers[driverTypeKey as keyof typeof DefaultDrivers];
+        const driver =
+          DefaultDrivers[driverTypeKey as keyof typeof DefaultDrivers];
         const driverName = driver._driver;
         (this as unknown as Record<string, string>)[driverTypeKey] = driverName;
 
@@ -113,18 +124,25 @@ export class Localspace implements LocalspaceInstance {
   }
 
   config(options: LocalspaceConfig): true | Error | Promise<void>;
-  config<K extends keyof LocalspaceConfig>(key: K): LocalspaceConfig[K] | undefined;
+  config<K extends keyof LocalspaceConfig>(
+    key: K
+  ): LocalspaceConfig[K] | undefined;
   config(): LocalspaceConfig;
   config(optionsOrKey?: LocalspaceConfig | keyof LocalspaceConfig) {
     if (typeof optionsOrKey === 'object' && optionsOrKey !== null) {
       if (this._ready) {
-        return new Error("Can't call config() after localforage has been used.");
+        return new Error(
+          "Can't call config() after LocalSpace has been used."
+        );
       }
 
       const suppliedOptions = optionsOrKey as Partial<LocalspaceConfig>;
-      const configRecord = this._config as LocalspaceConfig & Record<string, unknown>;
+      const configRecord = this._config as LocalspaceConfig &
+        Record<string, unknown>;
 
-      for (const key of Object.keys(suppliedOptions) as Array<keyof LocalspaceConfig>) {
+      for (const key of Object.keys(suppliedOptions) as Array<
+        keyof LocalspaceConfig
+      >) {
         const value = suppliedOptions[key];
 
         if (key === 'storeName' && typeof value === 'string') {
@@ -166,9 +184,7 @@ export class Localspace implements LocalspaceInstance {
     const promise = new Promise<void>(async (resolve, reject) => {
       try {
         const driverName = driverObject._driver;
-        const complianceError = new Error(
-          'Custom driver not compliant; see https://mozilla.github.io/localForage/#definedriver'
-        );
+        const complianceError = new Error('Custom driver not compliant');
 
         if (!driverObject._driver) {
           reject(complianceError);
@@ -202,7 +218,8 @@ export class Localspace implements LocalspaceInstance {
 
           for (const optionalDriverMethod of OptionalDriverMethods) {
             if (!driverRecord[optionalDriverMethod]) {
-              driverRecord[optionalDriverMethod] = methodNotImplementedFactory(optionalDriverMethod);
+              driverRecord[optionalDriverMethod] =
+                methodNotImplementedFactory(optionalDriverMethod);
             }
           }
         };
@@ -211,7 +228,7 @@ export class Localspace implements LocalspaceInstance {
 
         const setDriverSupport = (support: boolean) => {
           if (DefinedDrivers[driverName]) {
-            console.info(`Redefining LocalForage driver: ${driverName}`);
+            console.info(`Redefining LocalSpace driver: ${driverName}`);
           }
           DefinedDrivers[driverName] = driverObject;
           DriverSupport[driverName] = support;
@@ -236,7 +253,11 @@ export class Localspace implements LocalspaceInstance {
       }
     });
 
-    executeTwoCallbacks(promise, callback, asErrorHandler(errorCallback as Callback<unknown> | undefined));
+    executeTwoCallbacks(
+      promise,
+      callback,
+      asErrorHandler(errorCallback as Callback<unknown> | undefined)
+    );
     return promise;
   }
 
@@ -253,7 +274,11 @@ export class Localspace implements LocalspaceInstance {
       ? Promise.resolve(DefinedDrivers[driverName])
       : Promise.reject(new Error('Driver not found.'));
 
-    executeTwoCallbacks(getDriverPromise, callback, asErrorHandler(errorCallback as Callback<unknown> | undefined));
+    executeTwoCallbacks(
+      getDriverPromise,
+      callback,
+      asErrorHandler(errorCallback as Callback<unknown> | undefined)
+    );
     return getDriverPromise;
   }
 
@@ -273,7 +298,11 @@ export class Localspace implements LocalspaceInstance {
       return this._ready!;
     });
 
-    executeTwoCallbacks(promise, callback, asErrorHandler(callback as Callback<unknown> | undefined));
+    executeTwoCallbacks(
+      promise,
+      callback,
+      asErrorHandler(callback as Callback<unknown> | undefined)
+    );
     return promise;
   }
 
@@ -310,9 +339,10 @@ export class Localspace implements LocalspaceInstance {
 
       const driverInstance = this as DriverAugmentedInstance;
       const initStorage = driverInstance._initStorage;
-      this._ready = typeof initStorage === 'function'
-        ? initStorage.call(this, this._config)
-        : Promise.resolve();
+      this._ready =
+        typeof initStorage === 'function'
+          ? initStorage.call(this, this._config)
+          : Promise.resolve();
 
       await this._ready;
       return this._ready;
@@ -388,7 +418,7 @@ export class Localspace implements LocalspaceInstance {
   _extend(libraryMethodsAndProperties: Partial<Driver>): void {
     extend(
       this as unknown as Record<string, unknown>,
-      libraryMethodsAndProperties as unknown as Partial<Record<string, unknown>>,
+      libraryMethodsAndProperties as unknown as Partial<Record<string, unknown>>
     );
   }
 
@@ -436,7 +466,10 @@ export class Localspace implements LocalspaceInstance {
     throw new Error('Driver not initialized');
   }
 
-  async key(keyIndex: number, callback?: Callback<string>): Promise<string | null> {
+  async key(
+    keyIndex: number,
+    callback?: Callback<string>
+  ): Promise<string | null> {
     throw new Error('Driver not initialized');
   }
 

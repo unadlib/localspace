@@ -809,7 +809,6 @@ function dropInstance(
   options?: LocalspaceConfig,
   callback?: Callback<void>
 ): Promise<void> {
-  // Implementation matches localForage's dropInstance for IndexedDB
   // This is a complex method - for now, we'll provide a basic implementation
   const promise = Promise.reject(new Error('dropInstance not yet implemented for IndexedDB'));
   executeCallback(promise, callback);

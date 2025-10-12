@@ -73,10 +73,9 @@ export function isArray<T>(value: T | T[]): value is T[] {
  * Normalize key (convert to string)
  */
 export function normalizeKey(key: unknown): string {
-  // localForage behavior: cast keys to strings
   if (typeof key !== 'string') {
     console.warn(
-      `key passed to localForage API is not a string (got ${typeof key}). Using String() to convert.`
+      `key passed to LocalSpace API is not a string (got ${typeof key}). Using String() to convert.`
     );
     return String(key);
   }
