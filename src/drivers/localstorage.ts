@@ -148,19 +148,25 @@ function key(
 
   const promise = self.ready().then(() => {
     const dbInfo = self._dbInfo;
-    let result: string | null;
+    const keyPrefix = dbInfo.keyPrefix;
+    const keys: string[] = [];
 
-    try {
-      result = localStorage.key(n);
-    } catch (error) {
-      result = null;
+    // Collect all keys that match our prefix to ensure consistent ordering
+    for (let i = 0; i < localStorage.length; i++) {
+      const itemKey = localStorage.key(i);
+      if (itemKey && itemKey.indexOf(keyPrefix) === 0) {
+        keys.push(itemKey.substring(keyPrefix.length));
+      }
     }
 
-    if (result) {
-      result = result.substring(dbInfo.keyPrefix.length);
+    // Sort keys to ensure consistent order across calls
+    keys.sort();
+
+    if (n < 0 || n >= keys.length) {
+      return null;
     }
 
-    return result;
+    return keys[n];
   });
 
   executeCallback(promise, callback);
@@ -181,6 +187,9 @@ function keys(this: any, callback?: Callback<string[]>): Promise<string[]> {
         keys.push(itemKey.substring(dbInfo.keyPrefix.length));
       }
     }
+
+    // Sort keys to ensure consistent order across calls
+    keys.sort();
 
     return keys;
   });
