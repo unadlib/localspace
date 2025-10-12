@@ -1,10 +1,10 @@
 import type {
   Driver,
   DbInfo,
-  LocalspaceConfig,
+  LocalSpaceConfig,
   Callback,
   Serializer,
-  LocalspaceInstance,
+  LocalSpaceInstance,
 } from '../types';
 import { executeCallback, normalizeKey } from '../utils/helpers';
 import serializer from '../utils/serializer';
@@ -14,12 +14,12 @@ type LocalStorageDbInfo = DbInfo & {
   serializer: Serializer;
 };
 
-type LocalStorageDriverContext = LocalspaceInstance &
+type LocalStorageDriverContext = LocalSpaceInstance &
   Partial<Driver> & {
   _dbInfo: LocalStorageDbInfo;
-  _defaultConfig: LocalspaceConfig;
+  _defaultConfig: LocalSpaceConfig;
   ready(): Promise<void>;
-  config(): LocalspaceConfig;
+  config(): LocalSpaceConfig;
 };
 
 function isLocalStorageValid(): boolean {
@@ -34,7 +34,7 @@ function isLocalStorageValid(): boolean {
   }
 }
 
-function getKeyPrefix(options: LocalspaceConfig, defaultConfig: LocalspaceConfig): string {
+function getKeyPrefix(options: LocalSpaceConfig, defaultConfig: LocalSpaceConfig): string {
   let keyPrefix = options.name + '/';
 
   if (options.storeName !== defaultConfig.storeName) {
@@ -59,7 +59,7 @@ function isLocalStorageUsable(): boolean {
   return !checkIfLocalStorageThrows() || localStorage.length > 0;
 }
 
-async function _initStorage(this: LocalStorageDriverContext, config: LocalspaceConfig): Promise<void> {
+async function _initStorage(this: LocalStorageDriverContext, config: LocalSpaceConfig): Promise<void> {
   const dbInfo: LocalStorageDbInfo = {
     ...config,
     keyPrefix: getKeyPrefix(config, this._defaultConfig),
@@ -263,10 +263,10 @@ async function setItem<T>(
 
 function dropInstance(
   this: LocalStorageDriverContext,
-  options?: LocalspaceConfig,
+  options?: LocalSpaceConfig,
   callback?: Callback<void>
 ): Promise<void> {
-  const effectiveOptions: LocalspaceConfig = { ...(options || {}) };
+  const effectiveOptions: LocalSpaceConfig = { ...(options || {}) };
 
   if (!effectiveOptions.name) {
     const currentConfig = this.config();

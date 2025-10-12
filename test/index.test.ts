@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import localspace, { Localspace } from '../src/index';
-import type { LocalspaceInstance } from '../src/types';
+import localspace, { LocalSpace } from '../src/index';
+import type { LocalSpaceInstance } from '../src/types';
 
 describe('localspace localStorage parity checks', () => {
-  let instance: LocalspaceInstance;
+  let instance: LocalSpaceInstance;
 
   beforeEach(async () => {
     instance = localspace.createInstance({
@@ -41,7 +41,7 @@ describe('localspace localStorage parity checks', () => {
 
 describe('localspace config compatibility snapshots', () => {
   it('sanitises storeName to match localForage expectations', () => {
-    const instance = new Localspace();
+    const instance = new LocalSpace();
     instance.config({
       name: 'My Cool App',
       storeName: 'my store&name-v1',

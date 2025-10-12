@@ -6,7 +6,7 @@ export type Callback<T = unknown> = (error: Error | null, value?: T) => void;
 /**
  * Configuration options for localspace
  */
-export interface LocalspaceConfig {
+export interface LocalSpaceConfig {
   /**
    * Description of the database
    */
@@ -50,7 +50,7 @@ export interface Driver {
   /**
    * Initialize storage with config
    */
-  _initStorage(config: LocalspaceConfig): Promise<void>;
+  _initStorage(config: LocalSpaceConfig): Promise<void>;
 
   /**
    * Check if driver is supported (can be boolean or function)
@@ -104,7 +104,7 @@ export interface Driver {
    * Drop instance (optional)
    */
   dropInstance?(
-    options?: LocalspaceConfig,
+    options?: LocalSpaceConfig,
     callback?: Callback<void>
   ): Promise<void>;
 }
@@ -136,16 +136,16 @@ export interface DefinedDriversMap {
 /**
  * Database info stored internally
  */
-export interface DbInfo extends LocalspaceConfig {
+export interface DbInfo extends LocalSpaceConfig {
   db?: IDBDatabase | null;
   serializer?: Serializer;
   keyPrefix?: string;
 }
 
 /**
- * Localspace instance interface
+ * LocalSpace instance interface
  */
-export interface LocalspaceInstance {
+export interface LocalSpaceInstance {
   /**
    * Driver constants
    */
@@ -155,14 +155,14 @@ export interface LocalspaceInstance {
   /**
    * Configure localspace
    */
-  config(options: LocalspaceConfig): true | Error | Promise<void>;
-  config<K extends keyof LocalspaceConfig>(key: K): LocalspaceConfig[K] | undefined;
-  config(): LocalspaceConfig;
+  config(options: LocalSpaceConfig): true | Error | Promise<void>;
+  config<K extends keyof LocalSpaceConfig>(key: K): LocalSpaceConfig[K] | undefined;
+  config(): LocalSpaceConfig;
 
   /**
    * Create a new instance
    */
-  createInstance(options?: LocalspaceConfig): LocalspaceInstance;
+  createInstance(options?: LocalSpaceConfig): LocalSpaceInstance;
 
   /**
    * Define a custom driver
@@ -258,7 +258,7 @@ export interface LocalspaceInstance {
    * Drop instance
    */
   dropInstance(
-    options?: LocalspaceConfig,
+    options?: LocalSpaceConfig,
     callback?: Callback<void>
   ): Promise<void>;
 
@@ -271,9 +271,9 @@ export interface LocalspaceInstance {
   _driver?: string;
   _driverSet: Promise<void> | null;
   _initDriver?: (() => Promise<void>) | null;
-  _config: LocalspaceConfig;
-  _defaultConfig: LocalspaceConfig;
-  _initStorage?(config: LocalspaceConfig): Promise<void>;
+  _config: LocalSpaceConfig;
+  _defaultConfig: LocalSpaceConfig;
+  _initStorage?(config: LocalSpaceConfig): Promise<void>;
   _extend?(methods: Partial<Driver>): void;
   _getSupportedDrivers?(drivers: string[]): string[];
   _wrapLibraryMethodsWithReady?(): void;

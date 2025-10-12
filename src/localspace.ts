@@ -1,6 +1,6 @@
 import type {
-  LocalspaceInstance,
-  LocalspaceConfig,
+  LocalSpaceInstance,
+  LocalSpaceConfig,
   Driver,
   Callback,
   DbInfo,
@@ -45,7 +45,7 @@ const LibraryMethods = [
   'setItem',
 ].concat(OptionalDriverMethods);
 
-const DefaultConfig: LocalspaceConfig = {
+const DefaultConfig: LocalSpaceConfig = {
   description: '',
   driver: DefaultDriverOrder.slice(),
   name: 'localforage',
@@ -62,7 +62,7 @@ type ReadyWrappedMethod = (...args: unknown[]) => unknown;
 
 type DriverAugmentedInstance = ReadyAwareInstance &
   Partial<Driver> & {
-    _initStorage?: (config: LocalspaceConfig) => Promise<void>;
+    _initStorage?: (config: LocalSpaceConfig) => Promise<void>;
   };
 
 const asErrorHandler = (
@@ -89,19 +89,19 @@ function callWhenReady(
   } as ReadyWrappedMethod;
 }
 
-export class Localspace implements LocalspaceInstance {
+export class LocalSpace implements LocalSpaceInstance {
   readonly INDEXEDDB = 'asyncStorage';
   readonly LOCALSTORAGE = 'localStorageWrapper';
 
-  _defaultConfig: LocalspaceConfig;
-  _config: LocalspaceConfig;
+  _defaultConfig: LocalSpaceConfig;
+  _config: LocalSpaceConfig;
   _driverSet: Promise<void> | null = null;
   _initDriver: (() => Promise<void>) | null = null;
   _ready: Promise<void> | null = null;
   _dbInfo: DbInfo | null = null;
   _driver?: string;
 
-  constructor(options?: LocalspaceConfig) {
+  constructor(options?: LocalSpaceConfig) {
     // Define default drivers
     for (const driverTypeKey in DefaultDrivers) {
       if (Object.prototype.hasOwnProperty.call(DefaultDrivers, driverTypeKey)) {
@@ -123,12 +123,12 @@ export class Localspace implements LocalspaceInstance {
     this.setDriver(this._config.driver!).catch(() => {});
   }
 
-  config(options: LocalspaceConfig): true | Error | Promise<void>;
-  config<K extends keyof LocalspaceConfig>(
+  config(options: LocalSpaceConfig): true | Error | Promise<void>;
+  config<K extends keyof LocalSpaceConfig>(
     key: K
-  ): LocalspaceConfig[K] | undefined;
-  config(): LocalspaceConfig;
-  config(optionsOrKey?: LocalspaceConfig | keyof LocalspaceConfig) {
+  ): LocalSpaceConfig[K] | undefined;
+  config(): LocalSpaceConfig;
+  config(optionsOrKey?: LocalSpaceConfig | keyof LocalSpaceConfig) {
     if (typeof optionsOrKey === 'object' && optionsOrKey !== null) {
       if (this._ready) {
         return new Error(
@@ -136,12 +136,12 @@ export class Localspace implements LocalspaceInstance {
         );
       }
 
-      const suppliedOptions = optionsOrKey as Partial<LocalspaceConfig>;
-      const configRecord = this._config as LocalspaceConfig &
+      const suppliedOptions = optionsOrKey as Partial<LocalSpaceConfig>;
+      const configRecord = this._config as LocalSpaceConfig &
         Record<string, unknown>;
 
       for (const key of Object.keys(suppliedOptions) as Array<
-        keyof LocalspaceConfig
+        keyof LocalSpaceConfig
       >) {
         const value = suppliedOptions[key];
 
@@ -165,15 +165,15 @@ export class Localspace implements LocalspaceInstance {
     }
 
     if (typeof optionsOrKey === 'string') {
-      const key = optionsOrKey as keyof LocalspaceConfig;
+      const key = optionsOrKey as keyof LocalSpaceConfig;
       return this._config[key];
     }
 
     return this._config;
   }
 
-  createInstance(options?: LocalspaceConfig): LocalspaceInstance {
-    return new Localspace(options);
+  createInstance(options?: LocalSpaceConfig): LocalSpaceInstance {
+    return new LocalSpace(options);
   }
 
   async defineDriver(
@@ -478,7 +478,7 @@ export class Localspace implements LocalspaceInstance {
   }
 
   async dropInstance(
-    options?: LocalspaceConfig,
+    options?: LocalSpaceConfig,
     callback?: Callback<void>
   ): Promise<void> {
     throw new Error('Driver not initialized');

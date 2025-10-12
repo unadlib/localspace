@@ -1,29 +1,29 @@
-import { Localspace } from './localspace';
+import { LocalSpace } from './localspace';
 import type {
-  LocalspaceInstance,
-  LocalspaceConfig,
+  LocalSpaceInstance,
+  LocalSpaceConfig,
   Driver,
   Callback,
   Serializer,
 } from './types';
 
 // Create default instance
-const localspace = new Localspace() as LocalspaceInstance;
+const localspace = new LocalSpace() as LocalSpaceInstance;
 
 // Export default instance
 export default localspace;
 
 // Export types
 export type {
-  LocalspaceInstance,
-  LocalspaceConfig,
+  LocalSpaceInstance,
+  LocalSpaceConfig,
   Driver,
   Callback,
   Serializer,
 };
 
 // Export class for creating instances
-export { Localspace };
+export { LocalSpace };
 
 // Export drivers
 export { default as indexedDBDriver } from './drivers/indexeddb';

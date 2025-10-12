@@ -1,4 +1,4 @@
-import type { Driver, DbInfo, LocalspaceConfig, Callback } from '../types';
+import type { Driver, DbInfo, LocalSpaceConfig, Callback } from '../types';
 import { executeCallback, normalizeKey, createBlob } from '../utils/helpers';
 
 const DETECT_BLOB_SUPPORT_STORE = 'local-forage-detect-blob-support';
@@ -358,7 +358,7 @@ function tryReconnect(dbInfo: DbInfo): Promise<void> {
     });
 }
 
-async function _initStorage(this: any, config: LocalspaceConfig): Promise<void> {
+async function _initStorage(this: any, config: LocalSpaceConfig): Promise<void> {
   const self = this;
   const dbInfo: DbInfo = { db: null };
 
@@ -806,7 +806,7 @@ function keys(this: any, callback?: Callback<string[]>): Promise<string[]> {
 
 function dropInstance(
   this: any,
-  options?: LocalspaceConfig,
+  options?: LocalSpaceConfig,
   callback?: Callback<void>
 ): Promise<void> {
   // This is a complex method - for now, we'll provide a basic implementation
