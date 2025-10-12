@@ -238,7 +238,7 @@ export class Localspace implements LocalspaceInstance {
       return this._ready as any;
     });
 
-    executeTwoCallbacks(promise, callback, callback);
+    executeTwoCallbacks(promise, callback);
     return promise;
   }
 
@@ -260,7 +260,9 @@ export class Localspace implements LocalspaceInstance {
     const extendSelfWithDriver = async (driver: Driver) => {
       this._extend(driver);
       setDriverToConfig();
-      this._ready = this._initStorage!(this._config) as any;
+      if ((this as any)._initStorage) {
+        this._ready = (this as any)._initStorage(this._config) as any;
+      }
       return this._ready;
     };
 

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>localspace test fixture</title>
+    <script src="../../../dist/index.umd.js" onerror="window.__localspaceUmdError = 'failed to load UMD bundle';"></script>
+    <script type="module">
+      async function bootstrapLocalspace() {
+        if (window.Localspace && window.Localspace.default) {
+          window.localspace = window.Localspace.default;
+          window.__localspaceLoaded = true;
+          return;
+        }
+
+        try {
+          const module = await import('../../../dist/index.js');
+          window.localspace = module.default ?? module;
+          window.__localspaceLoaded = true;
+        } catch (error) {
+          window.__localspaceError = error && error.message ? error.message : String(error);
+        }
+      }
+
+      bootstrapLocalspace();
+    </script>
+  </head>
+  <body>
+    <main>
+      <h1>localspace test fixture</h1>
+    </main>
+  </body>
+</html>

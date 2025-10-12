@@ -91,7 +91,7 @@ function checkBlobSupport(db: IDBDatabase): Promise<boolean> {
       const ua = navigator.userAgent;
       const matchedChrome = ua.match(/Chrome\/(\d+)/);
       const matchedEdge = ua.match(/Edge\//);
-      resolve(matchedEdge || !matchedChrome || parseInt(matchedChrome[1], 10) >= 43);
+      resolve(!!matchedEdge || !matchedChrome || parseInt(matchedChrome[1], 10) >= 43);
     };
   }).catch(() => false);
 }
@@ -211,8 +211,9 @@ function getConnection(
       }
     }
 
-    const dbArgs = upgradeNeeded ? [dbInfo.name!, dbInfo.version] : [dbInfo.name!];
-    const openreq = idb.open(...dbArgs);
+    const openreq = upgradeNeeded
+      ? idb.open(dbInfo.name!, dbInfo.version)
+      : idb.open(dbInfo.name!);
 
     if (upgradeNeeded) {
       openreq.onupgradeneeded = (e: IDBVersionChangeEvent) => {
@@ -472,7 +473,7 @@ function getItem<T>(
       .catch(reject);
   });
 
-  executeCallback(promise, callback);
+  executeCallback(promise, callback as Callback<T | null>);
   return promise;
 }
 
@@ -757,7 +758,7 @@ function key(
       .catch(reject);
   });
 
-  executeCallback(promise, callback);
+  executeCallback(promise, callback as Callback<string | null>);
   return promise;
 }
 
@@ -818,7 +819,7 @@ function dropInstance(
 const asyncStorage: Driver = {
   _driver: 'asyncStorage',
   _initStorage,
-  _support: isIndexedDBValid(),
+  _support: (() => isIndexedDBValid()) as (() => Promise<boolean>),
   iterate,
   getItem,
   setItem,

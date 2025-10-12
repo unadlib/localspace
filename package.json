@@ -34,7 +34,9 @@
     "dist"
   ],
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run && playwright test",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
     "clean": "rimraf dist",
     "type-check": "tsc --skipLibCheck",
     "build": "yarn clean && tsc --skipLibCheck && yarn build:prod",
@@ -49,6 +51,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
+    "@playwright/test": "^1.56.0",
     "@rollup/plugin-commonjs": "^28.0.6",
     "@rollup/plugin-node-resolve": "^16.0.1",
     "@rollup/plugin-replace": "^6.0.2",

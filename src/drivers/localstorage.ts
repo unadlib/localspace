@@ -85,16 +85,16 @@ function getItem<T>(
 
   const promise = self.ready().then(() => {
     const dbInfo = self._dbInfo;
-    let result = localStorage.getItem(dbInfo.keyPrefix + key);
+    let result: any = localStorage.getItem(dbInfo.keyPrefix + key);
 
     if (result) {
       result = dbInfo.serializer.deserialize(result);
     }
 
-    return result;
+    return result as T | null;
   });
 
-  executeCallback(promise, callback);
+  executeCallback(promise, callback as Callback<T | null>);
   return promise;
 }
 
@@ -118,13 +118,13 @@ function iterate<T, U>(
         continue;
       }
 
-      let value = localStorage.getItem(key);
+      let value: any = localStorage.getItem(key);
       if (value) {
         value = dbInfo.serializer.deserialize(value);
       }
 
       const result = iterator(
-        value,
+        value as T,
         key.substring(keyPrefixLength),
         iterationNumber++
       );
