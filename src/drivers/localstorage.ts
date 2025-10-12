@@ -163,16 +163,13 @@ function key(
     const keyPrefix = dbInfo.keyPrefix;
     const keys: string[] = [];
 
-    // Collect all keys that match our prefix to ensure consistent ordering
+    // Collect keys that match the prefix; keep native storage iteration order
     for (let i = 0; i < localStorage.length; i++) {
       const itemKey = localStorage.key(i);
       if (itemKey && itemKey.indexOf(keyPrefix) === 0) {
         keys.push(itemKey.substring(keyPrefix.length));
       }
     }
-
-    // Sort keys to ensure consistent order across calls
-    keys.sort();
 
     if (n < 0 || n >= keys.length) {
       return null;
@@ -197,9 +194,6 @@ function keys(this: LocalStorageDriverContext, callback?: Callback<string[]>): P
         keys.push(itemKey.substring(dbInfo.keyPrefix.length));
       }
     }
-
-    // Sort keys to ensure consistent order across calls
-    keys.sort();
 
     return keys;
   });
