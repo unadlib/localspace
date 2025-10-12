@@ -61,7 +61,7 @@ test.describe('localspace browser interoperability', () => {
     expect(result.iterated[1]?.iteration).toBe(2);
   });
 
-  test('clear() resets length and keys (参考 localforage_test/test.api.js:316-360)', async ({ page }) => {
+  test('clear() resets length and keys', async ({ page }) => {
     await ensureFixtureReady(page);
 
     const result = await page.evaluate(async (storeName) => {
@@ -99,7 +99,7 @@ test.describe('localspace browser interoperability', () => {
     expect(result.after.keys).toEqual([]);
   });
 
-  test('iterate breaks early when return value defined (参考 localforage_test/test.api.js:519-569)', async ({ page }) => {
+  test('iterate breaks early when return value defined', async ({ page }) => {
     await ensureFixtureReady(page);
 
     const breakValue = await page.evaluate(async (storeName) => {
@@ -122,7 +122,7 @@ test.describe('localspace browser interoperability', () => {
     expect(breakValue).toBe('Some value!');
   });
 
-  test('key(n) and keys() follow insertion order (参考 localforage_test/test.api.js:704-736)', async ({ page }) => {
+  test('key(n) and keys() follow insertion order', async ({ page }) => {
     await ensureFixtureReady(page);
 
     const keys = await page.evaluate(async (storeName) => {
@@ -151,7 +151,7 @@ test.describe('localspace browser interoperability', () => {
     expect(keys.all).toEqual(['alpha', 'beta']);
   });
 
-  test('dropInstance removes persisted entries for localStorage (参考 localforage_test/test.api.js:1940-1995)', async ({ page }) => {
+  test('dropInstance removes persisted entries for localStorage', async ({ page }) => {
     await ensureFixtureReady(page);
 
     const result = await page.evaluate(async (storeName) => {

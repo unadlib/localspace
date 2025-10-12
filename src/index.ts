@@ -1,8 +1,3 @@
-/**
- * localspace - A modern, TypeScript-first storage library
- * 100% API compatible with localForage
- */
-
 import { Localspace } from './localspace';
 import type {
   LocalspaceInstance,
