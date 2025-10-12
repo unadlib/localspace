@@ -21,24 +21,34 @@ export function executeCallback<T>(
  */
 export function executeTwoCallbacks<T>(
   promise: Promise<T>,
-  successCallback?: Callback<T>,
-  errorCallback?: Callback<Error>
+  callback?: Callback<T>,
+  errorCallback?: (error: Error) => void
 ): Promise<T> {
-  if (successCallback) {
+  const handleError = (error: unknown) => {
+    const normalizedError = error instanceof Error ? error : new Error(String(error));
+    if (errorCallback) {
+      errorCallback(normalizedError);
+    } else if (callback) {
+      callback(normalizedError as Error);
+    }
+  };
+
+  if (callback) {
     promise.then(
-      (result) => successCallback(null, result),
-      errorCallback || successCallback
+      (result) => callback(null, result),
+      handleError
     );
   } else if (errorCallback) {
-    promise.catch(errorCallback);
+    promise.catch(handleError);
   }
+
   return promise;
 }
 
 /**
  * Get callback from arguments (handles optional parameters)
  */
-export function getCallback<T extends any[]>(args: T): Callback | undefined {
+export function getCallback<T extends unknown[]>(args: T): Callback | undefined {
   if (args.length > 0 && typeof args[args.length - 1] === 'function') {
     return args[args.length - 1] as Callback;
   }
@@ -55,14 +65,14 @@ export function includes<T>(arr: T[], value: T): boolean {
 /**
  * Check if value is array
  */
-export function isArray(value: any): value is any[] {
+export function isArray<T>(value: T | T[]): value is T[] {
   return Array.isArray(value);
 }
 
 /**
  * Normalize key (convert to string)
  */
-export function normalizeKey(key: any): string {
+export function normalizeKey(key: unknown): string {
   // localForage behavior: cast keys to strings
   if (typeof key !== 'string') {
     console.warn(
@@ -77,16 +87,14 @@ export function normalizeKey(key: any): string {
  * Extend object (shallow merge)
  */
 export function extend<T extends object>(target: T, ...sources: Partial<T>[]): T {
+  const targetRecord = target as Record<string, unknown>;
   for (const source of sources) {
     if (source) {
+      const sourceRecord = source as Record<string, unknown>;
       for (const key in source) {
         if (Object.prototype.hasOwnProperty.call(source, key)) {
-          const value = source[key];
-          if (isArray(value)) {
-            (target as any)[key] = (value as any).slice();
-          } else {
-            (target as any)[key] = value;
-          }
+          const value = sourceRecord[key];
+          targetRecord[key] = isArray(value) ? [...value] : value;
         }
       }
     }

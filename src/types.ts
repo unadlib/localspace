@@ -1,7 +1,7 @@
 /**
  * Callback type for async operations
  */
-export type Callback<T = any> = (error: Error | null, value?: T) => void;
+export type Callback<T = unknown> = (error: Error | null, value?: T) => void;
 
 /**
  * Configuration options for localspace
@@ -113,8 +113,8 @@ export interface Driver {
  * Serializer interface
  */
 export interface Serializer {
-  serialize(value: any): Promise<string>;
-  deserialize(value: string): any;
+  serialize(value: unknown): Promise<string>;
+  deserialize(value: string): unknown;
   stringToBuffer(str: string): ArrayBuffer;
   bufferToString(buffer: ArrayBuffer): string;
 }
@@ -137,7 +137,7 @@ export interface DefinedDriversMap {
  * Database info stored internally
  */
 export interface DbInfo extends LocalspaceConfig {
-  db?: any;
+  db?: IDBDatabase | null;
   serializer?: Serializer;
   keyPrefix?: string;
 }
@@ -156,7 +156,7 @@ export interface LocalspaceInstance {
    * Configure localspace
    */
   config(options: LocalspaceConfig): true | Error | Promise<void>;
-  config(key: string): any;
+  config<K extends keyof LocalspaceConfig>(key: K): LocalspaceConfig[K] | undefined;
   config(): LocalspaceConfig;
 
   /**
@@ -266,7 +266,7 @@ export interface LocalspaceInstance {
    * Internal properties (for compatibility)
    */
   _initReady?: () => Promise<void>;
-  _ready: boolean | null;
+  _ready: boolean | Promise<void> | null;
   _dbInfo: DbInfo | null;
   _driver?: string;
   _driverSet: Promise<void> | null;

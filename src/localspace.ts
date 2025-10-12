@@ -17,7 +17,7 @@ import localstorageDriver from './drivers/localstorage';
 const DefinedDrivers: DefinedDriversMap = {};
 const DriverSupport: DriverSupportMap = {};
 
-const DefaultDrivers = {
+const DefaultDrivers: Record<'INDEXEDDB' | 'LOCALSTORAGE', Driver> = {
   INDEXEDDB: idbDriver,
   LOCALSTORAGE: localstorageDriver,
 };
@@ -49,12 +49,34 @@ const DefaultConfig: LocalspaceConfig = {
   version: 1.0,
 };
 
-function callWhenReady(instance: any, libraryMethod: string): void {
-  instance[libraryMethod] = function (...args: any[]) {
-    return instance.ready().then(() => {
-      return instance[libraryMethod].apply(instance, args);
-    });
+type ReadyAwareInstance = {
+  ready: () => Promise<void>;
+} & Record<string, unknown>;
+
+type ReadyWrappedMethod = (...args: unknown[]) => unknown;
+
+type DriverAugmentedInstance = ReadyAwareInstance &
+  Partial<Driver> & {
+    _initStorage?: (config: LocalspaceConfig) => Promise<void>;
   };
+
+const asErrorHandler = (callback?: Callback<unknown>): ((error: Error) => void) | undefined => {
+  if (!callback) {
+    return undefined;
+  }
+
+  return (error: Error) => {
+    callback(error);
+  };
+};
+
+function callWhenReady(instance: ReadyAwareInstance, libraryMethod: string): void {
+  instance[libraryMethod] = function (...args: unknown[]) {
+    return instance.ready().then(() => {
+      const method = instance[libraryMethod] as ReadyWrappedMethod;
+      return method.apply(instance, args);
+    });
+  } as ReadyWrappedMethod;
 }
 
 export class Localspace implements LocalspaceInstance {
@@ -65,7 +87,7 @@ export class Localspace implements LocalspaceInstance {
   _config: LocalspaceConfig;
   _driverSet: Promise<void> | null = null;
   _initDriver: (() => Promise<void>) | null = null;
-  _ready: boolean | null = false;
+  _ready: Promise<void> | null = null;
   _dbInfo: DbInfo | null = null;
   _driver?: string;
 
@@ -73,9 +95,9 @@ export class Localspace implements LocalspaceInstance {
     // Define default drivers
     for (const driverTypeKey in DefaultDrivers) {
       if (Object.prototype.hasOwnProperty.call(DefaultDrivers, driverTypeKey)) {
-        const driver = (DefaultDrivers as any)[driverTypeKey];
+        const driver = DefaultDrivers[driverTypeKey as keyof typeof DefaultDrivers];
         const driverName = driver._driver;
-        (this as any)[driverTypeKey] = driverName;
+        (this as unknown as Record<string, string>)[driverTypeKey] = driverName;
 
         if (!DefinedDrivers[driverName]) {
           this.defineDriver(driver);
@@ -91,36 +113,45 @@ export class Localspace implements LocalspaceInstance {
   }
 
   config(options: LocalspaceConfig): true | Error | Promise<void>;
-  config(key: string): any;
+  config<K extends keyof LocalspaceConfig>(key: K): LocalspaceConfig[K] | undefined;
   config(): LocalspaceConfig;
-  config(optionsOrKey?: LocalspaceConfig | string): any {
-    if (typeof optionsOrKey === 'object') {
+  config(optionsOrKey?: LocalspaceConfig | keyof LocalspaceConfig) {
+    if (typeof optionsOrKey === 'object' && optionsOrKey !== null) {
       if (this._ready) {
         return new Error("Can't call config() after localforage has been used.");
       }
 
-      for (const i in optionsOrKey) {
-        if (i === 'storeName') {
-          (optionsOrKey as any)[i] = (optionsOrKey as any)[i].replace(/\W/g, '_');
+      const suppliedOptions = optionsOrKey as Partial<LocalspaceConfig>;
+      const configRecord = this._config as LocalspaceConfig & Record<string, unknown>;
+
+      for (const key of Object.keys(suppliedOptions) as Array<keyof LocalspaceConfig>) {
+        const value = suppliedOptions[key];
+
+        if (key === 'storeName' && typeof value === 'string') {
+          configRecord.storeName = value.replace(/\W/g, '_');
+          continue;
         }
 
-        if (i === 'version' && typeof (optionsOrKey as any)[i] !== 'number') {
+        if (key === 'version' && typeof value !== 'number') {
           return new Error('Database version must be a number.');
         }
 
-        (this._config as any)[i] = (optionsOrKey as any)[i];
+        configRecord[key as string] = value as unknown;
       }
 
-      if ('driver' in optionsOrKey && optionsOrKey.driver) {
+      if (suppliedOptions.driver) {
         return this.setDriver(this._config.driver!);
       }
 
       return true;
-    } else if (typeof optionsOrKey === 'string') {
-      return (this._config as any)[optionsOrKey];
-    } else {
-      return this._config;
     }
+
+    if (typeof optionsOrKey === 'string') {
+      const key = optionsOrKey as keyof LocalspaceConfig;
+      return this._config[key];
+    }
+
+    return this._config;
   }
 
   createInstance(options?: LocalspaceConfig): LocalspaceInstance {
@@ -144,13 +175,12 @@ export class Localspace implements LocalspaceInstance {
           return;
         }
 
+        const driverRecord = driverObject as Driver & Record<string, unknown>;
         const driverMethods = LibraryMethods.concat('_initStorage');
         for (const driverMethodName of driverMethods) {
           const isRequired = !includes(OptionalDriverMethods, driverMethodName);
-          if (
-            (isRequired || (driverObject as any)[driverMethodName]) &&
-            typeof (driverObject as any)[driverMethodName] !== 'function'
-          ) {
+          const candidate = driverRecord[driverMethodName];
+          if ((isRequired || candidate) && typeof candidate !== 'function') {
             reject(complianceError);
             return;
           }
@@ -158,18 +188,21 @@ export class Localspace implements LocalspaceInstance {
 
         const configureMissingMethods = () => {
           const methodNotImplementedFactory = (methodName: string) => {
-            return function () {
+            return function (...callbackArgs: unknown[]) {
               const error = new Error(
                 `Method ${methodName} is not implemented by the current driver`
               );
+              const maybeCallback = callbackArgs[callbackArgs.length - 1];
+              if (typeof maybeCallback === 'function') {
+                (maybeCallback as Callback)(error);
+              }
               return Promise.reject(error);
             };
           };
 
           for (const optionalDriverMethod of OptionalDriverMethods) {
-            if (!(driverObject as any)[optionalDriverMethod]) {
-              (driverObject as any)[optionalDriverMethod] =
-                methodNotImplementedFactory(optionalDriverMethod);
+            if (!driverRecord[optionalDriverMethod]) {
+              driverRecord[optionalDriverMethod] = methodNotImplementedFactory(optionalDriverMethod);
             }
           }
         };
@@ -203,7 +236,7 @@ export class Localspace implements LocalspaceInstance {
       }
     });
 
-    executeTwoCallbacks(promise, callback, errorCallback);
+    executeTwoCallbacks(promise, callback, asErrorHandler(errorCallback as Callback<unknown> | undefined));
     return promise;
   }
 
@@ -220,7 +253,7 @@ export class Localspace implements LocalspaceInstance {
       ? Promise.resolve(DefinedDrivers[driverName])
       : Promise.reject(new Error('Driver not found.'));
 
-    executeTwoCallbacks(getDriverPromise, callback, errorCallback);
+    executeTwoCallbacks(getDriverPromise, callback, asErrorHandler(errorCallback as Callback<unknown> | undefined));
     return getDriverPromise;
   }
 
@@ -231,14 +264,16 @@ export class Localspace implements LocalspaceInstance {
   }
 
   async ready(callback?: Callback<void>): Promise<void> {
-    const promise = this._driverSet!.then(() => {
+    const driverSet = this._driverSet ?? Promise.resolve();
+
+    const promise = driverSet.then(() => {
       if (this._ready === null) {
-        this._ready = this._initDriver!() as any;
+        this._ready = this._initDriver ? this._initDriver() : Promise.resolve();
       }
-      return this._ready as any;
+      return this._ready!;
     });
 
-    executeTwoCallbacks(promise, callback);
+    executeTwoCallbacks(promise, callback, asErrorHandler(callback as Callback<unknown> | undefined));
     return promise;
   }
 
@@ -253,16 +288,33 @@ export class Localspace implements LocalspaceInstance {
 
     const supportedDrivers = this._getSupportedDrivers(drivers);
 
+    if (supportedDrivers.length === 0) {
+      const error = new Error('No available storage method found.');
+      const rejection = Promise.reject(error);
+      this._driverSet = rejection;
+      executeTwoCallbacks(
+        rejection,
+        callback,
+        asErrorHandler(errorCallback as Callback<unknown> | undefined)
+      );
+      return rejection;
+    }
+
     const setDriverToConfig = () => {
-      this._config.driver = this.driver() as any;
+      this._config.driver = this.driver() ?? undefined;
     };
 
     const extendSelfWithDriver = async (driver: Driver) => {
       this._extend(driver);
       setDriverToConfig();
-      if ((this as any)._initStorage) {
-        this._ready = (this as any)._initStorage(this._config) as any;
-      }
+
+      const driverInstance = this as DriverAugmentedInstance;
+      const initStorage = driverInstance._initStorage;
+      this._ready = typeof initStorage === 'function'
+        ? initStorage.call(this, this._config)
+        : Promise.resolve();
+
+      await this._ready;
       return this._ready;
     };
 
@@ -270,7 +322,7 @@ export class Localspace implements LocalspaceInstance {
       return async () => {
         let currentDriverIndex = 0;
 
-        const driverPromiseLoop: any = async () => {
+        const driverPromiseLoop = async (): Promise<void> => {
           while (currentDriverIndex < supportedDrivers.length) {
             const driverName = supportedDrivers[currentDriverIndex];
             currentDriverIndex++;
@@ -321,7 +373,11 @@ export class Localspace implements LocalspaceInstance {
         throw error;
       });
 
-    executeTwoCallbacks(this._driverSet, callback, errorCallback);
+    executeTwoCallbacks(
+      this._driverSet,
+      callback,
+      asErrorHandler(errorCallback as Callback<unknown> | undefined)
+    );
     return this._driverSet;
   }
 
@@ -330,7 +386,10 @@ export class Localspace implements LocalspaceInstance {
   }
 
   _extend(libraryMethodsAndProperties: Partial<Driver>): void {
-    extend(this, libraryMethodsAndProperties as any);
+    extend(
+      this as unknown as Record<string, unknown>,
+      libraryMethodsAndProperties as unknown as Partial<Record<string, unknown>>,
+    );
   }
 
   _getSupportedDrivers(drivers: string[]): string[] {
@@ -345,7 +404,7 @@ export class Localspace implements LocalspaceInstance {
 
   _wrapLibraryMethodsWithReady(): void {
     for (const libraryMethod of LibraryMethods) {
-      callWhenReady(this, libraryMethod);
+      callWhenReady(this as unknown as ReadyAwareInstance, libraryMethod);
     }
   }
 
