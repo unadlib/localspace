@@ -764,4 +764,56 @@ test.describe('localspace dropInstance for IndexedDB', () => {
     expect(result.store2AfterLength).toBe(2);
     expect(result.store2AfterValue).toBe('store2-valueA');
   });
+
+  test('dropInstance preserves explicit storeName when name omitted', async ({ page }) => {
+    await ensureFixtureReady(page);
+
+    const result = await page.evaluate(async () => {
+      const localspace = (window as any).localspace;
+      const dbName = `drop-store-fallback-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      const instance1 = localspace.createInstance({
+        name: dbName,
+        storeName: 'store1',
+      });
+      const instance2 = localspace.createInstance({
+        name: dbName,
+        storeName: 'store2',
+      });
+
+      await instance1.setDriver([instance1.INDEXEDDB]);
+      await instance2.setDriver([instance2.INDEXEDDB]);
+      await Promise.all([instance1.ready(), instance2.ready()]);
+      await Promise.all([instance1.clear(), instance2.clear()]);
+
+      await instance1.setItem('only-store1', 'value1');
+      await instance2.setItem('only-store2', 'value2');
+
+      await instance1.dropInstance({ storeName: 'store1' });
+
+      const newInstance1 = localspace.createInstance({
+        name: dbName,
+        storeName: 'store1',
+      });
+      const newInstance2 = localspace.createInstance({
+        name: dbName,
+        storeName: 'store2',
+      });
+
+      await newInstance1.setDriver([newInstance1.INDEXEDDB]);
+      await newInstance2.setDriver([newInstance2.INDEXEDDB]);
+      await Promise.all([newInstance1.ready(), newInstance2.ready()]);
+
+      const store1Length = await newInstance1.length();
+      const store2Value = await newInstance2.getItem('only-store2');
+
+      return {
+        store1Length,
+        store2Value,
+      };
+    });
+
+    expect(result.store1Length).toBe(0);
+    expect(result.store2Value).toBe('value2');
+  });
 });

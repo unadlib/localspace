@@ -819,7 +819,9 @@ function dropInstance(
 
   if (!effectiveOptions.name) {
     effectiveOptions.name = currentConfig.name;
-    effectiveOptions.storeName = currentConfig.storeName;
+    if (!effectiveOptions.storeName) {
+      effectiveOptions.storeName = currentConfig.storeName;
+    }
   }
 
   // Validate options
