@@ -16,7 +16,7 @@ describe('localspace localStorage parity checks', () => {
     await instance.clear();
   });
 
-  it('persists values with setItem/getItem similar to localForage', async () => {
+  it('persists values with setItem/getItem', async () => {
     const stored = await instance.setItem('office', 'Initech');
     expect(stored).toBe('Initech');
 
@@ -40,7 +40,7 @@ describe('localspace localStorage parity checks', () => {
 });
 
 describe('localspace config compatibility snapshots', () => {
-  it('sanitises storeName to match localForage expectations', () => {
+  it('sanitises storeName', () => {
     const instance = new LocalSpace();
     instance.config({
       name: 'My Cool App',
