@@ -1,6 +1,26 @@
-import type { Driver, DbInfo, LocalspaceConfig, Callback } from '../types';
+import type {
+  Driver,
+  DbInfo,
+  LocalspaceConfig,
+  Callback,
+  Serializer,
+  LocalspaceInstance,
+} from '../types';
 import { executeCallback, normalizeKey } from '../utils/helpers';
 import serializer from '../utils/serializer';
+
+type LocalStorageDbInfo = DbInfo & {
+  keyPrefix: string;
+  serializer: Serializer;
+};
+
+type LocalStorageDriverContext = LocalspaceInstance &
+  Partial<Driver> & {
+  _dbInfo: LocalStorageDbInfo;
+  _defaultConfig: LocalspaceConfig;
+  ready(): Promise<void>;
+  config(): LocalspaceConfig;
+};
 
 function isLocalStorageValid(): boolean {
   try {
@@ -39,29 +59,23 @@ function isLocalStorageUsable(): boolean {
   return !checkIfLocalStorageThrows() || localStorage.length > 0;
 }
 
-async function _initStorage(this: any, config: LocalspaceConfig): Promise<void> {
-  const self = this;
-  const dbInfo: DbInfo = {};
-
-  for (const i in config) {
-    (dbInfo as any)[i] = (config as any)[i];
-  }
-
-  dbInfo.keyPrefix = getKeyPrefix(config, self._defaultConfig);
+async function _initStorage(this: LocalStorageDriverContext, config: LocalspaceConfig): Promise<void> {
+  const dbInfo: LocalStorageDbInfo = {
+    ...config,
+    keyPrefix: getKeyPrefix(config, this._defaultConfig),
+    serializer,
+  };
 
   if (!isLocalStorageUsable()) {
     throw new Error('localStorage not usable');
   }
 
-  self._dbInfo = dbInfo;
-  dbInfo.serializer = serializer;
+  this._dbInfo = dbInfo;
 }
 
-function clear(this: any, callback?: Callback<void>): Promise<void> {
-  const self = this;
-
-  const promise = self.ready().then(() => {
-    const keyPrefix = self._dbInfo.keyPrefix;
+function clear(this: LocalStorageDriverContext, callback?: Callback<void>): Promise<void> {
+  const promise = this.ready().then(() => {
+    const keyPrefix = this._dbInfo.keyPrefix;
 
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i);
@@ -76,37 +90,34 @@ function clear(this: any, callback?: Callback<void>): Promise<void> {
 }
 
 function getItem<T>(
-  this: any,
+  this: LocalStorageDriverContext,
   key: string,
   callback?: Callback<T>
 ): Promise<T | null> {
-  const self = this;
-  key = normalizeKey(key);
+  const normalizedKey = normalizeKey(key);
 
-  const promise = self.ready().then(() => {
-    const dbInfo = self._dbInfo;
-    let result: any = localStorage.getItem(dbInfo.keyPrefix + key);
+  const promise = this.ready().then(() => {
+    const dbInfo = this._dbInfo;
+    const raw = localStorage.getItem(dbInfo.keyPrefix + normalizedKey);
 
-    if (result) {
-      result = dbInfo.serializer.deserialize(result);
+    if (raw === null) {
+      return null;
     }
 
-    return result as T | null;
+    return dbInfo.serializer.deserialize(raw) as T;
   });
 
-  executeCallback(promise, callback as Callback<T | null>);
+  executeCallback(promise as Promise<T | null>, callback as Callback<T | null> | undefined);
   return promise;
 }
 
 function iterate<T, U>(
-  this: any,
+  this: LocalStorageDriverContext,
   iterator: (value: T, key: string, iterationNumber: number) => U,
   callback?: Callback<U>
 ): Promise<U> {
-  const self = this;
-
-  const promise = self.ready().then(() => {
-    const dbInfo = self._dbInfo;
+  const promise = this.ready().then(() => {
+    const dbInfo = this._dbInfo;
     const keyPrefix = dbInfo.keyPrefix;
     const keyPrefixLength = keyPrefix.length;
     const length = localStorage.length;
@@ -118,9 +129,10 @@ function iterate<T, U>(
         continue;
       }
 
-      let value: any = localStorage.getItem(key);
-      if (value) {
-        value = dbInfo.serializer.deserialize(value);
+      const rawValue = localStorage.getItem(key);
+      let value: T | null = null;
+      if (rawValue !== null) {
+        value = dbInfo.serializer.deserialize(rawValue) as T;
       }
 
       const result = iterator(
@@ -133,6 +145,8 @@ function iterate<T, U>(
         return result;
       }
     }
+
+    return undefined as unknown as U;
   });
 
   executeCallback(promise, callback);
@@ -140,14 +154,12 @@ function iterate<T, U>(
 }
 
 function key(
-  this: any,
+  this: LocalStorageDriverContext,
   n: number,
   callback?: Callback<string>
 ): Promise<string | null> {
-  const self = this;
-
-  const promise = self.ready().then(() => {
-    const dbInfo = self._dbInfo;
+  const promise = this.ready().then(() => {
+    const dbInfo = this._dbInfo;
     const keyPrefix = dbInfo.keyPrefix;
     const keys: string[] = [];
 
@@ -169,15 +181,13 @@ function key(
     return keys[n];
   });
 
-  executeCallback(promise, callback);
+  executeCallback(promise, callback as Callback<string | null> | undefined);
   return promise;
 }
 
-function keys(this: any, callback?: Callback<string[]>): Promise<string[]> {
-  const self = this;
-
-  const promise = self.ready().then(() => {
-    const dbInfo = self._dbInfo;
+function keys(this: LocalStorageDriverContext, callback?: Callback<string[]>): Promise<string[]> {
+  const promise = this.ready().then(() => {
+    const dbInfo = this._dbInfo;
     const length = localStorage.length;
     const keys: string[] = [];
 
@@ -198,26 +208,23 @@ function keys(this: any, callback?: Callback<string[]>): Promise<string[]> {
   return promise;
 }
 
-function length(this: any, callback?: Callback<number>): Promise<number> {
-  const self = this;
-
-  const promise = self.keys().then((keys: string[]) => keys.length);
+function length(this: LocalStorageDriverContext, callback?: Callback<number>): Promise<number> {
+  const promise = keys.call(this).then((derivedKeys) => derivedKeys.length);
 
   executeCallback(promise, callback);
   return promise;
 }
 
 function removeItem(
-  this: any,
+  this: LocalStorageDriverContext,
   key: string,
   callback?: Callback<void>
 ): Promise<void> {
-  const self = this;
-  key = normalizeKey(key);
+  const normalizedKey = normalizeKey(key);
 
-  const promise = self.ready().then(() => {
-    const dbInfo = self._dbInfo;
-    localStorage.removeItem(dbInfo.keyPrefix + key);
+  const promise = this.ready().then(() => {
+    const dbInfo = this._dbInfo;
+    localStorage.removeItem(dbInfo.keyPrefix + normalizedKey);
   });
 
   executeCallback(promise, callback);
@@ -225,34 +232,28 @@ function removeItem(
 }
 
 async function setItem<T>(
-  this: any,
+  this: LocalStorageDriverContext,
   key: string,
   value: T,
   callback?: Callback<T>
 ): Promise<T> {
-  const self = this;
-  key = normalizeKey(key);
+  const normalizedKey = normalizeKey(key);
 
-  const promise = self.ready().then(async () => {
-    if (value === undefined) {
-      value = null as any;
-    }
-
-    const originalValue = value;
-
-    const serializedValue = await self._dbInfo.serializer.serialize(value);
+  const promise = this.ready().then(async () => {
+    const normalizedValue = (value === undefined ? null : value) as T;
+    const serializedValue = await this._dbInfo.serializer.serialize(normalizedValue);
 
     try {
-      localStorage.setItem(self._dbInfo.keyPrefix + key, serializedValue);
-      return originalValue;
-    } catch (e: any) {
+      localStorage.setItem(this._dbInfo.keyPrefix + normalizedKey, serializedValue);
+      return normalizedValue;
+    } catch (error: unknown) {
       if (
-        e.name === 'QuotaExceededError' ||
-        e.name === 'NS_ERROR_DOM_QUOTA_REACHED'
+        error instanceof Error &&
+        (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED')
       ) {
-        throw e;
+        throw error;
       }
-      throw e;
+      throw error;
     }
   });
 
@@ -261,25 +262,24 @@ async function setItem<T>(
 }
 
 function dropInstance(
-  this: any,
+  this: LocalStorageDriverContext,
   options?: LocalspaceConfig,
   callback?: Callback<void>
 ): Promise<void> {
-  const self = this;
-  options = options || {};
+  const effectiveOptions: LocalspaceConfig = { ...(options || {}) };
 
-  if (!options.name) {
-    const currentConfig = self.config();
-    options.name = options.name || currentConfig.name;
-    options.storeName = options.storeName || currentConfig.storeName;
+  if (!effectiveOptions.name) {
+    const currentConfig = this.config();
+    effectiveOptions.name = currentConfig.name;
+    effectiveOptions.storeName = currentConfig.storeName;
   }
 
-  const promise = !options.name
+  const promise = !effectiveOptions.name
     ? Promise.reject(new Error('Invalid arguments'))
     : new Promise<void>((resolve) => {
-        const keyPrefix = !options!.storeName
-          ? `${options!.name}/`
-          : getKeyPrefix(options!, self._defaultConfig);
+        const keyPrefix = !effectiveOptions.storeName
+          ? `${effectiveOptions.name}/`
+          : getKeyPrefix(effectiveOptions, this._defaultConfig);
 
         for (let i = localStorage.length - 1; i >= 0; i--) {
           const key = localStorage.key(i);

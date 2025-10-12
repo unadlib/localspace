@@ -105,19 +105,33 @@ export function extend<T extends object>(target: T, ...sources: Partial<T>[]): T
 /**
  * Create a Blob (with fallback for older browsers)
  */
+type LegacyBlobBuilderConstructor = {
+  new (): {
+    append(part: BlobPart): void;
+    getBlob(type?: string): Blob;
+  };
+};
+
 export function createBlob(parts: BlobPart[], properties?: BlobPropertyBag): Blob {
   try {
     return new Blob(parts, properties);
-  } catch (e: any) {
-    if (e.name !== 'TypeError') {
-      throw e;
+  } catch (error: unknown) {
+    if (!(error instanceof Error) || error.name !== 'TypeError') {
+      throw error;
     }
     // Fallback for older browsers (though we're targeting modern ones)
+    const legacyWindow = window as typeof window & {
+      BlobBuilder?: LegacyBlobBuilderConstructor;
+      MSBlobBuilder?: LegacyBlobBuilderConstructor;
+      MozBlobBuilder?: LegacyBlobBuilderConstructor;
+      WebKitBlobBuilder?: LegacyBlobBuilderConstructor;
+    };
+
     const BlobBuilder =
-      (window as any).BlobBuilder ||
-      (window as any).MSBlobBuilder ||
-      (window as any).MozBlobBuilder ||
-      (window as any).WebKitBlobBuilder;
+      legacyWindow.BlobBuilder ||
+      legacyWindow.MSBlobBuilder ||
+      legacyWindow.MozBlobBuilder ||
+      legacyWindow.WebKitBlobBuilder;
 
     if (!BlobBuilder) {
       throw new Error('Blob constructor not supported');

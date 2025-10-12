@@ -77,68 +77,58 @@ function bufferToString(buffer: ArrayBuffer): string {
   return base64String;
 }
 
-async function serialize(value: any): Promise<string> {
-  let valueType = '';
-  if (value) {
-    valueType = toString.call(value);
+const typedArrayTagMap: Record<string, string> = {
+  '[object Int8Array]': TYPE_INT8ARRAY,
+  '[object Uint8Array]': TYPE_UINT8ARRAY,
+  '[object Uint8ClampedArray]': TYPE_UINT8CLAMPEDARRAY,
+  '[object Int16Array]': TYPE_INT16ARRAY,
+  '[object Uint16Array]': TYPE_UINT16ARRAY,
+  '[object Int32Array]': TYPE_INT32ARRAY,
+  '[object Uint32Array]': TYPE_UINT32ARRAY,
+  '[object Float32Array]': TYPE_FLOAT32ARRAY,
+  '[object Float64Array]': TYPE_FLOAT64ARRAY,
+};
+
+function isTypedArray(value: unknown): value is ArrayBufferView {
+  return ArrayBuffer.isView(value) && !(value instanceof DataView);
+}
+
+async function serialize(value: unknown): Promise<string> {
+  const valueType = value != null ? toString.call(value) : '';
+
+  if (value instanceof ArrayBuffer) {
+    return SERIALIZED_MARKER + TYPE_ARRAYBUFFER + bufferToString(value);
   }
 
-  // Handle ArrayBuffer and TypedArrays
-  if (
-    value &&
-    (valueType === '[object ArrayBuffer]' ||
-      (value.buffer && toString.call(value.buffer) === '[object ArrayBuffer]'))
-  ) {
-    let buffer: ArrayBuffer;
-    let marker = SERIALIZED_MARKER;
-
-    if (value instanceof ArrayBuffer) {
-      buffer = value;
-      marker += TYPE_ARRAYBUFFER;
-    } else {
-      buffer = value.buffer;
-
-      if (valueType === '[object Int8Array]') {
-        marker += TYPE_INT8ARRAY;
-      } else if (valueType === '[object Uint8Array]') {
-        marker += TYPE_UINT8ARRAY;
-      } else if (valueType === '[object Uint8ClampedArray]') {
-        marker += TYPE_UINT8CLAMPEDARRAY;
-      } else if (valueType === '[object Int16Array]') {
-        marker += TYPE_INT16ARRAY;
-      } else if (valueType === '[object Uint16Array]') {
-        marker += TYPE_UINT16ARRAY;
-      } else if (valueType === '[object Int32Array]') {
-        marker += TYPE_INT32ARRAY;
-      } else if (valueType === '[object Uint32Array]') {
-        marker += TYPE_UINT32ARRAY;
-      } else if (valueType === '[object Float32Array]') {
-        marker += TYPE_FLOAT32ARRAY;
-      } else if (valueType === '[object Float64Array]') {
-        marker += TYPE_FLOAT64ARRAY;
-      } else {
-        throw new Error('Failed to get type for BinaryArray');
-      }
+  if (isTypedArray(value)) {
+    const marker = typedArrayTagMap[valueType];
+    if (!marker) {
+      throw new Error('Failed to get type for BinaryArray');
     }
+    const sourceBuffer = value.buffer;
+    const normalizedBuffer = sourceBuffer instanceof ArrayBuffer
+      ? sourceBuffer
+      : new Uint8Array(sourceBuffer).slice().buffer;
+    return SERIALIZED_MARKER + marker + bufferToString(normalizedBuffer);
+  }
 
-    return marker + bufferToString(buffer);
-  } else if (valueType === '[object Blob]') {
-    // Convert Blob to ArrayBuffer using modern API
-    const arrayBuffer = await value.arrayBuffer();
+  if (valueType === '[object Blob]') {
+    const blob = value as Blob;
+    const arrayBuffer = await blob.arrayBuffer();
     const str =
-      BLOB_TYPE_PREFIX + value.type + '~' + bufferToString(arrayBuffer);
+      BLOB_TYPE_PREFIX + blob.type + '~' + bufferToString(arrayBuffer);
     return SERIALIZED_MARKER + TYPE_BLOB + str;
-  } else {
-    try {
-      return JSON.stringify(value);
-    } catch (e) {
-      console.error("Couldn't convert value into a JSON string: ", value);
-      throw e;
-    }
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch (error) {
+    console.error("Couldn't convert value into a JSON string: ", value);
+    throw error;
   }
 }
 
-function deserialize(value: string): any {
+function deserialize(value: string): unknown {
   // If not specially serialized, parse as JSON
   if (value.substring(0, SERIALIZED_MARKER_LENGTH) !== SERIALIZED_MARKER) {
     return JSON.parse(value);
