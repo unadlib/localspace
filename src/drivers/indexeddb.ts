@@ -809,8 +809,172 @@ function dropInstance(
   options?: LocalSpaceConfig,
   callback?: Callback<void>
 ): Promise<void> {
-  // This is a complex method - for now, we'll provide a basic implementation
-  const promise = Promise.reject(new Error('dropInstance not yet implemented for IndexedDB'));
+  const self = this;
+  const currentConfig = self.config();
+
+  // Normalize options
+  const effectiveOptions: LocalSpaceConfig = {
+    ...(typeof options === 'object' ? options : {}),
+  };
+
+  if (!effectiveOptions.name) {
+    effectiveOptions.name = currentConfig.name;
+    effectiveOptions.storeName = currentConfig.storeName;
+  }
+
+  // Validate options
+  if (!effectiveOptions.name) {
+    const promise = Promise.reject(new Error('Invalid arguments'));
+    executeCallback(promise, callback);
+    return promise;
+  }
+
+  const isCurrentDb =
+    effectiveOptions.name === currentConfig.name && self._dbInfo?.db;
+
+  const dbPromise: Promise<IDBDatabase> = isCurrentDb
+    ? Promise.resolve(self._dbInfo.db)
+    : getConnection(effectiveOptions as DbInfo, false).then((db) => {
+        const dbContext = dbContexts[effectiveOptions.name!];
+        if (dbContext) {
+          const forages = dbContext.forages;
+          dbContext.db = db;
+          for (const forage of forages) {
+            forage._dbInfo.db = db;
+          }
+        }
+        return db;
+      });
+
+  let promise: Promise<void>;
+
+  // Case 1: Drop entire database (no storeName specified)
+  if (!effectiveOptions.storeName) {
+    promise = dbPromise.then((db) => {
+      deferReadiness(effectiveOptions as DbInfo);
+
+      const dbContext = dbContexts[effectiveOptions.name!];
+      const forages = dbContext?.forages || [];
+
+      // Close all connections
+      db.close();
+      for (const forage of forages) {
+        forage._dbInfo.db = null;
+      }
+
+      // Delete the entire database
+      const dropDBPromise = new Promise<void>((resolve, reject) => {
+        const idb = getIDB();
+        if (!idb) {
+          return reject(new Error('IndexedDB not available'));
+        }
+
+        const req = idb.deleteDatabase(effectiveOptions.name!);
+
+        req.onerror = () => {
+          reject(req.error || new Error('Failed to delete database'));
+        };
+
+        req.onblocked = () => {
+          console.warn(
+            `dropInstance blocked for database "${effectiveOptions.name}" until all open connections are closed`
+          );
+        };
+
+        req.onsuccess = () => {
+          resolve();
+        };
+      });
+
+      return dropDBPromise
+        .then(() => {
+          if (dbContext) {
+            dbContext.db = null;
+            for (const forage of forages) {
+              advanceReadiness(forage._dbInfo);
+            }
+          }
+        })
+        .catch((err) => {
+          if (dbContext) {
+            rejectReadiness(effectiveOptions as DbInfo, err);
+          }
+          throw err;
+        });
+    });
+  } else {
+    // Case 2: Drop specific object store
+    promise = dbPromise.then((db) => {
+      if (!db.objectStoreNames.contains(effectiveOptions.storeName!)) {
+        // Store doesn't exist, nothing to do
+        return;
+      }
+
+      const newVersion = db.version + 1;
+
+      deferReadiness(effectiveOptions as DbInfo);
+
+      const dbContext = dbContexts[effectiveOptions.name!];
+      const forages = dbContext?.forages || [];
+
+      // Close all connections
+      db.close();
+      for (const forage of forages) {
+        forage._dbInfo.db = null;
+        forage._dbInfo.version = newVersion;
+      }
+
+      // Delete the object store by upgrading the database
+      const dropObjectPromise = new Promise<IDBDatabase>((resolve, reject) => {
+        const idb = getIDB();
+        if (!idb) {
+          return reject(new Error('IndexedDB not available'));
+        }
+
+        const req = idb.open(effectiveOptions.name!, newVersion);
+
+        req.onerror = () => {
+          const db = req.result;
+          if (db) {
+            db.close();
+          }
+          reject(req.error || new Error('Failed to open database'));
+        };
+
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (db.objectStoreNames.contains(effectiveOptions.storeName!)) {
+            db.deleteObjectStore(effectiveOptions.storeName!);
+          }
+        };
+
+        req.onsuccess = () => {
+          const db = req.result;
+          resolve(db);
+        };
+      });
+
+      return dropObjectPromise
+        .then((db) => {
+          if (dbContext) {
+            dbContext.db = db;
+            for (const forage of forages) {
+              forage._dbInfo.db = db;
+              advanceReadiness(forage._dbInfo);
+            }
+          }
+          // Close the database after use
+          db.close();
+        })
+        .catch((err) => {
+          if (dbContext) {
+            rejectReadiness(effectiveOptions as DbInfo, err);
+          }
+          throw err;
+        });
+    });
+  }
+
   executeCallback(promise, callback);
   return promise;
 }

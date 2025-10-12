@@ -623,3 +623,145 @@ test.describe('localspace error handling', () => {
     expect(value).toBe(null);
   });
 });
+
+test.describe('localspace dropInstance for IndexedDB', () => {
+  test('dropInstance removes entire database when no storeName provided', async ({ page }) => {
+    await ensureFixtureReady(page);
+
+    const result = await page.evaluate(async () => {
+      const localspace = (window as any).localspace;
+      const dbName = `drop-db-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      // Create instance with IndexedDB
+      const instance = localspace.createInstance({
+        name: dbName,
+        storeName: 'testStore',
+      });
+
+      await instance.setDriver([instance.INDEXEDDB]);
+      await instance.ready();
+      await instance.clear();
+
+      // Add some data
+      await instance.setItem('key1', 'value1');
+      await instance.setItem('key2', 'value2');
+      await instance.setItem('key3', { nested: true, data: [1, 2, 3] });
+
+      // Verify data exists
+      const beforeLength = await instance.length();
+      const beforeValue = await instance.getItem('key1');
+
+      // Drop the entire database (no storeName in options)
+      await instance.dropInstance({ name: dbName });
+
+      // Create a new instance with same database name
+      const newInstance = localspace.createInstance({
+        name: dbName,
+        storeName: 'testStore',
+      });
+
+      await newInstance.setDriver([newInstance.INDEXEDDB]);
+      await newInstance.ready();
+
+      // Check that database is empty after drop
+      const afterLength = await newInstance.length();
+      const afterValue = await newInstance.getItem('key1');
+
+      return {
+        beforeLength,
+        beforeValue,
+        afterLength,
+        afterValue,
+      };
+    });
+
+    expect(result.beforeLength).toBe(3);
+    expect(result.beforeValue).toBe('value1');
+    expect(result.afterLength).toBe(0);
+    expect(result.afterValue).toBe(null);
+  });
+
+  test('dropInstance removes specific object store for IndexedDB', async ({ page }) => {
+    await ensureFixtureReady(page);
+
+    const result = await page.evaluate(async () => {
+      const localspace = (window as any).localspace;
+      const dbName = `drop-store-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      // Create two instances with different stores in the same database
+      const instance1 = localspace.createInstance({
+        name: dbName,
+        storeName: 'store1',
+      });
+
+      const instance2 = localspace.createInstance({
+        name: dbName,
+        storeName: 'store2',
+      });
+
+      await instance1.setDriver([instance1.INDEXEDDB]);
+      await instance2.setDriver([instance2.INDEXEDDB]);
+      await Promise.all([instance1.ready(), instance2.ready()]);
+      await Promise.all([instance1.clear(), instance2.clear()]);
+
+      // Add data to both stores
+      await instance1.setItem('key1', 'store1-value1');
+      await instance1.setItem('key2', 'store1-value2');
+      await instance2.setItem('keyA', 'store2-valueA');
+      await instance2.setItem('keyB', 'store2-valueB');
+
+      // Verify data exists
+      const store1BeforeLength = await instance1.length();
+      const store2BeforeLength = await instance2.length();
+      const store1BeforeValue = await instance1.getItem('key1');
+      const store2BeforeValue = await instance2.getItem('keyA');
+
+      // Drop only store1 (specify storeName)
+      await instance1.dropInstance({ name: dbName, storeName: 'store1' });
+
+      // Create new instances to check the state
+      const newInstance1 = localspace.createInstance({
+        name: dbName,
+        storeName: 'store1',
+      });
+
+      const newInstance2 = localspace.createInstance({
+        name: dbName,
+        storeName: 'store2',
+      });
+
+      await newInstance1.setDriver([newInstance1.INDEXEDDB]);
+      await newInstance2.setDriver([newInstance2.INDEXEDDB]);
+      await Promise.all([newInstance1.ready(), newInstance2.ready()]);
+
+      // Check that store1 is empty but store2 still has data
+      const store1AfterLength = await newInstance1.length();
+      const store1AfterValue = await newInstance1.getItem('key1');
+      const store2AfterLength = await newInstance2.length();
+      const store2AfterValue = await newInstance2.getItem('keyA');
+
+      return {
+        store1BeforeLength,
+        store2BeforeLength,
+        store1BeforeValue,
+        store2BeforeValue,
+        store1AfterLength,
+        store1AfterValue,
+        store2AfterLength,
+        store2AfterValue,
+      };
+    });
+
+    // Before drop
+    expect(result.store1BeforeLength).toBe(2);
+    expect(result.store2BeforeLength).toBe(2);
+    expect(result.store1BeforeValue).toBe('store1-value1');
+    expect(result.store2BeforeValue).toBe('store2-valueA');
+
+    // After drop - store1 should be empty, store2 should still have data
+    expect(result.store1AfterLength).toBe(0);
+    expect(result.store1AfterValue).toBe(null);
+    expect(result.store2AfterLength).toBe(2);
+    expect(result.store2AfterValue).toBe('store2-valueA');
+  });
+});
