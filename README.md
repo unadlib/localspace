@@ -1,5 +1,10 @@
 # localspace
-Modern storage toolkit that keeps localForage compatibility while using async/await, TypeScript, and zero legacy baggage.
+
+![Node CI](https://github.com/unadlib/localspace/workflows/Node%20CI/badge.svg)
+[![npm](https://img.shields.io/npm/v/localspace.svg)](https://www.npmjs.com/package/localspace)
+![license](https://img.shields.io/npm/l/localspace)
+
+LocalSpace - Modern storage toolkit that keeps localForage compatibility while using async/await, TypeScript, and zero legacy baggage.
 
 ## Table of Contents
 - [localspace delivers modern storage compatibility](#localspace-delivers-modern-storage-compatibility)
@@ -11,15 +16,14 @@ Modern storage toolkit that keeps localForage compatibility while using async/aw
 - [Note differences from localForage before upgrading](#note-differences-from-localforage-before-upgrading)
 - [Enable compatibility mode for legacy callbacks](#enable-compatibility-mode-for-legacy-callbacks)
 - [Troubleshoot with these tips](#troubleshoot-with-these-tips)
-- [License](#license)
 
 ## localspace delivers modern storage compatibility
-localspace targets developers who need localForage’s API surface without its historical baggage. **You get the same method names, configuration options, and driver constants, all implemented with modern JavaScript and strong TypeScript types.**
+localspace targets developers who need localForage’s API surface without its historical baggage. **You get the same method names, configuration options, and driver constants, all implemented with modern JavaScript and TypeScript types.**
 
 - Promise-first API with optional callbacks
 - IndexedDB and localStorage drivers included out of the box
 - ES module, CommonJS, and UMD bundles plus `.d.ts` files
-- Drop-in TypeScript generics for strong value typing
+- Drop-in TypeScript generics for value typing
 
 ## Install and import localspace
 Install the package with your preferred package manager and import it once at the entry point where you manage storage.
