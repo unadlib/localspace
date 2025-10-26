@@ -5,6 +5,8 @@ import type {
   Driver,
   Callback,
   Serializer,
+  CompatibilitySuccessCallback,
+  CompatibilityErrorCallback,
 } from './types';
 
 // Create default instance
@@ -20,6 +22,8 @@ export type {
   Driver,
   Callback,
   Serializer,
+  CompatibilitySuccessCallback,
+  CompatibilityErrorCallback,
 };
 
 // Export class for creating instances

@@ -7,6 +7,8 @@ import type {
   DefinedDriversMap,
   DriverSupportMap,
   Serializer,
+  CompatibilityErrorCallback,
+  CompatibilitySuccessCallback,
 } from './types';
 import {
   extend,
@@ -52,6 +54,7 @@ const DefaultConfig: LocalSpaceConfig = {
   size: 4980736,
   storeName: 'keyvaluepairs',
   version: 1.0,
+  compatibilityMode: false,
 };
 
 type ReadyAwareInstance = {
@@ -66,14 +69,19 @@ type DriverAugmentedInstance = ReadyAwareInstance &
   };
 
 const asErrorHandler = (
-  callback?: Callback<unknown>
+  callback?: Callback<unknown> | CompatibilityErrorCallback,
+  options?: { compatibilityMode?: boolean }
 ): ((error: Error) => void) | undefined => {
   if (!callback) {
     return undefined;
   }
 
   return (error: Error) => {
-    callback(error);
+    if (options?.compatibilityMode) {
+      (callback as CompatibilityErrorCallback)(error);
+    } else {
+      (callback as Callback<unknown>)(error);
+    }
   };
 };
 
@@ -178,8 +186,8 @@ export class LocalSpace implements LocalSpaceInstance {
 
   async defineDriver(
     driverObject: Driver,
-    callback?: Callback<void>,
-    errorCallback?: Callback<Error>
+    callback?: Callback<void> | CompatibilitySuccessCallback<void>,
+    errorCallback?: Callback<Error> | CompatibilityErrorCallback
   ): Promise<void> {
     const promise = new Promise<void>(async (resolve, reject) => {
       try {
@@ -253,10 +261,15 @@ export class LocalSpace implements LocalSpaceInstance {
       }
     });
 
+    const callbackOptions = this._getCallbackOptions();
     executeTwoCallbacks(
       promise,
       callback,
-      asErrorHandler(errorCallback as Callback<unknown> | undefined)
+      asErrorHandler(
+        errorCallback as Callback<unknown> | CompatibilityErrorCallback | undefined,
+        callbackOptions
+      ),
+      callbackOptions
     );
     return promise;
   }
@@ -274,17 +287,22 @@ export class LocalSpace implements LocalSpaceInstance {
       ? Promise.resolve(DefinedDrivers[driverName])
       : Promise.reject(new Error('Driver not found.'));
 
+    const callbackOptions = this._getCallbackOptions();
     executeTwoCallbacks(
       getDriverPromise,
       callback,
-      asErrorHandler(errorCallback as Callback<unknown> | undefined)
+      asErrorHandler(
+        errorCallback as Callback<unknown> | CompatibilityErrorCallback | undefined,
+        callbackOptions
+      ),
+      callbackOptions
     );
     return getDriverPromise;
   }
 
   async getSerializer(callback?: Callback<Serializer>): Promise<Serializer> {
     const serializerPromise = Promise.resolve(serializer);
-    executeTwoCallbacks(serializerPromise, callback);
+    executeTwoCallbacks(serializerPromise, callback, undefined, this._getCallbackOptions());
     return serializerPromise;
   }
 
@@ -298,33 +316,42 @@ export class LocalSpace implements LocalSpaceInstance {
       return this._ready!;
     });
 
+    const callbackOptions = this._getCallbackOptions();
     executeTwoCallbacks(
       promise,
       callback,
-      asErrorHandler(callback as Callback<unknown> | undefined)
+      asErrorHandler(callback as Callback<unknown> | undefined, callbackOptions),
+      callbackOptions
     );
     return promise;
   }
 
   async setDriver(
     drivers: string | string[],
-    callback?: Callback<void>,
-    errorCallback?: Callback<Error>
+    callback?: Callback<void> | CompatibilitySuccessCallback<void>,
+    errorCallback?: Callback<Error> | CompatibilityErrorCallback
   ): Promise<void> {
     if (!isArray(drivers)) {
       drivers = [drivers];
     }
 
     const supportedDrivers = this._getSupportedDrivers(drivers);
+    const callbackOptions = this._getCallbackOptions();
 
     if (supportedDrivers.length === 0) {
       const error = new Error('No available storage method found.');
-      const rejection = Promise.reject(error);
+      const rejection = Promise.resolve().then<never>(() => {
+        throw error;
+      });
       this._driverSet = rejection;
       executeTwoCallbacks(
         rejection,
         callback,
-        asErrorHandler(errorCallback as Callback<unknown> | undefined)
+        asErrorHandler(
+          errorCallback as Callback<unknown> | CompatibilityErrorCallback | undefined,
+          callbackOptions
+        ),
+        callbackOptions
       );
       return rejection;
     }
@@ -371,7 +398,9 @@ export class LocalSpace implements LocalSpaceInstance {
 
           setDriverToConfig();
           const error = new Error('No available storage method found.');
-          this._driverSet = Promise.reject(error);
+          this._driverSet = Promise.resolve().then<never>(() => {
+            throw error;
+          });
           throw error;
         };
 
@@ -399,14 +428,20 @@ export class LocalSpace implements LocalSpaceInstance {
       .catch(() => {
         setDriverToConfig();
         const error = new Error('No available storage method found.');
-        this._driverSet = Promise.reject(error);
+        this._driverSet = Promise.resolve().then<never>(() => {
+          throw error;
+        });
         throw error;
       });
 
     executeTwoCallbacks(
       this._driverSet,
       callback,
-      asErrorHandler(errorCallback as Callback<unknown> | undefined)
+      asErrorHandler(
+        errorCallback as Callback<unknown> | CompatibilityErrorCallback | undefined,
+        callbackOptions
+      ),
+      callbackOptions
     );
     return this._driverSet;
   }
@@ -436,6 +471,14 @@ export class LocalSpace implements LocalSpaceInstance {
     for (const libraryMethod of LibraryMethods) {
       callWhenReady(this as unknown as ReadyAwareInstance, libraryMethod);
     }
+  }
+
+  private _getCallbackOptions() {
+    const compatibilityMode =
+      this._config && typeof this._config.compatibilityMode === 'boolean'
+        ? !!this._config.compatibilityMode
+        : false;
+    return { compatibilityMode };
   }
 
   // Driver methods (will be replaced by actual driver implementations)

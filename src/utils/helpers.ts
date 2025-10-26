@@ -1,4 +1,8 @@
-import type { Callback } from '../types';
+import type {
+  Callback,
+  CompatibilityErrorCallback,
+  CompatibilitySuccessCallback,
+} from '../types';
 
 /**
  * Execute callback if provided, handling errors gracefully
@@ -21,23 +25,45 @@ export function executeCallback<T>(
  */
 export function executeTwoCallbacks<T>(
   promise: Promise<T>,
-  callback?: Callback<T>,
-  errorCallback?: (error: Error) => void
+  callback?: Callback<T> | CompatibilitySuccessCallback<T>,
+  errorCallback?:
+    | ((error: Error) => void)
+    | CompatibilityErrorCallback
+    | Callback<T>,
+  options?: { compatibilityMode?: boolean }
 ): Promise<T> {
+  const normalizeError = (error: unknown): Error => {
+    return error instanceof Error ? error : new Error(String(error));
+  };
+
+  if (options?.compatibilityMode) {
+    if (typeof callback === 'function') {
+      promise.then((result) => {
+        (callback as CompatibilitySuccessCallback<T>)(result);
+      });
+    }
+
+    if (typeof errorCallback === 'function') {
+      promise.catch((error) => {
+        (errorCallback as CompatibilityErrorCallback)(normalizeError(error));
+      });
+    }
+
+    return promise;
+  }
+
   const handleError = (error: unknown) => {
-    const normalizedError = error instanceof Error ? error : new Error(String(error));
+    const normalizedError = normalizeError(error);
+
     if (errorCallback) {
-      errorCallback(normalizedError);
+      (errorCallback as (error: Error) => void)(normalizedError);
     } else if (callback) {
-      callback(normalizedError as Error);
+      (callback as Callback<T>)(normalizedError);
     }
   };
 
   if (callback) {
-    promise.then(
-      (result) => callback(null, result),
-      handleError
-    );
+    promise.then((result) => (callback as Callback<T>)(null, result), handleError);
   } else if (errorCallback) {
     promise.catch(handleError);
   }

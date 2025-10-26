@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import localspace, { LocalSpace } from '../src/index';
+import { executeTwoCallbacks } from '../src/utils/helpers';
 import type { LocalSpaceInstance } from '../src/types';
 
 describe('localspace localStorage parity checks', () => {
@@ -61,5 +62,62 @@ describe('localspace config compatibility snapshots', () => {
 
     const result = instance.config({ description: 'should fail' });
     expect(result).toBeInstanceOf(Error);
+  });
+});
+
+describe('compatibility mode toggles callback semantics', () => {
+  it('defaults to node-style callbacks when compatibility mode is disabled', async () => {
+    const instance = localspace.createInstance({
+      name: 'compat-default',
+      storeName: `store_${Math.random().toString(36).slice(2)}`,
+    });
+
+    const success = vi.fn();
+    const failure = vi.fn();
+
+    await instance.setDriver([instance.LOCALSTORAGE], success, failure);
+
+    expect(success).toHaveBeenCalledTimes(1);
+    expect(success.mock.calls[0][0]).toBeNull();
+    expect(failure).not.toHaveBeenCalled();
+  });
+
+  it('invokes legacy success callback signature when compatibility mode is enabled', async () => {
+    const instance = localspace.createInstance({
+      name: 'compat-legacy',
+      storeName: `store_${Math.random().toString(36).slice(2)}`,
+      compatibilityMode: true,
+    });
+
+    const success = vi.fn();
+    const failure = vi.fn();
+
+    await instance.setDriver([instance.LOCALSTORAGE], success, failure);
+
+    expect(success).toHaveBeenCalledTimes(1);
+    expect(success.mock.calls[0].length).toBe(1);
+    expect(failure).not.toHaveBeenCalled();
+  });
+
+  it('routes errors to legacy error callback in compatibility mode', async () => {
+    const success = vi.fn();
+    const failure = vi.fn();
+
+    const handlers: { onCatch?: (error: Error) => void } = {};
+    const fakePromise = {
+      then: vi.fn().mockImplementation(() => fakePromise),
+      catch: vi.fn().mockImplementation((handler: (error: Error) => void) => {
+        handlers.onCatch = handler;
+        return fakePromise;
+      }),
+    } as unknown as Promise<void>;
+
+    executeTwoCallbacks(fakePromise, success, failure, { compatibilityMode: true });
+
+    handlers.onCatch?.(new Error('compat failure'));
+
+    expect(success).not.toHaveBeenCalled();
+    expect(failure).toHaveBeenCalledTimes(1);
+    expect(failure.mock.calls[0][0]).toBeInstanceOf(Error);
   });
 });

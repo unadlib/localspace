@@ -4,6 +4,16 @@
 export type Callback<T = unknown> = (error: Error | null, value?: T) => void;
 
 /**
+ * Compatibility success callback (no error parameter)
+ */
+export type CompatibilitySuccessCallback<T = unknown> = (value: T) => void;
+
+/**
+ * Compatibility error callback (receives Error only)
+ */
+export type CompatibilityErrorCallback = (error: Error) => void;
+
+/**
  * Configuration options for localspace
  */
 export interface LocalSpaceConfig {
@@ -23,7 +33,7 @@ export interface LocalSpaceConfig {
   name?: string;
 
   /**
-   * Database size (for WebSQL, ignored in other drivers)
+   * Database size
    */
   size?: number;
 
@@ -36,6 +46,11 @@ export interface LocalSpaceConfig {
    * Database version
    */
   version?: number;
+
+  /**
+   * Enable legacy callback compatibility mode
+   */
+  compatibilityMode?: boolean;
 }
 
 /**
@@ -156,7 +171,9 @@ export interface LocalSpaceInstance {
    * Configure localspace
    */
   config(options: LocalSpaceConfig): true | Error | Promise<void>;
-  config<K extends keyof LocalSpaceConfig>(key: K): LocalSpaceConfig[K] | undefined;
+  config<K extends keyof LocalSpaceConfig>(
+    key: K
+  ): LocalSpaceConfig[K] | undefined;
   config(): LocalSpaceConfig;
 
   /**
@@ -169,8 +186,8 @@ export interface LocalSpaceInstance {
    */
   defineDriver(
     driver: Driver,
-    callback?: Callback<void>,
-    errorCallback?: Callback<Error>
+    callback?: Callback<void> | CompatibilitySuccessCallback<void>,
+    errorCallback?: Callback<Error> | CompatibilityErrorCallback
   ): Promise<void>;
 
   /**
@@ -202,8 +219,8 @@ export interface LocalSpaceInstance {
    */
   setDriver(
     drivers: string | string[],
-    callback?: Callback<void>,
-    errorCallback?: Callback<Error>
+    callback?: Callback<void> | CompatibilitySuccessCallback<void>,
+    errorCallback?: Callback<Error> | CompatibilityErrorCallback
   ): Promise<void>;
 
   /**
@@ -263,7 +280,7 @@ export interface LocalSpaceInstance {
   ): Promise<void>;
 
   /**
-   * Internal properties (for compatibility)
+   * Internal properties
    */
   _initReady?: () => Promise<void>;
   _ready: boolean | Promise<void> | null;
