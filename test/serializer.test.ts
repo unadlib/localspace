@@ -53,4 +53,83 @@ describe('serializer round-trip behaviour', () => {
     const restored = serializer.bufferToString(buffer);
     expect(restored).toBe(btoa(text));
   });
+
+  it('handles Int8Array', async () => {
+    const view = new Int8Array([-100, 0, 100]);
+    const encoded = await serializer.serialize(view);
+    const decoded = serializer.deserialize(encoded);
+
+    expect(decoded).toBeInstanceOf(Int8Array);
+    expect(Array.from(decoded as Int8Array)).toEqual(Array.from(view));
+  });
+
+  describe('Additional typed array support', () => {
+    it('handles Uint8Array', async () => {
+      const view = new Uint8Array([1, 2, 3, 4, 5]);
+      const encoded = await serializer.serialize(view);
+      const decoded = serializer.deserialize(encoded);
+
+      expect(decoded).toBeInstanceOf(Uint8Array);
+      expect(Array.from(decoded as Uint8Array)).toEqual(Array.from(view));
+    });
+
+    it('handles Uint8ClampedArray', async () => {
+      const view = new Uint8ClampedArray([0, 128, 255]);
+      const encoded = await serializer.serialize(view);
+      const decoded = serializer.deserialize(encoded);
+
+      expect(decoded).toBeInstanceOf(Uint8ClampedArray);
+      expect(Array.from(decoded as Uint8ClampedArray)).toEqual(Array.from(view));
+    });
+
+    it('handles Uint16Array', async () => {
+      const view = new Uint16Array([1000, 2000, 3000]);
+      const encoded = await serializer.serialize(view);
+      const decoded = serializer.deserialize(encoded);
+
+      expect(decoded).toBeInstanceOf(Uint16Array);
+      expect(Array.from(decoded as Uint16Array)).toEqual(Array.from(view));
+    });
+
+    it('handles Int32Array', async () => {
+      const view = new Int32Array([-100, 0, 100]);
+      const encoded = await serializer.serialize(view);
+      const decoded = serializer.deserialize(encoded);
+
+      expect(decoded).toBeInstanceOf(Int32Array);
+      expect(Array.from(decoded as Int32Array)).toEqual(Array.from(view));
+    });
+
+    it('handles Uint32Array', async () => {
+      const view = new Uint32Array([100, 200, 300]);
+      const encoded = await serializer.serialize(view);
+      const decoded = serializer.deserialize(encoded);
+
+      expect(decoded).toBeInstanceOf(Uint32Array);
+      expect(Array.from(decoded as Uint32Array)).toEqual(Array.from(view));
+    });
+
+    it('handles Float32Array', async () => {
+      const view = new Float32Array([1.5, 2.5, 3.5]);
+      const encoded = await serializer.serialize(view);
+      const decoded = serializer.deserialize(encoded);
+
+      expect(decoded).toBeInstanceOf(Float32Array);
+      expect(Array.from(decoded as Float32Array)).toEqual(Array.from(view));
+    });
+
+    it('handles Float64Array', async () => {
+      const view = new Float64Array([1.123456789, 2.987654321]);
+      const encoded = await serializer.serialize(view);
+      const decoded = serializer.deserialize(encoded);
+
+      expect(decoded).toBeInstanceOf(Float64Array);
+      expect(Array.from(decoded as Float64Array)).toEqual(Array.from(view));
+    });
+
+    it('throws error for unknown type', () => {
+      const invalidData = '__lfsc__:999:invalid';
+      expect(() => serializer.deserialize(invalidData)).toThrow('Unknown type');
+    });
+  });
 });
