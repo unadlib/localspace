@@ -139,9 +139,7 @@ export class LocalSpace implements LocalSpaceInstance {
   config(optionsOrKey?: LocalSpaceConfig | keyof LocalSpaceConfig) {
     if (typeof optionsOrKey === 'object' && optionsOrKey !== null) {
       if (this._ready) {
-        return new Error(
-          "Can't call config() after LocalSpace has been used."
-        );
+        return new Error("Can't call config() after LocalSpace has been used.");
       }
 
       const suppliedOptions = optionsOrKey as Partial<LocalSpaceConfig>;
@@ -266,7 +264,10 @@ export class LocalSpace implements LocalSpaceInstance {
       promise,
       callback,
       asErrorHandler(
-        errorCallback as Callback<unknown> | CompatibilityErrorCallback | undefined,
+        errorCallback as
+          | Callback<unknown>
+          | CompatibilityErrorCallback
+          | undefined,
         callbackOptions
       ),
       callbackOptions
@@ -292,7 +293,10 @@ export class LocalSpace implements LocalSpaceInstance {
       getDriverPromise,
       callback,
       asErrorHandler(
-        errorCallback as Callback<unknown> | CompatibilityErrorCallback | undefined,
+        errorCallback as
+          | Callback<unknown>
+          | CompatibilityErrorCallback
+          | undefined,
         callbackOptions
       ),
       callbackOptions
@@ -302,7 +306,12 @@ export class LocalSpace implements LocalSpaceInstance {
 
   async getSerializer(callback?: Callback<Serializer>): Promise<Serializer> {
     const serializerPromise = Promise.resolve(serializer);
-    executeTwoCallbacks(serializerPromise, callback, undefined, this._getCallbackOptions());
+    executeTwoCallbacks(
+      serializerPromise,
+      callback,
+      undefined,
+      this._getCallbackOptions()
+    );
     return serializerPromise;
   }
 
@@ -320,7 +329,10 @@ export class LocalSpace implements LocalSpaceInstance {
     executeTwoCallbacks(
       promise,
       callback,
-      asErrorHandler(callback as Callback<unknown> | undefined, callbackOptions),
+      asErrorHandler(
+        callback as Callback<unknown> | undefined,
+        callbackOptions
+      ),
       callbackOptions
     );
     return promise;
@@ -348,7 +360,10 @@ export class LocalSpace implements LocalSpaceInstance {
         rejection,
         callback,
         asErrorHandler(
-          errorCallback as Callback<unknown> | CompatibilityErrorCallback | undefined,
+          errorCallback as
+            | Callback<unknown>
+            | CompatibilityErrorCallback
+            | undefined,
           callbackOptions
         ),
         callbackOptions
@@ -438,7 +453,10 @@ export class LocalSpace implements LocalSpaceInstance {
       this._driverSet,
       callback,
       asErrorHandler(
-        errorCallback as Callback<unknown> | CompatibilityErrorCallback | undefined,
+        errorCallback as
+          | Callback<unknown>
+          | CompatibilityErrorCallback
+          | undefined,
         callbackOptions
       ),
       callbackOptions

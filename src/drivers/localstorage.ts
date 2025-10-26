@@ -16,11 +16,11 @@ type LocalStorageDbInfo = DbInfo & {
 
 type LocalStorageDriverContext = LocalSpaceInstance &
   Partial<Driver> & {
-  _dbInfo: LocalStorageDbInfo;
-  _defaultConfig: LocalSpaceConfig;
-  ready(): Promise<void>;
-  config(): LocalSpaceConfig;
-};
+    _dbInfo: LocalStorageDbInfo;
+    _defaultConfig: LocalSpaceConfig;
+    ready(): Promise<void>;
+    config(): LocalSpaceConfig;
+  };
 
 function isLocalStorageValid(): boolean {
   try {
@@ -34,7 +34,10 @@ function isLocalStorageValid(): boolean {
   }
 }
 
-function getKeyPrefix(options: LocalSpaceConfig, defaultConfig: LocalSpaceConfig): string {
+function getKeyPrefix(
+  options: LocalSpaceConfig,
+  defaultConfig: LocalSpaceConfig
+): string {
   let keyPrefix = options.name + '/';
 
   if (options.storeName !== defaultConfig.storeName) {
@@ -59,7 +62,10 @@ function isLocalStorageUsable(): boolean {
   return !checkIfLocalStorageThrows() || localStorage.length > 0;
 }
 
-async function _initStorage(this: LocalStorageDriverContext, config: LocalSpaceConfig): Promise<void> {
+async function _initStorage(
+  this: LocalStorageDriverContext,
+  config: LocalSpaceConfig
+): Promise<void> {
   const dbInfo: LocalStorageDbInfo = {
     ...config,
     keyPrefix: getKeyPrefix(config, this._defaultConfig),
@@ -73,7 +79,10 @@ async function _initStorage(this: LocalStorageDriverContext, config: LocalSpaceC
   this._dbInfo = dbInfo;
 }
 
-function clear(this: LocalStorageDriverContext, callback?: Callback<void>): Promise<void> {
+function clear(
+  this: LocalStorageDriverContext,
+  callback?: Callback<void>
+): Promise<void> {
   const promise = this.ready().then(() => {
     const keyPrefix = this._dbInfo.keyPrefix;
 
@@ -107,7 +116,10 @@ function getItem<T>(
     return dbInfo.serializer.deserialize(raw) as T;
   });
 
-  executeCallback(promise as Promise<T | null>, callback as Callback<T | null> | undefined);
+  executeCallback(
+    promise as Promise<T | null>,
+    callback as Callback<T | null> | undefined
+  );
   return promise;
 }
 
@@ -182,7 +194,10 @@ function key(
   return promise;
 }
 
-function keys(this: LocalStorageDriverContext, callback?: Callback<string[]>): Promise<string[]> {
+function keys(
+  this: LocalStorageDriverContext,
+  callback?: Callback<string[]>
+): Promise<string[]> {
   const promise = this.ready().then(() => {
     const dbInfo = this._dbInfo;
     const length = localStorage.length;
@@ -202,7 +217,10 @@ function keys(this: LocalStorageDriverContext, callback?: Callback<string[]>): P
   return promise;
 }
 
-function length(this: LocalStorageDriverContext, callback?: Callback<number>): Promise<number> {
+function length(
+  this: LocalStorageDriverContext,
+  callback?: Callback<number>
+): Promise<number> {
   const promise = keys.call(this).then((derivedKeys) => derivedKeys.length);
 
   executeCallback(promise, callback);
@@ -235,15 +253,20 @@ async function setItem<T>(
 
   const promise = this.ready().then(async () => {
     const normalizedValue = (value === undefined ? null : value) as T;
-    const serializedValue = await this._dbInfo.serializer.serialize(normalizedValue);
+    const serializedValue =
+      await this._dbInfo.serializer.serialize(normalizedValue);
 
     try {
-      localStorage.setItem(this._dbInfo.keyPrefix + normalizedKey, serializedValue);
+      localStorage.setItem(
+        this._dbInfo.keyPrefix + normalizedKey,
+        serializedValue
+      );
       return normalizedValue;
     } catch (error: unknown) {
       if (
         error instanceof Error &&
-        (error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED')
+        (error.name === 'QuotaExceededError' ||
+          error.name === 'NS_ERROR_DOM_QUOTA_REACHED')
       ) {
         throw error;
       }

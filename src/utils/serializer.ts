@@ -106,9 +106,10 @@ async function serialize(value: unknown): Promise<string> {
       throw new Error('Failed to get type for BinaryArray');
     }
     const sourceBuffer = value.buffer;
-    const normalizedBuffer = sourceBuffer instanceof ArrayBuffer
-      ? sourceBuffer
-      : new Uint8Array(sourceBuffer).slice().buffer;
+    const normalizedBuffer =
+      sourceBuffer instanceof ArrayBuffer
+        ? sourceBuffer
+        : new Uint8Array(sourceBuffer).slice().buffer;
     return SERIALIZED_MARKER + marker + bufferToString(normalizedBuffer);
   }
 

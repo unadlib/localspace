@@ -63,7 +63,10 @@ export function executeTwoCallbacks<T>(
   };
 
   if (callback) {
-    promise.then((result) => (callback as Callback<T>)(null, result), handleError);
+    promise.then(
+      (result) => (callback as Callback<T>)(null, result),
+      handleError
+    );
   } else if (errorCallback) {
     promise.catch(handleError);
   }
@@ -74,7 +77,9 @@ export function executeTwoCallbacks<T>(
 /**
  * Get callback from arguments (handles optional parameters)
  */
-export function getCallback<T extends unknown[]>(args: T): Callback | undefined {
+export function getCallback<T extends unknown[]>(
+  args: T
+): Callback | undefined {
   if (args.length > 0 && typeof args[args.length - 1] === 'function') {
     return args[args.length - 1] as Callback;
   }
@@ -111,7 +116,10 @@ export function normalizeKey(key: unknown): string {
 /**
  * Extend object (shallow merge)
  */
-export function extend<T extends object>(target: T, ...sources: Partial<T>[]): T {
+export function extend<T extends object>(
+  target: T,
+  ...sources: Partial<T>[]
+): T {
   const targetRecord = target as Record<string, unknown>;
   for (const source of sources) {
     if (source) {
@@ -137,7 +145,10 @@ type LegacyBlobBuilderConstructor = {
   };
 };
 
-export function createBlob(parts: BlobPart[], properties?: BlobPropertyBag): Blob {
+export function createBlob(
+  parts: BlobPart[],
+  properties?: BlobPropertyBag
+): Blob {
   try {
     return new Blob(parts, properties);
   } catch (error: unknown) {

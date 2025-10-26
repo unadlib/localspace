@@ -91,7 +91,9 @@ function checkBlobSupport(db: IDBDatabase): Promise<boolean> {
       const ua = navigator.userAgent;
       const matchedChrome = ua.match(/Chrome\/(\d+)/);
       const matchedEdge = ua.match(/Edge\//);
-      resolve(!!matchedEdge || !matchedChrome || parseInt(matchedChrome[1], 10) >= 43);
+      resolve(
+        !!matchedEdge || !matchedChrome || parseInt(matchedChrome[1], 10) >= 43
+      );
     };
   }).catch(() => false);
 }
@@ -105,7 +107,7 @@ function encodeBlob(blob: Blob): Promise<{
     const reader = new FileReader();
     reader.onerror = reject;
     reader.onloadend = (e: ProgressEvent<FileReader>) => {
-      const base64 = btoa(e.target?.result as string || '');
+      const base64 = btoa((e.target?.result as string) || '');
       resolve({
         __local_forage_encoded_blob: true,
         data: base64,
@@ -180,7 +182,10 @@ function advanceReadiness(dbInfo: DbInfo): Promise<void> | undefined {
   }
 }
 
-function rejectReadiness(dbInfo: DbInfo, err: Error): Promise<void> | undefined {
+function rejectReadiness(
+  dbInfo: DbInfo,
+  err: Error
+): Promise<void> | undefined {
   const dbContext = dbContexts[dbInfo.name!];
   const deferredOperation = dbContext.deferredOperations.pop();
 
@@ -358,7 +363,10 @@ function tryReconnect(dbInfo: DbInfo): Promise<void> {
     });
 }
 
-async function _initStorage(this: any, config: LocalSpaceConfig): Promise<void> {
+async function _initStorage(
+  this: any,
+  config: LocalSpaceConfig
+): Promise<void> {
   const self = this;
   const dbInfo: DbInfo = { db: null };
 
@@ -506,7 +514,11 @@ function iterate<T, U>(
                   if (isEncodedBlob(value)) {
                     value = decodeBlob(value);
                   }
-                  const result = iterator(value, cursor.key as string, iterationNumber++);
+                  const result = iterator(
+                    value,
+                    cursor.key as string,
+                    iterationNumber++
+                  );
                   if (result !== undefined) {
                     resolve(result);
                   } else {
@@ -984,7 +996,7 @@ function dropInstance(
 const asyncStorage: Driver = {
   _driver: 'asyncStorage',
   _initStorage,
-  _support: (() => isIndexedDBValid()) as (() => Promise<boolean>),
+  _support: (() => isIndexedDBValid()) as () => Promise<boolean>,
   iterate,
   getItem,
   setItem,
