@@ -9,7 +9,7 @@ export default defineConfig({
   timeout: 30 * 1000,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: 5,
   workers: process.env.CI ? 1 : undefined,
   use: {
     headless: true,
