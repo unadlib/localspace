@@ -164,8 +164,8 @@ const restored = await localspace.getItem<Blob>('file');
 - Blob capability checks run on each request instead of being cached. Cache the result in your application if repeated blob writes dominate your workload.
 - **WebSQL is intentionally unsupported.** Migrate any WebSQL-only code to IndexedDB or localStorage before switching.
 
-### Enable compatibility mode for legacy callbacks
-If you maintain older code that expects *success* and *error* callbacks, enable `compatibilityMode` when creating an instance. **Use this mode only for migrations; prefer native Promises going forward.**
+### Enable compatibility mode for driver setup methods
+If you maintain older code that expects separate *success* and *error* callbacks for driver setup methods (`setDriver`, `defineDriver`), enable `compatibilityMode` when creating an instance. **Use this mode only for migrations; prefer native Promises going forward.**
 
 ```ts
 const legacy = localspace.createInstance({
@@ -177,7 +177,7 @@ const legacy = localspace.createInstance({
 legacy.setDriver(
   [legacy.LOCALSTORAGE],
   () => {
-    // Success callback receives the value only.
+    // Success callback receives no arguments.
   },
   (error) => {
     // Error callback receives the Error object only.
@@ -185,7 +185,19 @@ legacy.setDriver(
 );
 ```
 
-When `compatibilityMode` is off, Node-style `(error, value)` callbacks remain supported but Promises are recommended.
+**Note:** Storage methods like `setItem`, `getItem`, `removeItem`, etc. always use Node-style `(error, value)` callbacks regardless of `compatibilityMode`. This matches localForage's original behavior. For example:
+
+```ts
+localspace.setItem('key', 'value', (err, value) => {
+  if (err) {
+    console.error('Error:', err);
+  } else {
+    console.log('Saved:', value);
+  }
+});
+```
+
+When `compatibilityMode` is off, driver setup methods also use Node-style callbacks. Promises are recommended for all new code.
 
 ## Troubleshooting
 - **Wait for readiness:** Call `await localspace.ready()` before the first operation when you need to confirm driver selection.

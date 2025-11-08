@@ -34,9 +34,9 @@
     "dist"
   ],
   "scripts": {
-    "test": "vitest run && playwright test",
+    "test": "vitest run && yarn build && playwright test",
     "test:unit": "vitest run",
-    "test:e2e": "playwright test",
+    "test:e2e": "yarn build && playwright test",
     "clean": "rimraf dist",
     "type-check": "tsc --skipLibCheck",
     "build": "yarn clean && tsc --skipLibCheck && yarn build:prod",
