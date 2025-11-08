@@ -206,4 +206,4 @@ When `compatibilityMode` is off, driver setup methods also use Node-style callba
 - **Run unit tests:** The project ships with Vitest and Playwright suites covering API behavior; run `yarn test` to verify changes.
 
 ## License
-localspace is released under the [MIT License](LICENSE).
+[MIT](./LICENSE)

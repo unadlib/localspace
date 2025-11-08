@@ -190,8 +190,10 @@ function decodeBlob(encodedBlob: {
   return createBlob([buffer], { type: encodedBlob.type });
 }
 
-function isEncodedBlob(value: any): boolean {
-  return value && value.__local_forage_encoded_blob;
+function isEncodedBlob(value?: {
+  __local_forage_encoded_blob?: boolean;
+}): boolean {
+  return !!value?.__local_forage_encoded_blob;
 }
 
 function createDbContext(): DbContext {
