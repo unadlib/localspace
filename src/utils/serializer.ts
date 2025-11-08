@@ -22,12 +22,18 @@ const TYPE_UINT16ARRAY = 'ur16';
 const TYPE_UINT32ARRAY = 'ui32';
 const TYPE_FLOAT32ARRAY = 'fl32';
 const TYPE_FLOAT64ARRAY = 'fl64';
+const TYPE_BIGINT64ARRAY = 'bi64';
+const TYPE_BIGUINT64ARRAY = 'bu64';
 const TYPE_SERIALIZED_MARKER_LENGTH =
   SERIALIZED_MARKER_LENGTH + TYPE_ARRAYBUFFER.length;
 
 const toString = Object.prototype.toString;
 
+const getGlobalScope = (): typeof globalThis =>
+  typeof window !== 'undefined' ? window : globalThis;
+
 function stringToBuffer(serializedString: string): ArrayBuffer {
+  const scope = getGlobalScope();
   const bufferLength = serializedString.length * 0.75;
   const len = serializedString.length;
   let p = 0;
@@ -40,8 +46,8 @@ function stringToBuffer(serializedString: string): ArrayBuffer {
     }
   }
 
-  const buffer = new ArrayBuffer(actualLength);
-  const bytes = new Uint8Array(buffer);
+  const buffer = new scope.ArrayBuffer(actualLength);
+  const bytes = new scope.Uint8Array(buffer);
 
   for (let i = 0; i < len; i += 4) {
     const encoded1 = BASE_CHARS.indexOf(serializedString[i]);
@@ -57,7 +63,8 @@ function stringToBuffer(serializedString: string): ArrayBuffer {
 }
 
 function bufferToString(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
+  const scope = getGlobalScope();
+  const bytes = new scope.Uint8Array(buffer);
   let base64String = '';
 
   for (let i = 0; i < bytes.length; i += 3) {
@@ -87,6 +94,8 @@ const typedArrayTagMap: Record<string, string> = {
   '[object Uint32Array]': TYPE_UINT32ARRAY,
   '[object Float32Array]': TYPE_FLOAT32ARRAY,
   '[object Float64Array]': TYPE_FLOAT64ARRAY,
+  '[object BigInt64Array]': TYPE_BIGINT64ARRAY,
+  '[object BigUint64Array]': TYPE_BIGUINT64ARRAY,
 };
 
 function isTypedArray(value: unknown): value is ArrayBufferView {
@@ -96,8 +105,12 @@ function isTypedArray(value: unknown): value is ArrayBufferView {
 async function serialize(value: unknown): Promise<string> {
   const valueType = value != null ? toString.call(value) : '';
 
-  if (value instanceof ArrayBuffer) {
-    return SERIALIZED_MARKER + TYPE_ARRAYBUFFER + bufferToString(value);
+  if (valueType === '[object ArrayBuffer]') {
+    return (
+      SERIALIZED_MARKER +
+      TYPE_ARRAYBUFFER +
+      bufferToString(value as ArrayBuffer)
+    );
   }
 
   if (isTypedArray(value)) {
@@ -156,29 +169,40 @@ function deserialize(value: string): unknown {
   const buffer = stringToBuffer(actualSerializedString);
 
   // Return the right type based on the marker
+  const scope = getGlobalScope();
   switch (type) {
     case TYPE_ARRAYBUFFER:
       return buffer;
     case TYPE_BLOB:
       return createBlob([buffer], { type: blobType });
     case TYPE_INT8ARRAY:
-      return new Int8Array(buffer);
+      return new scope.Int8Array(buffer);
     case TYPE_UINT8ARRAY:
-      return new Uint8Array(buffer);
+      return new scope.Uint8Array(buffer);
     case TYPE_UINT8CLAMPEDARRAY:
-      return new Uint8ClampedArray(buffer);
+      return new scope.Uint8ClampedArray(buffer);
     case TYPE_INT16ARRAY:
-      return new Int16Array(buffer);
+      return new scope.Int16Array(buffer);
     case TYPE_UINT16ARRAY:
-      return new Uint16Array(buffer);
+      return new scope.Uint16Array(buffer);
     case TYPE_INT32ARRAY:
-      return new Int32Array(buffer);
+      return new scope.Int32Array(buffer);
     case TYPE_UINT32ARRAY:
-      return new Uint32Array(buffer);
+      return new scope.Uint32Array(buffer);
     case TYPE_FLOAT32ARRAY:
-      return new Float32Array(buffer);
+      return new scope.Float32Array(buffer);
     case TYPE_FLOAT64ARRAY:
-      return new Float64Array(buffer);
+      return new scope.Float64Array(buffer);
+    case TYPE_BIGINT64ARRAY:
+      if (typeof scope.BigInt64Array === 'undefined') {
+        throw new Error('BigInt64Array is not supported in this environment');
+      }
+      return new scope.BigInt64Array(buffer);
+    case TYPE_BIGUINT64ARRAY:
+      if (typeof scope.BigUint64Array === 'undefined') {
+        throw new Error('BigUint64Array is not supported in this environment');
+      }
+      return new scope.BigUint64Array(buffer);
     default:
       throw new Error('Unknown type: ' + type);
   }

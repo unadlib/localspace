@@ -1,5 +1,6 @@
 import type { Driver, DbInfo, LocalSpaceConfig, Callback } from '../types';
 import { executeCallback, normalizeKey, createBlob } from '../utils/helpers';
+import serializer from '../utils/serializer';
 
 const DETECT_BLOB_SUPPORT_STORE = 'local-forage-detect-blob-support';
 let supportsBlobs: boolean | undefined;
@@ -8,6 +9,19 @@ const toString = Object.prototype.toString;
 
 const READ_ONLY = 'readonly';
 const READ_WRITE = 'readwrite';
+let detectBlobSupportPromise: Promise<boolean> | null = null;
+
+const getNavigatorObject = (): Navigator | undefined => {
+  if (typeof window !== 'undefined' && window.navigator) {
+    return window.navigator;
+  }
+
+  if (typeof navigator !== 'undefined') {
+    return navigator;
+  }
+
+  return undefined;
+};
 
 interface DbContext {
   forages: any[];
@@ -45,11 +59,10 @@ function isIndexedDBValid(): boolean | Promise<boolean> {
     if (!idb) return false;
 
     // Check if IndexedDB is available and functional
+    const nav = getNavigatorObject();
+    const userAgent = nav?.userAgent ?? '';
     const isSafari =
-      typeof window !== 'undefined' &&
-      window.navigator &&
-      /Safari/.test(navigator.userAgent) &&
-      !/Chrome/.test(navigator.userAgent);
+      !!nav && /Safari/.test(userAgent) && !/Chrome/.test(userAgent);
 
     // Safari private browsing mode throws when trying to access indexedDB
     if (isSafari) {
@@ -75,7 +88,11 @@ function checkBlobSupport(db: IDBDatabase): Promise<boolean> {
     return Promise.resolve(supportsBlobs);
   }
 
-  return new Promise<boolean>((resolve) => {
+  if (detectBlobSupportPromise) {
+    return detectBlobSupportPromise;
+  }
+
+  detectBlobSupportPromise = new Promise<boolean>((resolve) => {
     const txn = db.transaction(DETECT_BLOB_SUPPORT_STORE, READ_WRITE);
     const blob = createBlob(['']);
 
@@ -87,35 +104,64 @@ function checkBlobSupport(db: IDBDatabase): Promise<boolean> {
       resolve(false);
     };
 
+    txn.onerror = txn.onabort;
+
     txn.oncomplete = () => {
-      const ua = navigator.userAgent;
+      const nav = getNavigatorObject();
+      const ua = nav?.userAgent ?? '';
       const matchedChrome = ua.match(/Chrome\/(\d+)/);
       const matchedEdge = ua.match(/Edge\//);
-      resolve(
-        !!matchedEdge || !matchedChrome || parseInt(matchedChrome[1], 10) >= 43
-      );
+      const chromeVersion = matchedChrome ? parseInt(matchedChrome[1], 10) : NaN;
+      const supportsLargeBlobs =
+        !!matchedEdge ||
+        !matchedChrome ||
+        Number.isNaN(chromeVersion) ||
+        chromeVersion >= 43;
+      resolve(supportsLargeBlobs);
     };
-  }).catch(() => false);
+  })
+    .then((result) => {
+      supportsBlobs = result;
+      detectBlobSupportPromise = null;
+      return result;
+    })
+    .catch(() => {
+      detectBlobSupportPromise = null;
+      supportsBlobs = false;
+      return false;
+    });
+
+  return detectBlobSupportPromise;
 }
 
-function encodeBlob(blob: Blob): Promise<{
+async function readBlobAsArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
+  if (typeof blob.arrayBuffer === 'function') {
+    return blob.arrayBuffer();
+  }
+
+  if (typeof FileReader === 'undefined') {
+    throw new Error('Blob serialization not supported in this environment');
+  }
+
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onloadend = () => resolve(reader.result as ArrayBuffer);
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
+async function encodeBlob(blob: Blob): Promise<{
   __local_forage_encoded_blob: boolean;
   data: string;
   type: string;
 }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = reject;
-    reader.onloadend = (e: ProgressEvent<FileReader>) => {
-      const base64 = btoa((e.target?.result as string) || '');
-      resolve({
-        __local_forage_encoded_blob: true,
-        data: base64,
-        type: blob.type,
-      });
-    };
-    reader.readAsBinaryString(blob);
-  });
+  const arrayBuffer = await readBlobAsArrayBuffer(blob);
+  return {
+    __local_forage_encoded_blob: true,
+    data: serializer.bufferToString(arrayBuffer),
+    type: blob.type,
+  };
 }
 
 function decodeBlob(encodedBlob: {
@@ -123,18 +169,8 @@ function decodeBlob(encodedBlob: {
   data: string;
   type: string;
 }): Blob {
-  const arrayBuff = binStringToArrayBuffer(atob(encodedBlob.data));
-  return createBlob([arrayBuff], { type: encodedBlob.type });
-}
-
-function binStringToArrayBuffer(bin: string): ArrayBuffer {
-  const length = bin.length;
-  const buf = new ArrayBuffer(length);
-  const arr = new Uint8Array(buf);
-  for (let i = 0; i < length; i++) {
-    arr[i] = bin.charCodeAt(i);
-  }
-  return buf;
+  const buffer = serializer.stringToBuffer(encodedBlob.data);
+  return createBlob([buffer], { type: encodedBlob.type });
 }
 
 function isEncodedBlob(value: any): boolean {

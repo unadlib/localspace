@@ -80,7 +80,7 @@ const asErrorHandler = (
     if (options?.compatibilityMode) {
       (callback as CompatibilityErrorCallback)(error);
     } else {
-      (callback as Callback<unknown>)(error);
+      (callback as Callback<unknown>)(error, undefined);
     }
   };
 };
@@ -104,12 +104,17 @@ export class LocalSpace implements LocalSpaceInstance {
   _defaultConfig: LocalSpaceConfig;
   _config: LocalSpaceConfig;
   _driverSet: Promise<void> | null = null;
+  _pendingDriverInitialization: Promise<void> | null = null;
+  _isRunningDefaultDriverSelection = false;
+  _manualDriverOverride = false;
   _initDriver: (() => Promise<void>) | null = null;
   _ready: Promise<void> | null = null;
   _dbInfo: DbInfo | null = null;
   _driver?: string;
 
   constructor(options?: LocalSpaceConfig) {
+    const driverInitializationPromises: Promise<void>[] = [];
+
     // Define default drivers
     for (const driverTypeKey in DefaultDrivers) {
       if (Object.prototype.hasOwnProperty.call(DefaultDrivers, driverTypeKey)) {
@@ -119,7 +124,14 @@ export class LocalSpace implements LocalSpaceInstance {
         (this as unknown as Record<string, string>)[driverTypeKey] = driverName;
 
         if (!DefinedDrivers[driverName]) {
-          this.defineDriver(driver);
+          driverInitializationPromises.push(
+            this.defineDriver(driver).catch((error) => {
+              console.warn(
+                `Failed to define LocalSpace driver "${driverName}"`,
+                error
+              );
+            })
+          );
         }
       }
     }
@@ -128,7 +140,24 @@ export class LocalSpace implements LocalSpaceInstance {
     this._config = extend({}, this._defaultConfig, options || {});
 
     this._wrapLibraryMethodsWithReady();
-    this.setDriver(this._config.driver!).catch(() => {});
+
+    const waitForDrivers =
+      driverInitializationPromises.length > 0
+        ? Promise.all(driverInitializationPromises).then(() => undefined)
+        : Promise.resolve();
+
+    this._pendingDriverInitialization = waitForDrivers.then(() =>
+      this._runDefaultDriverSelection()
+    );
+
+    this._pendingDriverInitialization.then(
+      () => {
+        this._pendingDriverInitialization = null;
+      },
+      () => {
+        this._pendingDriverInitialization = null;
+      }
+    );
   }
 
   config(options: LocalSpaceConfig): true | Error | Promise<void>;
@@ -316,9 +345,12 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   async ready(callback?: Callback<void>): Promise<void> {
-    const driverSet = this._driverSet ?? Promise.resolve();
+    const driverInitialization =
+      this._driverSet ??
+      this._pendingDriverInitialization ??
+      Promise.resolve();
 
-    const promise = driverSet.then(() => {
+    const promise = driverInitialization.then(() => {
       if (this._ready === null) {
         this._ready = this._initDriver ? this._initDriver() : Promise.resolve();
       }
@@ -343,6 +375,10 @@ export class LocalSpace implements LocalSpaceInstance {
     callback?: Callback<void> | CompatibilitySuccessCallback<void>,
     errorCallback?: Callback<Error> | CompatibilityErrorCallback
   ): Promise<void> {
+    if (!this._isRunningDefaultDriverSelection) {
+      this._manualDriverOverride = true;
+    }
+
     if (!isArray(drivers)) {
       drivers = [drivers];
     }
@@ -489,6 +525,23 @@ export class LocalSpace implements LocalSpaceInstance {
     for (const libraryMethod of LibraryMethods) {
       callWhenReady(this as unknown as ReadyAwareInstance, libraryMethod);
     }
+  }
+
+  private _runDefaultDriverSelection(): Promise<void> {
+    if (this._manualDriverOverride) {
+      return this._driverSet ?? Promise.resolve();
+    }
+
+    this._isRunningDefaultDriverSelection = true;
+    return this.setDriver(this._config.driver!).then(
+      () => {
+        this._isRunningDefaultDriverSelection = false;
+      },
+      (error) => {
+        this._isRunningDefaultDriverSelection = false;
+        throw error;
+      }
+    );
   }
 
   private _getCallbackOptions() {

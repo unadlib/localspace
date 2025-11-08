@@ -127,6 +127,32 @@ describe('serializer round-trip behaviour', () => {
       expect(Array.from(decoded as Float64Array)).toEqual(Array.from(view));
     });
 
+    (typeof BigInt64Array === 'function' ? it : it.skip)(
+      'handles BigInt64Array',
+      async () => {
+        const view = new BigInt64Array([1n, -2n, 3n]);
+        const encoded = await serializer.serialize(view);
+        const decoded = serializer.deserialize(encoded);
+
+        expect(decoded).toBeInstanceOf(BigInt64Array);
+        expect(Array.from(decoded as BigInt64Array)).toEqual(Array.from(view));
+      }
+    );
+
+    (typeof BigUint64Array === 'function' ? it : it.skip)(
+      'handles BigUint64Array',
+      async () => {
+        const view = new BigUint64Array([0n, 4n, 8n]);
+        const encoded = await serializer.serialize(view);
+        const decoded = serializer.deserialize(encoded);
+
+        expect(decoded).toBeInstanceOf(BigUint64Array);
+        expect(Array.from(decoded as BigUint64Array)).toEqual(
+          Array.from(view)
+        );
+      }
+    );
+
     it('throws error for unknown type', () => {
       const invalidData = '__lfsc__:999:invalid';
       expect(() => serializer.deserialize(invalidData)).toThrow('Unknown type');

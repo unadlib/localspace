@@ -14,7 +14,7 @@ export function executeCallback<T>(
   if (callback) {
     promise.then(
       (result) => callback(null, result),
-      (error) => callback(error)
+      (error) => callback(error, undefined)
     );
   }
   return promise;
@@ -58,7 +58,7 @@ export function executeTwoCallbacks<T>(
     if (errorCallback) {
       (errorCallback as (error: Error) => void)(normalizedError);
     } else if (callback) {
-      (callback as Callback<T>)(normalizedError);
+      (callback as Callback<T>)(normalizedError, undefined);
     }
   };
 

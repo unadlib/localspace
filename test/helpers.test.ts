@@ -30,7 +30,7 @@ describe('executeTwoCallbacks', () => {
     });
     await executeTwoCallbacks(rejectingPromise, callback).catch(() => undefined);
 
-    expect(callback).toHaveBeenCalledWith(error);
+    expect(callback).toHaveBeenCalledWith(error, undefined);
   });
 
   it('supports legacy success/error callbacks in compatibility mode', async () => {
@@ -237,7 +237,7 @@ describe('helper utilities', () => {
       const callback = vi.fn();
       const error = new Error('test error');
       await executeCallback(Promise.reject(error), callback).catch(() => {});
-      expect(callback).toHaveBeenCalledWith(error);
+      expect(callback).toHaveBeenCalledWith(error, undefined);
     });
 
     it('returns promise even when callback is provided', async () => {
