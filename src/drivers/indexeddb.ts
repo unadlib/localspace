@@ -638,7 +638,7 @@ async function setItem<T>(
       if (toString.call(value) === '[object Blob]') {
         const blobSupport = await checkBlobSupport(dbInfo.db!);
         if (!blobSupport) {
-          value = (await encodeBlob(value as any)) as any;
+          value = (await encodeBlob(value as Blob)) as T;
         }
       }
 
