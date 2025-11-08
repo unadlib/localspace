@@ -29,8 +29,14 @@ const TYPE_SERIALIZED_MARKER_LENGTH =
 
 const toString = Object.prototype.toString;
 
-const getGlobalScope = (): typeof globalThis =>
-  typeof window !== 'undefined' ? window : globalThis;
+const getGlobalScope = (): typeof globalThis => {
+  if (typeof window !== 'undefined') return window;
+  if (typeof globalThis !== 'undefined') return globalThis;
+  if (typeof self !== 'undefined') return self;
+  if (typeof global !== 'undefined') return global as any;
+  // Last resort fallback for very old environments
+  return Function('return this')() as typeof globalThis;
+};
 
 function stringToBuffer(serializedString: string): ArrayBuffer {
   const scope = getGlobalScope();

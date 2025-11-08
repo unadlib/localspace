@@ -375,6 +375,12 @@ export class LocalSpace implements LocalSpaceInstance {
     callback?: Callback<void> | CompatibilitySuccessCallback<void>,
     errorCallback?: Callback<Error> | CompatibilityErrorCallback
   ): Promise<void> {
+    // Wait for driver initialization to complete before checking support
+    // Skip waiting if this is being called from _runDefaultDriverSelection to avoid deadlock
+    if (this._pendingDriverInitialization && !this._isRunningDefaultDriverSelection) {
+      await this._pendingDriverInitialization;
+    }
+
     if (!this._isRunningDefaultDriverSelection) {
       this._manualDriverOverride = true;
     }
