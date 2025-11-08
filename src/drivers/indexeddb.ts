@@ -1,6 +1,21 @@
-import type { Driver, DbInfo, LocalSpaceConfig, Callback } from '../types';
+import type {
+  Driver,
+  DbInfo,
+  LocalSpaceConfig,
+  Callback,
+  LocalSpaceInstance,
+} from '../types';
 import { executeCallback, normalizeKey, createBlob } from '../utils/helpers';
 import serializer from '../utils/serializer';
+
+type IndexedDBDriverContext = LocalSpaceInstance &
+  Partial<Driver> & {
+    _dbInfo: DbInfo;
+    _defaultConfig: LocalSpaceConfig;
+    _initReady?: () => Promise<void>;
+    ready(): Promise<void>;
+    config(): LocalSpaceConfig;
+  };
 
 const DETECT_BLOB_SUPPORT_STORE = 'local-forage-detect-blob-support';
 let supportsBlobs: boolean | undefined;
@@ -24,7 +39,7 @@ const getNavigatorObject = (): Navigator | undefined => {
 };
 
 interface DbContext {
-  forages: any[];
+  forages: IndexedDBDriverContext[];
   db: IDBDatabase | null;
   dbReady: Promise<void> | null;
   deferredOperations: DeferredOperation[];
@@ -42,11 +57,11 @@ function getIDB(): IDBFactory | null {
   }
   if (typeof window !== 'undefined') {
     return (
-      (window as any).indexedDB ||
-      (window as any).webkitIndexedDB ||
-      (window as any).mozIndexedDB ||
-      (window as any).OIndexedDB ||
-      (window as any).msIndexedDB ||
+      window.indexedDB ||
+      window.webkitIndexedDB ||
+      window.mozIndexedDB ||
+      window.OIndexedDB ||
+      window.msIndexedDB ||
       null
     );
   }
@@ -111,7 +126,9 @@ function checkBlobSupport(db: IDBDatabase): Promise<boolean> {
       const ua = nav?.userAgent ?? '';
       const matchedChrome = ua.match(/Chrome\/(\d+)/);
       const matchedEdge = ua.match(/Edge\//);
-      const chromeVersion = matchedChrome ? parseInt(matchedChrome[1], 10) : NaN;
+      const chromeVersion = matchedChrome
+        ? parseInt(matchedChrome[1], 10)
+        : NaN;
       const supportsLargeBlobs =
         !!matchedEdge ||
         !matchedChrome ||
@@ -184,6 +201,20 @@ function createDbContext(): DbContext {
     dbReady: null,
     deferredOperations: [],
   };
+}
+
+function requireDbName(dbInfo: DbInfo): string {
+  if (dbInfo.name) {
+    return dbInfo.name;
+  }
+  throw new Error('IndexedDB database name is not configured.');
+}
+
+function requireStoreName(dbInfo: DbInfo): string {
+  if (dbInfo.storeName) {
+    return dbInfo.storeName;
+  }
+  throw new Error('IndexedDB storeName is not configured.');
 }
 
 function deferReadiness(dbInfo: DbInfo): void {
@@ -400,7 +431,7 @@ function tryReconnect(dbInfo: DbInfo): Promise<void> {
 }
 
 async function _initStorage(
-  this: any,
+  this: IndexedDBDriverContext,
   config: LocalSpaceConfig
 ): Promise<void> {
   const self = this;
@@ -410,13 +441,14 @@ async function _initStorage(
     (dbInfo as any)[i] = (config as any)[i];
   }
 
-  const dbContext = dbContexts[dbInfo.name!];
+  const dbName = requireDbName(dbInfo);
+  let dbContext = dbContexts[dbName];
 
   if (!dbContext) {
-    dbContexts[dbInfo.name!] = createDbContext();
+    dbContext = dbContexts[dbName] = createDbContext();
   }
 
-  dbContexts[dbInfo.name!].forages.push(self);
+  dbContext.forages.push(self);
 
   if (!self._initReady) {
     self._initReady = self.ready;
@@ -429,25 +461,27 @@ async function _initStorage(
     return Promise.resolve();
   }
 
-  for (const forage of dbContexts[dbInfo.name!].forages) {
+  for (const forage of dbContext.forages) {
     if (forage !== self) {
-      initPromises.push(forage._initReady().catch(ignoreErrors));
+      const initReady = (forage._initReady ?? forage.ready).bind(forage);
+      initPromises.push(initReady().catch(ignoreErrors));
     }
   }
 
-  const forages = dbContexts[dbInfo.name!].forages.slice(0);
+  const forages = dbContext.forages.slice(0);
 
   await Promise.all(initPromises);
 
-  dbInfo.db = dbContexts[dbInfo.name!].db;
+  dbInfo.db = dbContext.db;
   const db = await getConnection(dbInfo, false);
   dbInfo.db = db;
 
-  if (isUpgradeNeeded(dbInfo, self._defaultConfig.version)) {
+  const defaultVersion = self._defaultConfig.version ?? 1;
+  if (isUpgradeNeeded(dbInfo, defaultVersion)) {
     const upgradedDb = await getConnection(dbInfo, true);
-    dbInfo.db = dbContexts[dbInfo.name!].db = upgradedDb;
+    dbInfo.db = dbContext.db = upgradedDb;
   } else {
-    dbInfo.db = dbContexts[dbInfo.name!].db = db;
+    dbInfo.db = dbContext.db = db;
   }
 
   self._dbInfo = dbInfo;
@@ -460,11 +494,16 @@ async function _initStorage(
   }
 }
 
-function fullyReady(this: any, callback?: Callback<void>): Promise<void> {
+function fullyReady(
+  this: IndexedDBDriverContext,
+  callback?: Callback<void>
+): Promise<void> {
   const self = this;
 
-  const promise = self._initReady().then(() => {
-    const dbContext = dbContexts[self._dbInfo.name];
+  const initReady = (self._initReady ?? self.ready).bind(self);
+  const promise = initReady().then(() => {
+    const dbName = requireDbName(self._dbInfo);
+    const dbContext = dbContexts[dbName];
     if (dbContext && dbContext.dbReady) {
       return dbContext.dbReady;
     }
@@ -475,7 +514,7 @@ function fullyReady(this: any, callback?: Callback<void>): Promise<void> {
 }
 
 function getItem<T>(
-  this: any,
+  this: IndexedDBDriverContext,
   key: string,
   callback?: Callback<T>
 ): Promise<T | null> {
@@ -493,7 +532,8 @@ function getItem<T>(
             if (err) return reject(err);
 
             try {
-              const store = transaction!.objectStore(self._dbInfo.storeName);
+              const storeName = requireStoreName(self._dbInfo);
+              const store = transaction!.objectStore(storeName);
               const req = store.get(key);
 
               req.onsuccess = () => {
@@ -522,7 +562,7 @@ function getItem<T>(
 }
 
 function iterate<T, U>(
-  this: any,
+  this: IndexedDBDriverContext,
   iterator: (value: T, key: string, iterationNumber: number) => U,
   callback?: Callback<U>
 ): Promise<U> {
@@ -539,7 +579,8 @@ function iterate<T, U>(
             if (err) return reject(err);
 
             try {
-              const store = transaction!.objectStore(self._dbInfo.storeName);
+              const storeName = requireStoreName(self._dbInfo);
+              const store = transaction!.objectStore(storeName);
               const req = store.openCursor();
               let iterationNumber = 1;
 
@@ -580,7 +621,7 @@ function iterate<T, U>(
 }
 
 async function setItem<T>(
-  this: any,
+  this: IndexedDBDriverContext,
   key: string,
   value: T,
   callback?: Callback<T>
@@ -608,7 +649,8 @@ async function setItem<T>(
           if (err) return reject(err);
 
           try {
-            const store = transaction!.objectStore(self._dbInfo.storeName);
+            const storeName = requireStoreName(dbInfo);
+            const store = transaction!.objectStore(storeName);
             let actualValue = value;
 
             if (actualValue === null) {
@@ -643,7 +685,7 @@ async function setItem<T>(
 }
 
 function removeItem(
-  this: any,
+  this: IndexedDBDriverContext,
   key: string,
   callback?: Callback<void>
 ): Promise<void> {
@@ -661,7 +703,8 @@ function removeItem(
             if (err) return reject(err);
 
             try {
-              const store = transaction!.objectStore(self._dbInfo.storeName);
+              const storeName = requireStoreName(self._dbInfo);
+              const store = transaction!.objectStore(storeName);
               const req = store.delete(key);
 
               transaction!.oncomplete = () => resolve();
@@ -683,7 +726,10 @@ function removeItem(
   return promise;
 }
 
-function clear(this: any, callback?: Callback<void>): Promise<void> {
+function clear(
+  this: IndexedDBDriverContext,
+  callback?: Callback<void>
+): Promise<void> {
   const self = this;
 
   const promise = new Promise<void>((resolve, reject) => {
@@ -697,7 +743,8 @@ function clear(this: any, callback?: Callback<void>): Promise<void> {
             if (err) return reject(err);
 
             try {
-              const store = transaction!.objectStore(self._dbInfo.storeName);
+              const storeName = requireStoreName(self._dbInfo);
+              const store = transaction!.objectStore(storeName);
               const req = store.clear();
 
               transaction!.oncomplete = () => resolve();
@@ -718,7 +765,10 @@ function clear(this: any, callback?: Callback<void>): Promise<void> {
   return promise;
 }
 
-function length(this: any, callback?: Callback<number>): Promise<number> {
+function length(
+  this: IndexedDBDriverContext,
+  callback?: Callback<number>
+): Promise<number> {
   const self = this;
 
   const promise = new Promise<number>((resolve, reject) => {
@@ -732,7 +782,8 @@ function length(this: any, callback?: Callback<number>): Promise<number> {
             if (err) return reject(err);
 
             try {
-              const store = transaction!.objectStore(self._dbInfo.storeName);
+              const storeName = requireStoreName(self._dbInfo);
+              const store = transaction!.objectStore(storeName);
               const req = store.count();
 
               req.onsuccess = () => resolve(req.result);
@@ -751,7 +802,7 @@ function length(this: any, callback?: Callback<number>): Promise<number> {
 }
 
 function key(
-  this: any,
+  this: IndexedDBDriverContext,
   n: number,
   callback?: Callback<string>
 ): Promise<string | null> {
@@ -773,7 +824,8 @@ function key(
             if (err) return reject(err);
 
             try {
-              const store = transaction!.objectStore(self._dbInfo.storeName);
+              const storeName = requireStoreName(self._dbInfo);
+              const store = transaction!.objectStore(storeName);
               let advanced = false;
               const req = store.openKeyCursor();
 
@@ -810,7 +862,10 @@ function key(
   return promise;
 }
 
-function keys(this: any, callback?: Callback<string[]>): Promise<string[]> {
+function keys(
+  this: IndexedDBDriverContext,
+  callback?: Callback<string[]>
+): Promise<string[]> {
   const self = this;
 
   const promise = new Promise<string[]>((resolve, reject) => {
@@ -824,7 +879,8 @@ function keys(this: any, callback?: Callback<string[]>): Promise<string[]> {
             if (err) return reject(err);
 
             try {
-              const store = transaction!.objectStore(self._dbInfo.storeName);
+              const storeName = requireStoreName(self._dbInfo);
+              const store = transaction!.objectStore(storeName);
               const req = store.openKeyCursor();
               const keys: string[] = [];
 
@@ -853,7 +909,7 @@ function keys(this: any, callback?: Callback<string[]>): Promise<string[]> {
 }
 
 function dropInstance(
-  this: any,
+  this: IndexedDBDriverContext,
   options?: LocalSpaceConfig,
   callback?: Callback<void>
 ): Promise<void> {
@@ -879,22 +935,27 @@ function dropInstance(
     return promise;
   }
 
-  const isCurrentDb =
-    effectiveOptions.name === currentConfig.name && self._dbInfo?.db;
+  const targetName = effectiveOptions.name!;
+  const currentDb = self._dbInfo?.db ?? null;
+  const shouldReuseCurrentDb =
+    targetName === currentConfig.name && currentDb !== null;
 
-  const dbPromise: Promise<IDBDatabase> = isCurrentDb
-    ? Promise.resolve(self._dbInfo.db)
-    : getConnection(effectiveOptions as DbInfo, false).then((db) => {
-        const dbContext = dbContexts[effectiveOptions.name!];
-        if (dbContext) {
-          const forages = dbContext.forages;
-          dbContext.db = db;
-          for (const forage of forages) {
-            forage._dbInfo.db = db;
-          }
+  let dbPromise: Promise<IDBDatabase>;
+  if (shouldReuseCurrentDb && currentDb) {
+    dbPromise = Promise.resolve(currentDb);
+  } else {
+    dbPromise = getConnection(effectiveOptions as DbInfo, false).then((db) => {
+      const dbContext = dbContexts[targetName];
+      if (dbContext) {
+        const forages = dbContext.forages;
+        dbContext.db = db;
+        for (const forage of forages) {
+          forage._dbInfo.db = db;
         }
-        return db;
-      });
+      }
+      return db;
+    });
+  }
 
   let promise: Promise<void>;
 
@@ -903,7 +964,7 @@ function dropInstance(
     promise = dbPromise.then((db) => {
       deferReadiness(effectiveOptions as DbInfo);
 
-      const dbContext = dbContexts[effectiveOptions.name!];
+      const dbContext = dbContexts[targetName];
       const forages = dbContext?.forages || [];
 
       // Close all connections
@@ -919,7 +980,7 @@ function dropInstance(
           return reject(new Error('IndexedDB not available'));
         }
 
-        const req = idb.deleteDatabase(effectiveOptions.name!);
+        const req = idb.deleteDatabase(targetName);
 
         req.onerror = () => {
           reject(req.error || new Error('Failed to delete database'));
@@ -927,7 +988,7 @@ function dropInstance(
 
         req.onblocked = () => {
           console.warn(
-            `dropInstance blocked for database "${effectiveOptions.name}" until all open connections are closed`
+            `dropInstance blocked for database "${targetName}" until all open connections are closed`
           );
         };
 
@@ -964,7 +1025,7 @@ function dropInstance(
 
       deferReadiness(effectiveOptions as DbInfo);
 
-      const dbContext = dbContexts[effectiveOptions.name!];
+      const dbContext = dbContexts[targetName];
       const forages = dbContext?.forages || [];
 
       // Close all connections
@@ -981,7 +1042,7 @@ function dropInstance(
           return reject(new Error('IndexedDB not available'));
         }
 
-        const req = idb.open(effectiveOptions.name!, newVersion);
+        const req = idb.open(targetName, newVersion);
 
         req.onerror = () => {
           const db = req.result;

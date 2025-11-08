@@ -31,7 +31,7 @@ const toString = Object.prototype.toString;
 
 const getGlobalScope = (): typeof globalThis => {
   // source: https://github.com/Raynos/global/blob/master/window.js
-  let win: any;
+  let win: typeof globalThis;
   if (typeof window !== 'undefined') {
     win = window;
   } else if (typeof global !== 'undefined') {
@@ -39,7 +39,7 @@ const getGlobalScope = (): typeof globalThis => {
   } else if (typeof self !== 'undefined') {
     win = self;
   } else {
-    win = {};
+    win = {} as typeof globalThis;
   }
   return win;
 };

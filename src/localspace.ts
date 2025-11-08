@@ -346,9 +346,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
   async ready(callback?: Callback<void>): Promise<void> {
     const driverInitialization =
-      this._driverSet ??
-      this._pendingDriverInitialization ??
-      Promise.resolve();
+      this._driverSet ?? this._pendingDriverInitialization ?? Promise.resolve();
 
     const promise = driverInitialization.then(() => {
       if (this._ready === null) {
@@ -377,7 +375,10 @@ export class LocalSpace implements LocalSpaceInstance {
   ): Promise<void> {
     // Wait for driver initialization to complete before checking support
     // Skip waiting if this is being called from _runDefaultDriverSelection to avoid deadlock
-    if (this._pendingDriverInitialization && !this._isRunningDefaultDriverSelection) {
+    if (
+      this._pendingDriverInitialization &&
+      !this._isRunningDefaultDriverSelection
+    ) {
       await this._pendingDriverInitialization;
     }
 
