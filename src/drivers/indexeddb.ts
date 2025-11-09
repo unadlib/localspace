@@ -440,7 +440,9 @@ async function _initStorage(
   const dbInfo: DbInfo = { db: null };
 
   for (const i in config) {
-    (dbInfo as any)[i] = (config as any)[i];
+    Object.assign(dbInfo, {
+      [i]: config[i as keyof LocalSpaceConfig],
+    });
   }
 
   const dbName = requireDbName(dbInfo);
@@ -631,7 +633,7 @@ async function setItem<T>(
   const self = this;
   key = normalizeKey(key);
 
-  const promise = new Promise<T>(async (resolve, reject) => {
+  const promise = new Promise<T | null | undefined>(async (resolve, reject) => {
     let dbInfo: DbInfo;
     try {
       await self.ready();
@@ -653,17 +655,17 @@ async function setItem<T>(
           try {
             const storeName = requireStoreName(dbInfo);
             const store = transaction!.objectStore(storeName);
-            let actualValue = value;
+            let actualValue: T | null | undefined = value;
 
             if (actualValue === null) {
-              actualValue = undefined as any;
+              actualValue = undefined;
             }
 
             const req = store.put(actualValue, key);
 
             transaction!.oncomplete = () => {
               if (actualValue === undefined) {
-                actualValue = null as any;
+                actualValue = null;
               }
               resolve(actualValue);
             };
@@ -682,8 +684,8 @@ async function setItem<T>(
     }
   });
 
-  executeCallback(promise, callback);
-  return promise;
+  executeCallback(promise as Promise<T>, callback);
+  return promise as Promise<T>;
 }
 
 function removeItem(
