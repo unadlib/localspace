@@ -38,7 +38,7 @@
     "test:unit": "vitest run",
     "test:e2e": "yarn build && playwright test",
     "clean": "rimraf dist",
-    "type-check": "tsc --skipLibCheck --noEmit",
+    "check:type": "tsc --skipLibCheck --noEmit",
     "build": "yarn clean && tsc --skipLibCheck && yarn build:prod",
     "build:prod": "NODE_ENV=production rollup --config --bundleConfigAsCjs",
     "build:doc": "typedoc --plugin typedoc-plugin-markdown --out docs src/index.ts",
