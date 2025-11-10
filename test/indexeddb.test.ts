@@ -171,6 +171,20 @@ describe('IndexedDB driver tests', () => {
 
       expect(count).toBe(3);
     });
+
+    it('should normalize nullish values during interaction', async () => {
+      await instance.clear();
+      await instance.setItem('nullish-null', null);
+      await instance.setItem('nullish-undefined', undefined);
+
+      const observed: Record<string, any> = {};
+      await instance.iterate((value, key) => {
+        observed[key] = value;
+      });
+
+      expect(observed['nullish-null']).toBe(null);
+      expect(observed['nullish-undefined']).toBe(null);
+    });
   });
 
   describe('Callback support', () => {
@@ -299,7 +313,9 @@ describe('IndexedDB driver tests', () => {
 
     it('should handle multiple Blob types', async () => {
       const textBlob = new Blob(['text'], { type: 'text/plain' });
-      const jsonBlob = new Blob(['{"key":"value"}'], { type: 'application/json' });
+      const jsonBlob = new Blob(['{"key":"value"}'], {
+        type: 'application/json',
+      });
 
       await instance.setItem('textBlob', textBlob);
       await instance.setItem('jsonBlob', jsonBlob);
@@ -327,7 +343,9 @@ describe('IndexedDB driver tests', () => {
 
   describe('Key normalization', () => {
     it('should convert non-string keys to strings', async () => {
-      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const consoleWarnSpy = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => {});
 
       await instance.setItem(123 as any, 'value');
       const value = await instance.getItem('123');
@@ -549,7 +567,9 @@ describe('IndexedDB driver tests', () => {
 
     it('should handle downgrade attempts', async () => {
       const dbName = `downgrade-test-${Math.random().toString(36).slice(2)}`;
-      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const consoleWarnSpy = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => {});
 
       // Create first instance with version 2.0
       const instance1 = localspace.createInstance({
