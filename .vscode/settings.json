@@ -3,6 +3,7 @@
         "behaviour",
         "INDEXEDDB",
         "keyvaluepairs",
-        "localspace"
+        "localspace",
+        "openreq"
     ]
 }

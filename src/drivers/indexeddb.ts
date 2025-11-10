@@ -592,6 +592,9 @@ function iterate<T, U>(
                 const cursor = req.result;
                 if (cursor) {
                   let value = cursor.value;
+                  if (value === undefined) {
+                    value = null;
+                  }
                   if (isEncodedBlob(value)) {
                     value = decodeBlob(value);
                   }
@@ -657,16 +660,13 @@ async function setItem<T>(
             const store = transaction!.objectStore(storeName);
             let actualValue: T | null | undefined = value;
 
-            if (actualValue === null) {
-              actualValue = undefined;
+            if (actualValue === undefined) {
+              actualValue = null;
             }
 
             const req = store.put(actualValue, key);
 
             transaction!.oncomplete = () => {
-              if (actualValue === undefined) {
-                actualValue = null;
-              }
               resolve(actualValue);
             };
 
@@ -1078,8 +1078,6 @@ function dropInstance(
               advanceReadiness(forage._dbInfo);
             }
           }
-          // Close the database after use
-          db.close();
         })
         .catch((err) => {
           if (dbContext) {
