@@ -2,6 +2,8 @@ import type {
   Callback,
   CompatibilityErrorCallback,
   CompatibilitySuccessCallback,
+  BatchItems,
+  KeyValuePair,
 } from '../types';
 
 /**
@@ -179,4 +181,27 @@ export function createBlob(
     }
     return builder.getBlob(properties?.type);
   }
+}
+
+/**
+ * Normalize batch inputs (array/map/object) into a flat list of key/value pairs
+ */
+export function normalizeBatchEntries<T>(items: BatchItems<T>): KeyValuePair<T>[] {
+  if (Array.isArray(items)) {
+    return items.map(({ key, value }) => ({ key: normalizeKey(key), value }));
+  }
+
+  if (items instanceof Map) {
+    const normalized: KeyValuePair<T>[] = [];
+    items.forEach((value, key) => {
+      normalized.push({ key: normalizeKey(key), value });
+    });
+    return normalized;
+  }
+
+  const normalized: KeyValuePair<T>[] = [];
+  for (const key of Object.keys(items)) {
+    normalized.push({ key: normalizeKey(key), value: items[key] });
+  }
+  return normalized;
 }

@@ -9,6 +9,8 @@ import type {
   Serializer,
   CompatibilityErrorCallback,
   CompatibilitySuccessCallback,
+  BatchItems,
+  BatchResponse,
 } from './types';
 import {
   extend,
@@ -34,17 +36,25 @@ const DefaultDriverOrder = [
   DefaultDrivers.LOCALSTORAGE._driver,
 ];
 
-const OptionalDriverMethods = ['dropInstance'];
+const OptionalDriverMethods = [
+  'dropInstance',
+  'setItems',
+  'getItems',
+  'removeItems',
+];
 
 const LibraryMethods = [
   'clear',
   'getItem',
+  'getItems',
   'iterate',
   'key',
   'keys',
   'length',
   'removeItem',
+  'removeItems',
   'setItem',
+  'setItems',
 ].concat(OptionalDriverMethods);
 
 const DefaultConfig: LocalSpaceConfig = {
@@ -567,6 +577,13 @@ export class LocalSpace implements LocalSpaceInstance {
     throw new Error('Driver not initialized');
   }
 
+  async getItems<T>(
+    keys: string[],
+    callback?: Callback<BatchResponse<T>>
+  ): Promise<BatchResponse<T>> {
+    throw new Error('Driver not initialized');
+  }
+
   async getItem<T>(key: string, callback?: Callback<T>): Promise<T | null> {
     throw new Error('Driver not initialized');
   }
@@ -575,7 +592,18 @@ export class LocalSpace implements LocalSpaceInstance {
     throw new Error('Driver not initialized');
   }
 
+  async setItems<T>(
+    entries: BatchItems<T>,
+    callback?: Callback<BatchResponse<T>>
+  ): Promise<BatchResponse<T>> {
+    throw new Error('Driver not initialized');
+  }
+
   async removeItem(key: string, callback?: Callback<void>): Promise<void> {
+    throw new Error('Driver not initialized');
+  }
+
+  async removeItems(keys: string[], callback?: Callback<void>): Promise<void> {
     throw new Error('Driver not initialized');
   }
 

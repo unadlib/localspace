@@ -5,8 +5,14 @@ import type {
   Callback,
   Serializer,
   LocalSpaceInstance,
+  BatchItems,
+  BatchResponse,
 } from '../types';
-import { executeCallback, normalizeKey } from '../utils/helpers';
+import {
+  executeCallback,
+  normalizeBatchEntries,
+  normalizeKey,
+} from '../utils/helpers';
 import serializer from '../utils/serializer';
 
 type LocalStorageDbInfo = DbInfo & {
@@ -243,6 +249,24 @@ function removeItem(
   return promise;
 }
 
+function removeItems(
+  this: LocalStorageDriverContext,
+  keys: string[],
+  callback?: Callback<void>
+): Promise<void> {
+  const normalizedKeys = keys.map((key) => normalizeKey(key));
+
+  const promise = this.ready().then(() => {
+    const dbInfo = this._dbInfo;
+    for (const key of normalizedKeys) {
+      localStorage.removeItem(dbInfo.keyPrefix + key);
+    }
+  });
+
+  executeCallback(promise, callback);
+  return promise;
+}
+
 async function setItem<T>(
   this: LocalStorageDriverContext,
   key: string,
@@ -272,6 +296,67 @@ async function setItem<T>(
       }
       throw error;
     }
+  });
+
+  executeCallback(promise, callback);
+  return promise;
+}
+
+function setItems<T>(
+  this: LocalStorageDriverContext,
+  items: BatchItems<T>,
+  callback?: Callback<BatchResponse<T>>
+): Promise<BatchResponse<T>> {
+  const normalized = normalizeBatchEntries(items);
+
+  const promise = this.ready().then(async () => {
+    const dbInfo = this._dbInfo;
+    const stored: BatchResponse<T> = [];
+
+    for (const entry of normalized) {
+      const normalizedValue = (entry.value === undefined
+        ? null
+        : entry.value) as T;
+      const serializedValue = await dbInfo.serializer.serialize(
+        normalizedValue
+      );
+
+      localStorage.setItem(
+        dbInfo.keyPrefix + entry.key,
+        serializedValue
+      );
+      stored.push({ key: entry.key, value: normalizedValue });
+    }
+
+    return stored;
+  });
+
+  executeCallback(promise, callback);
+  return promise;
+}
+
+function getItems<T>(
+  this: LocalStorageDriverContext,
+  keys: string[],
+  callback?: Callback<BatchResponse<T>>
+): Promise<BatchResponse<T>> {
+  const normalizedKeys = keys.map((key) => normalizeKey(key));
+
+  const promise = this.ready().then(() => {
+    const dbInfo = this._dbInfo;
+    const results: BatchResponse<T> = [];
+
+    for (const key of normalizedKeys) {
+      const raw = localStorage.getItem(dbInfo.keyPrefix + key);
+      if (raw === null) {
+        results.push({ key, value: null });
+        continue;
+      }
+      const value = dbInfo.serializer.deserialize(raw) as T;
+      results.push({ key, value });
+    }
+
+    return results;
   });
 
   executeCallback(promise, callback);
@@ -317,8 +402,11 @@ const localStorageWrapper: Driver = {
   _support: isLocalStorageValid(),
   iterate,
   getItem,
+  getItems,
   setItem,
+  setItems,
   removeItem,
+  removeItems,
   clear,
   length,
   key,

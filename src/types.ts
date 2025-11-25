@@ -21,6 +21,18 @@ export interface LocalSpaceConfig {
    * Description of the database
    */
   description?: string;
+  /**
+   * Preferred durability hint for IndexedDB readwrite transactions.
+   * Browsers default to 'relaxed'; set to 'strict' for migrations or
+   * other flows that must flush before continuing.
+   */
+  durability?: IDBTransactionOptions['durability'];
+
+  /**
+   * Optional Storage Buckets configuration (when supported by the browser).
+   * When provided, IndexedDB connections will be opened from the bucket.
+   */
+  bucket?: StorageBucketConfig;
 
   /**
    * Driver(s) to use (string or array of strings)
@@ -96,6 +108,30 @@ export interface Driver {
   removeItem(key: string, callback?: Callback<void>): Promise<void>;
 
   /**
+   * Batch set multiple items atomically when supported by the driver.
+   */
+  setItems<T>(
+    entries: BatchItems<T>,
+    callback?: Callback<BatchResponse<T>>
+  ): Promise<BatchResponse<T>>;
+
+  /**
+   * Batch get multiple items in order.
+   */
+  getItems<T>(
+    keys: string[],
+    callback?: Callback<BatchResponse<T>>
+  ): Promise<BatchResponse<T>>;
+
+  /**
+   * Batch remove multiple items.
+   */
+  removeItems(
+    keys: string[],
+    callback?: Callback<void>
+  ): Promise<void>;
+
+  /**
    * Clear all items
    */
   clear(callback?: Callback<void>): Promise<void>;
@@ -155,6 +191,7 @@ export interface DbInfo extends LocalSpaceConfig {
   db?: IDBDatabase | null;
   serializer?: Serializer;
   keyPrefix?: string;
+  idbFactory?: IDBFactory | null;
 }
 
 /**
@@ -257,6 +294,30 @@ export interface LocalSpaceInstance {
   clear(callback?: Callback<void>): Promise<void>;
 
   /**
+   * Batch set items
+   */
+  setItems<T>(
+    entries: BatchItems<T>,
+    callback?: Callback<BatchResponse<T>>
+  ): Promise<BatchResponse<T>>;
+
+  /**
+   * Batch get items in order
+   */
+  getItems<T>(
+    keys: string[],
+    callback?: Callback<BatchResponse<T>>
+  ): Promise<BatchResponse<T>>;
+
+  /**
+   * Batch remove items
+   */
+  removeItems(
+    keys: string[],
+    callback?: Callback<void>
+  ): Promise<void>;
+
+  /**
    * Get length
    */
   length(callback?: Callback<number>): Promise<number>;
@@ -295,3 +356,24 @@ export interface LocalSpaceInstance {
   _getSupportedDrivers?(drivers: string[]): string[];
   _wrapLibraryMethodsWithReady?(): void;
 }
+
+/**
+ * Storage Buckets options (when supported)
+ */
+export interface StorageBucketConfig {
+  name: string;
+  durability?: 'relaxed' | 'strict';
+  persisted?: boolean;
+}
+
+export interface KeyValuePair<T> {
+  key: string;
+  value: T;
+}
+
+export type BatchItems<T> =
+  | Array<KeyValuePair<T>>
+  | Map<string, T>
+  | Record<string, T>;
+
+export type BatchResponse<T> = Array<{ key: string; value: T | null }>;

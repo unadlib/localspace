@@ -104,4 +104,105 @@ test.describe('IndexedDB benchmark', () => {
     expect(metrics.getMs).toBeGreaterThan(0);
     expect(metrics.iterateMs).toBeGreaterThan(0);
   });
+
+  test('compares batch APIs against single-item loops', async ({ page }) => {
+    await ensureLocalspaceReady(page);
+
+    const metrics = await page.evaluate(async (config) => {
+      const localspace = (window as any).localspace;
+      if (!localspace.supports(localspace.INDEXEDDB)) {
+        throw new Error('IndexedDB driver not supported in browser');
+      }
+
+      const storeName = `benchmark-batch-${Date.now()}-${Math.random()
+        .toString(16)
+        .slice(2, 8)}`;
+      const instance = localspace.createInstance({
+        name: 'playwright-benchmark',
+        storeName,
+      });
+
+      await instance.setDriver([instance.INDEXEDDB]);
+      await instance.ready();
+      await instance.clear();
+
+      const payload = 'x'.repeat(config.payloadBytes);
+      const items = Array.from({ length: config.itemCount }, (_, index) => ({
+        key: `key-${index}`,
+        value: `${payload}-${index}`,
+      }));
+      const keys = items.map((item) => item.key);
+
+      // Baseline single-item loops
+      const setSingleStart = performance.now();
+      for (const item of items) {
+        await instance.setItem(item.key, item.value);
+      }
+      const setSingleMs = performance.now() - setSingleStart;
+
+      const getSingleStart = performance.now();
+      for (const item of items) {
+        await instance.getItem(item.key);
+      }
+      const getSingleMs = performance.now() - getSingleStart;
+
+      const removeSingleStart = performance.now();
+      for (const key of keys) {
+        await instance.removeItem(key);
+      }
+      const removeSingleMs = performance.now() - removeSingleStart;
+
+      // Batch APIs
+      const setBatchStart = performance.now();
+      const setBatchResult = await instance.setItems(items);
+      const setBatchMs = performance.now() - setBatchStart;
+
+      const getBatchStart = performance.now();
+      const getBatchResult = await instance.getItems(keys);
+      const getBatchMs = performance.now() - getBatchStart;
+
+      const removeBatchStart = performance.now();
+      await instance.removeItems(keys);
+      const removeBatchMs = performance.now() - removeBatchStart;
+
+      await instance.dropInstance();
+
+      return {
+        driver: instance.driver(),
+        itemCount: config.itemCount,
+        payloadBytes: config.payloadBytes,
+        set: { singleMs: setSingleMs, batchMs: setBatchMs },
+        get: { singleMs: getSingleMs, batchMs: getBatchMs },
+        remove: { singleMs: removeSingleMs, batchMs: removeBatchMs },
+        setBatchCount: setBatchResult.length,
+        getBatchCount: getBatchResult.length,
+        setSpeedup: setSingleMs / setBatchMs,
+        getSpeedup: getSingleMs / getBatchMs,
+        removeSpeedup: removeSingleMs / removeBatchMs,
+      };
+    }, BENCHMARK_CONFIG);
+
+    const format = (label: string, singleMs: number, batchMs: number, speedup: number) =>
+      `${label}: single ${singleMs.toFixed(2)}ms vs batch ${batchMs.toFixed(
+        2,
+      )}ms (x${speedup.toFixed(2)})`;
+
+    console.log(
+      `[IndexedDB] Batch vs single (${metrics.itemCount} items x ${metrics.payloadBytes}B, driver: ${metrics.driver})`,
+    );
+    console.log(format('set', metrics.set.singleMs, metrics.set.batchMs, metrics.setSpeedup));
+    console.log(format('get', metrics.get.singleMs, metrics.get.batchMs, metrics.getSpeedup));
+    console.log(
+      format('remove', metrics.remove.singleMs, metrics.remove.batchMs, metrics.removeSpeedup),
+    );
+
+    expect(metrics.driver).toBe('asyncStorage');
+    expect(metrics.setBatchCount).toBe(metrics.itemCount);
+    expect(metrics.getBatchCount).toBe(metrics.itemCount);
+    expect(metrics.set.batchMs).toBeGreaterThan(0);
+    expect(metrics.get.batchMs).toBeGreaterThan(0);
+    expect(metrics.remove.batchMs).toBeGreaterThan(0);
+    expect(metrics.setSpeedup).toBeGreaterThan(1);
+    expect(metrics.removeSpeedup).toBeGreaterThan(1);
+  });
 });

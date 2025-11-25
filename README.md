@@ -51,9 +51,9 @@ localspace is built on a foundation designed for growth. Here's what's planned:
 - [x] TypeScript-first implementation
 - [x] Comprehensive test coverage
 - [x] Modern build pipeline (ES modules, CommonJS, UMD)
+- [x] Batch operations (`setItems()`, `getItems()`, `removeItems()`) for higher throughput
 
 ### TODO
-- [ ] **Batch operations** - `setItems()`, `getItems()`, `removeItems()` for better performance
 - [ ] **Improved error handling** - Structured error types with detailed context
 - [ ] **Performance optimizations** - Connection pooling, transaction batching
 - [ ] **Plugin system** - Middleware architecture for cross-cutting concerns
@@ -123,6 +123,26 @@ localspace.getItem('user', (error, value) => {
 });
 ```
 
+### Boost throughput with batch operations
+Use the batch APIs to group writes and reads into single transactions for IndexedDB and localStorage. This reduces commit overhead and benefits from Chrome’s relaxed durability defaults (see below).
+
+```ts
+const items = [
+  { key: 'user:1', value: { name: 'Ada' } },
+  { key: 'user:2', value: { name: 'Lin' } },
+];
+
+// Single transaction write
+await localspace.setItems(items);
+
+// Ordered bulk read
+const result = await localspace.getItems(items.map((item) => item.key));
+console.log(result); // [{ key: 'user:1', value: {…} }, { key: 'user:2', value: {…} }]
+
+// Single transaction delete
+await localspace.removeItems(items.map((item) => item.key));
+```
+
 ### Configure isolated stores for clear data boundaries
 Create independent instances when you want to separate cache layers or product features. Each instance can override defaults like `name`, `storeName`, and driver order.
 
@@ -144,6 +164,20 @@ await localspace.setDriver([localspace.INDEXEDDB, localspace.LOCALSTORAGE]);
 if (!localspace.supports(localspace.INDEXEDDB)) {
   console.warn('IndexedDB unavailable, using localStorage wrapper.');
 }
+
+// Hint IndexedDB durability (Chrome defaults to "relaxed" from 121+)
+await localspace.setDriver([localspace.INDEXEDDB]);
+await localspace.ready();
+// Global durability hint for this instance
+localspace.config({ durability: 'strict' }); // or omit to stay relaxed for speed
+
+// Use Storage Buckets (Chromium 122+) to isolate data and hints
+const bucketed = localspace.createInstance({
+  name: 'mail-cache',
+  storeName: 'drafts',
+  bucket: { name: 'drafts', durability: 'strict', persisted: true },
+});
+await bucketed.setDriver([bucketed.INDEXEDDB]);
 ```
 
 **Tip:** Use `defineDriver()` and `getDriver()` to register custom drivers that match the localForage interface.
@@ -196,6 +230,11 @@ localspace.setItem('key', 'value', (err, value) => {
   }
 });
 ```
+
+## Performance notes
+- **Batch APIs outperform loops:** Playwright benchmark (`test/playwright/benchmark.spec.ts`) on 500 items x 256B showed `setItems()` ~6x faster and `getItems()` ~7.7x faster than per-item loops, with `removeItems()` ~2.8x faster (Chromium, relaxed durability).
+- **IndexedDB durability defaults:** Chrome 121+ uses relaxed durability by default; keep it for speed or set `durability: 'strict'` in `config` for migration-style writes.
+- **Storage Buckets (Chromium 122+):** supply a `bucket` option to isolate critical data and hint durability/persistence per bucket.
 
 When `compatibilityMode` is off, driver setup methods also use Node-style callbacks. Promises are recommended for all new code.
 

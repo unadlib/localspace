@@ -4,8 +4,16 @@ import type {
   LocalSpaceConfig,
   Callback,
   LocalSpaceInstance,
+  BatchItems,
+  BatchResponse,
+  KeyValuePair,
 } from '../types';
-import { executeCallback, normalizeKey, createBlob } from '../utils/helpers';
+import {
+  executeCallback,
+  normalizeBatchEntries,
+  normalizeKey,
+  createBlob,
+} from '../utils/helpers';
 import serializer from '../utils/serializer';
 
 type IndexedDBDriverContext = LocalSpaceInstance &
@@ -51,7 +59,7 @@ interface DeferredOperation {
   reject: (error: Error) => void;
 }
 
-function getIDB(): IDBFactory | null {
+function getDefaultIDB(): IDBFactory | null {
   if (typeof indexedDB !== 'undefined') {
     return indexedDB;
   }
@@ -68,9 +76,16 @@ function getIDB(): IDBFactory | null {
   return null;
 }
 
+function getIDB(dbInfo?: DbInfo): IDBFactory | null {
+  if (dbInfo?.idbFactory) {
+    return dbInfo.idbFactory;
+  }
+  return getDefaultIDB();
+}
+
 function isIndexedDBValid(): boolean | Promise<boolean> {
   try {
-    const idb = getIDB();
+    const idb = getDefaultIDB();
     if (!idb) return false;
 
     // Check if IndexedDB is available and functional
@@ -96,6 +111,33 @@ function isIndexedDBValid(): boolean | Promise<boolean> {
   } catch (e) {
     return false;
   }
+}
+
+async function resolveIdbFactory(
+  config: LocalSpaceConfig
+): Promise<IDBFactory | null> {
+  if (config.bucket?.name) {
+    const nav =
+      typeof navigator !== 'undefined' ? (navigator as Navigator) : undefined;
+    const buckets = nav?.storageBuckets;
+
+    if (buckets && typeof buckets.open === 'function') {
+      try {
+        const bucket = await buckets.open(config.bucket.name, {
+          durability: config.bucket.durability,
+          persisted: config.bucket.persisted,
+        });
+        return bucket.indexedDB ?? null;
+      } catch (error) {
+        console.warn(
+          `Failed to open storage bucket "${config.bucket.name}", falling back to default bucket.`,
+          error
+        );
+      }
+    }
+  }
+
+  return getDefaultIDB();
 }
 
 function checkBlobSupport(db: IDBDatabase): Promise<boolean> {
@@ -219,8 +261,13 @@ function requireStoreName(dbInfo: DbInfo): string {
   throw new Error('IndexedDB storeName is not configured.');
 }
 
+function getDbContextKey(dbInfo: DbInfo): string {
+  const dbName = requireDbName(dbInfo);
+  return dbInfo.bucket?.name ? `${dbInfo.bucket.name}::${dbName}` : dbName;
+}
+
 function deferReadiness(dbInfo: DbInfo): void {
-  const dbContext = dbContexts[dbInfo.name!];
+  const dbContext = dbContexts[getDbContextKey(dbInfo)];
   const deferredOperation: DeferredOperation = {
     promise: null as any,
     resolve: null as any,
@@ -242,7 +289,7 @@ function deferReadiness(dbInfo: DbInfo): void {
 }
 
 function advanceReadiness(dbInfo: DbInfo): Promise<void> | undefined {
-  const dbContext = dbContexts[dbInfo.name!];
+  const dbContext = dbContexts[getDbContextKey(dbInfo)];
   const deferredOperation = dbContext.deferredOperations.pop();
 
   if (deferredOperation) {
@@ -255,7 +302,7 @@ function rejectReadiness(
   dbInfo: DbInfo,
   err: Error
 ): Promise<void> | undefined {
-  const dbContext = dbContexts[dbInfo.name!];
+  const dbContext = dbContexts[getDbContextKey(dbInfo)];
   const deferredOperation = dbContext.deferredOperations.pop();
 
   if (deferredOperation) {
@@ -269,12 +316,13 @@ function getConnection(
   upgradeNeeded: boolean
 ): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const idb = getIDB();
+    const idb = getIDB(dbInfo);
     if (!idb) {
       return reject(new Error('IndexedDB not available'));
     }
 
-    dbContexts[dbInfo.name!] = dbContexts[dbInfo.name!] || createDbContext();
+    const contextKey = getDbContextKey(dbInfo);
+    dbContexts[contextKey] = dbContexts[contextKey] || createDbContext();
 
     if (dbInfo.db) {
       if (upgradeNeeded) {
@@ -356,6 +404,15 @@ function isUpgradeNeeded(dbInfo: DbInfo, defaultVersion: number): boolean {
   return false;
 }
 
+function getTransactionOptions(
+  dbInfo: DbInfo,
+  mode: IDBTransactionMode
+): IDBTransactionOptions | undefined {
+  if (mode === READ_WRITE && dbInfo.durability) {
+    return { durability: dbInfo.durability };
+  }
+}
+
 function createTransaction(
   dbInfo: DbInfo,
   mode: IDBTransactionMode,
@@ -363,7 +420,10 @@ function createTransaction(
   retries: number = 1
 ): void {
   try {
-    const tx = dbInfo.db!.transaction(dbInfo.storeName!, mode);
+    const txOptions = getTransactionOptions(dbInfo, mode);
+    const tx = txOptions
+      ? dbInfo.db!.transaction(dbInfo.storeName!, mode, txOptions)
+      : dbInfo.db!.transaction(dbInfo.storeName!, mode);
     callback(null, tx);
   } catch (err: any) {
     if (
@@ -401,7 +461,8 @@ function createTransaction(
 function tryReconnect(dbInfo: DbInfo): Promise<void> {
   deferReadiness(dbInfo);
 
-  const dbContext = dbContexts[dbInfo.name!];
+  const contextKey = getDbContextKey(dbInfo);
+  const dbContext = dbContexts[contextKey];
   const forages = dbContext.forages;
 
   for (const forage of forages) {
@@ -445,11 +506,17 @@ async function _initStorage(
     });
   }
 
+  dbInfo.idbFactory = await resolveIdbFactory(config);
+  if (!dbInfo.idbFactory) {
+    throw new Error('IndexedDB not available');
+  }
+
   const dbName = requireDbName(dbInfo);
-  let dbContext = dbContexts[dbName];
+  const contextKey = getDbContextKey(dbInfo);
+  let dbContext = dbContexts[contextKey];
 
   if (!dbContext) {
-    dbContext = dbContexts[dbName] = createDbContext();
+    dbContext = dbContexts[contextKey] = createDbContext();
   }
 
   dbContext.forages.push(self);
@@ -506,10 +573,12 @@ function fullyReady(
 
   const initReady = (self._initReady ?? self.ready).bind(self);
   const promise = initReady().then(() => {
-    const dbName = requireDbName(self._dbInfo);
-    const dbContext = dbContexts[dbName];
-    if (dbContext && dbContext.dbReady) {
-      return dbContext.dbReady;
+    if (self._dbInfo) {
+      const contextKey = getDbContextKey(self._dbInfo);
+      const dbContext = dbContexts[contextKey];
+      if (dbContext && dbContext.dbReady) {
+        return dbContext.dbReady;
+      }
     }
   });
 
@@ -562,6 +631,80 @@ function getItem<T>(
   });
 
   executeCallback(promise, callback as Callback<T | null>);
+  return promise;
+}
+
+function getItems<T>(
+  this: IndexedDBDriverContext,
+  keys: string[],
+  callback?: Callback<BatchResponse<T>>
+): Promise<BatchResponse<T>> {
+  const self = this;
+  const normalizedKeys = keys.map((key) => normalizeKey(key));
+
+  const promise = new Promise<BatchResponse<T>>((resolve, reject) => {
+    self
+      .ready()
+      .then(() => {
+        if (normalizedKeys.length === 0) {
+          resolve([]);
+          return;
+        }
+
+        createTransaction(
+          self._dbInfo,
+          READ_ONLY,
+          (err: Error | null, transaction?: IDBTransaction) => {
+            if (err) return reject(err);
+
+            try {
+              const storeName = requireStoreName(self._dbInfo);
+              const store = transaction!.objectStore(storeName);
+              const results: BatchResponse<T> = new Array(
+                normalizedKeys.length
+              );
+              let remaining = normalizedKeys.length;
+              let requestError: Error | null = null;
+
+              normalizedKeys.forEach((key, index) => {
+                const req = store.get(key);
+                req.onsuccess = () => {
+                  let value = req.result;
+                  if (value === undefined) {
+                    value = null;
+                  }
+                  if (isEncodedBlob(value)) {
+                    value = decodeBlob(value);
+                  }
+                  results[index] = { key, value };
+                  remaining -= 1;
+                  if (remaining === 0) {
+                    resolve(results);
+                  }
+                };
+                req.onerror = () => {
+                  requestError =
+                    req.error || new Error(`Failed to get "${key}"`);
+                };
+              });
+
+              transaction!.onabort = transaction!.onerror = () => {
+                reject(
+                  requestError ||
+                    transaction!.error ||
+                    new Error('Failed to get items transaction')
+                );
+              };
+            } catch (e) {
+              reject(e);
+            }
+          }
+        );
+      })
+      .catch(reject);
+  });
+
+  executeCallback(promise, callback);
   return promise;
 }
 
@@ -621,6 +764,91 @@ function iterate<T, U>(
         );
       })
       .catch(reject);
+  });
+
+  executeCallback(promise, callback);
+  return promise;
+}
+
+function setItems<T>(
+  this: IndexedDBDriverContext,
+  items: BatchItems<T>,
+  callback?: Callback<BatchResponse<T>>
+): Promise<BatchResponse<T>> {
+  const self = this;
+  const normalized = normalizeBatchEntries(items);
+
+  const promise = new Promise<BatchResponse<T>>(async (resolve, reject) => {
+    try {
+      await self.ready();
+      const dbInfo = self._dbInfo;
+
+      let blobSupport: boolean | undefined;
+      const payloads: BatchResponse<T> = [];
+
+      const needsBlobCheck = normalized.some(
+        (entry) => toString.call(entry.value) === '[object Blob]'
+      );
+
+      if (needsBlobCheck) {
+        blobSupport = await checkBlobSupport(dbInfo.db!);
+      }
+
+      for (const entry of normalized) {
+        let value: T | null | undefined = entry.value;
+        if (value === undefined) {
+          value = null;
+        }
+
+        if (toString.call(entry.value) === '[object Blob]') {
+          const canStoreBlob =
+            typeof blobSupport === 'boolean'
+              ? blobSupport
+              : await checkBlobSupport(dbInfo.db!);
+          if (!canStoreBlob) {
+            value = (await encodeBlob(entry.value as unknown as Blob)) as T;
+          }
+        }
+
+        payloads.push({ key: entry.key, value });
+      }
+
+      createTransaction(
+        dbInfo,
+        READ_WRITE,
+        (err: Error | null, transaction?: IDBTransaction) => {
+          if (err) return reject(err);
+
+          try {
+            const storeName = requireStoreName(dbInfo);
+            const store = transaction!.objectStore(storeName);
+            let requestError: Error | null = null;
+
+            for (const entry of payloads) {
+              const req = store.put(entry.value, entry.key);
+              req.onerror = () => {
+                requestError =
+                  req.error ||
+                  new Error(`Failed to set "${String(entry.key)}"`);
+              };
+            }
+
+            transaction!.oncomplete = () => resolve(payloads);
+            transaction!.onabort = transaction!.onerror = () => {
+              reject(
+                requestError ||
+                  transaction!.error ||
+                  new Error('Failed to set items transaction')
+              );
+            };
+          } catch (e) {
+            reject(e);
+          }
+        }
+      );
+    } catch (err) {
+      reject(err as Error);
+    }
   });
 
   executeCallback(promise, callback);
@@ -716,6 +944,63 @@ function removeItem(
               transaction!.onabort = () => {
                 const err = req.error || transaction!.error;
                 reject(err);
+              };
+            } catch (e) {
+              reject(e);
+            }
+          }
+        );
+      })
+      .catch(reject);
+  });
+
+  executeCallback(promise, callback);
+  return promise;
+}
+
+function removeItems(
+  this: IndexedDBDriverContext,
+  keys: string[],
+  callback?: Callback<void>
+): Promise<void> {
+  const self = this;
+  const normalizedKeys = keys.map((key) => normalizeKey(key));
+
+  const promise = new Promise<void>((resolve, reject) => {
+    self
+      .ready()
+      .then(() => {
+        if (normalizedKeys.length === 0) {
+          resolve();
+          return;
+        }
+
+        createTransaction(
+          self._dbInfo,
+          READ_WRITE,
+          (err: Error | null, transaction?: IDBTransaction) => {
+            if (err) return reject(err);
+
+            try {
+              const storeName = requireStoreName(self._dbInfo);
+              const store = transaction!.objectStore(storeName);
+              let requestError: Error | null = null;
+
+              for (const key of normalizedKeys) {
+                const req = store.delete(key);
+                req.onerror = () => {
+                  requestError =
+                    req.error || new Error(`Failed to remove "${key}"`);
+                };
+              }
+
+              transaction!.oncomplete = () => resolve();
+              transaction!.onabort = transaction!.onerror = () => {
+                reject(
+                  requestError ||
+                    transaction!.error ||
+                    new Error('Failed to remove items transaction')
+                );
               };
             } catch (e) {
               reject(e);
@@ -939,17 +1224,26 @@ function dropInstance(
     return promise;
   }
 
+  const dropDbInfo: DbInfo = {
+    ...(effectiveOptions as DbInfo),
+    idbFactory: self._dbInfo?.idbFactory ?? undefined,
+  };
+  if (!dropDbInfo.bucket && currentConfig.bucket) {
+    dropDbInfo.bucket = currentConfig.bucket;
+  }
+
   const targetName = effectiveOptions.name!;
   const currentDb = self._dbInfo?.db ?? null;
   const shouldReuseCurrentDb =
     targetName === currentConfig.name && currentDb !== null;
+  const contextKey = getDbContextKey(dropDbInfo);
 
   let dbPromise: Promise<IDBDatabase>;
   if (shouldReuseCurrentDb && currentDb) {
     dbPromise = Promise.resolve(currentDb);
   } else {
-    dbPromise = getConnection(effectiveOptions as DbInfo, false).then((db) => {
-      const dbContext = dbContexts[targetName];
+    dbPromise = getConnection(dropDbInfo, false).then((db) => {
+      const dbContext = dbContexts[contextKey];
       if (dbContext) {
         const forages = dbContext.forages;
         dbContext.db = db;
@@ -966,9 +1260,9 @@ function dropInstance(
   // Case 1: Drop entire database (no storeName specified)
   if (!effectiveOptions.storeName) {
     promise = dbPromise.then((db) => {
-      deferReadiness(effectiveOptions as DbInfo);
+      deferReadiness(dropDbInfo);
 
-      const dbContext = dbContexts[targetName];
+      const dbContext = dbContexts[contextKey];
       const forages = dbContext?.forages || [];
 
       // Close all connections
@@ -979,7 +1273,7 @@ function dropInstance(
 
       // Delete the entire database
       const dropDBPromise = new Promise<void>((resolve, reject) => {
-        const idb = getIDB();
+        const idb = getIDB(dropDbInfo);
         if (!idb) {
           return reject(new Error('IndexedDB not available'));
         }
@@ -1012,7 +1306,7 @@ function dropInstance(
         })
         .catch((err) => {
           if (dbContext) {
-            rejectReadiness(effectiveOptions as DbInfo, err);
+            rejectReadiness(dropDbInfo, err);
           }
           throw err;
         });
@@ -1027,9 +1321,9 @@ function dropInstance(
 
       const newVersion = db.version + 1;
 
-      deferReadiness(effectiveOptions as DbInfo);
+      deferReadiness(dropDbInfo);
 
-      const dbContext = dbContexts[targetName];
+      const dbContext = dbContexts[contextKey];
       const forages = dbContext?.forages || [];
 
       // Close all connections
@@ -1041,7 +1335,7 @@ function dropInstance(
 
       // Delete the object store by upgrading the database
       const dropObjectPromise = new Promise<IDBDatabase>((resolve, reject) => {
-        const idb = getIDB();
+        const idb = getIDB(dropDbInfo);
         if (!idb) {
           return reject(new Error('IndexedDB not available'));
         }
@@ -1098,8 +1392,11 @@ const asyncStorage: Driver = {
   _support: (() => isIndexedDBValid()) as () => Promise<boolean>,
   iterate,
   getItem,
+  getItems,
   setItem,
+  setItems,
   removeItem,
+  removeItems,
   clear,
   length,
   key,
