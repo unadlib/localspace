@@ -430,11 +430,13 @@ const localStorageWrapper: Driver = {
     callback?: Callback<T>
   ): Promise<T> {
     const scope: TransactionScope = {
-      get: (key) => getItem.call(this, key),
-      set: (key, value) => setItem.call(this, key, value),
-      remove: (key) => removeItem.call(this, key),
+      get: <V>(key: string) => getItem.call(this, key) as Promise<V | null>,
+      set: <V>(key: string, value: V) =>
+        setItem.call(this, key, value) as Promise<V>,
+      remove: (key: string) => removeItem.call(this, key),
       keys: () => keys.call(this),
-      iterate: (fn) => iterate.call(this, fn),
+      iterate: <V, U>(fn: (value: V, key: string, iteration: number) => U) =>
+        iterate.call(this, fn as (value: unknown, key: string, iteration: number) => unknown) as Promise<U>,
       clear: () => clear.call(this),
     };
 

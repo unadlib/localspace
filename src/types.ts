@@ -47,6 +47,13 @@ export interface LocalSpaceConfig {
   prewarmTransactions?: boolean;
 
   /**
+   * Optional idle timeout (ms) for IndexedDB connections. When set,
+   * connections will be closed after a period of inactivity and reopened
+   * automatically on the next operation.
+   */
+  connectionIdleMs?: number;
+
+  /**
    * Driver(s) to use (string or array of strings)
    */
   driver?: string | string[];

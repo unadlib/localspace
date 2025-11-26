@@ -55,6 +55,7 @@ interface DbContext {
   deferredOperations: DeferredOperation[];
   prewarmPromise?: Promise<void> | null;
   prewarmed?: boolean;
+  idleTimer?: ReturnType<typeof setTimeout> | null;
 }
 
 interface DeferredOperation {
@@ -250,6 +251,7 @@ function createDbContext(): DbContext {
     deferredOperations: [],
     prewarmPromise: null,
     prewarmed: false,
+    idleTimer: null,
   };
 }
 
@@ -272,8 +274,18 @@ function getDbContextKey(dbInfo: DbInfo): string {
   return dbInfo.bucket?.name ? `${dbInfo.bucket.name}::${dbName}` : dbName;
 }
 
+function getDbContext(dbInfo: DbInfo): DbContext | undefined {
+  return dbContexts[getDbContextKey(dbInfo)];
+}
+
+function ensureDbContext(dbInfo: DbInfo): DbContext {
+  const key = getDbContextKey(dbInfo);
+  dbContexts[key] = dbContexts[key] || createDbContext();
+  return dbContexts[key];
+}
+
 function deferReadiness(dbInfo: DbInfo): void {
-  const dbContext = dbContexts[getDbContextKey(dbInfo)];
+  const dbContext = ensureDbContext(dbInfo);
   const deferredOperation: DeferredOperation = {
     promise: null as any,
     resolve: null as any,
@@ -295,7 +307,8 @@ function deferReadiness(dbInfo: DbInfo): void {
 }
 
 function advanceReadiness(dbInfo: DbInfo): Promise<void> | undefined {
-  const dbContext = dbContexts[getDbContextKey(dbInfo)];
+  const dbContext = getDbContext(dbInfo);
+  if (!dbContext) return;
   const deferredOperation = dbContext.deferredOperations.pop();
 
   if (deferredOperation) {
@@ -308,7 +321,8 @@ function rejectReadiness(
   dbInfo: DbInfo,
   err: Error
 ): Promise<void> | undefined {
-  const dbContext = dbContexts[getDbContextKey(dbInfo)];
+  const dbContext = getDbContext(dbInfo);
+  if (!dbContext) return;
   const deferredOperation = dbContext.deferredOperations.pop();
 
   if (deferredOperation) {
@@ -455,6 +469,31 @@ function maybePrewarmTransaction(
   return promise;
 }
 
+function scheduleIdleClose(dbInfo: DbInfo): void {
+  const dbContext = getDbContext(dbInfo);
+  const idleMs = dbInfo.connectionIdleMs;
+  if (!dbContext || !dbContext.db || !idleMs || idleMs <= 0) {
+    return;
+  }
+
+  if (dbContext.idleTimer) {
+    clearTimeout(dbContext.idleTimer);
+  }
+
+  dbContext.idleTimer = setTimeout(() => {
+    try {
+      dbContext.db?.close();
+    } catch {
+      // ignore close errors
+    }
+    dbContext.db = null;
+    dbContext.prewarmed = false;
+    for (const forage of dbContext.forages) {
+      forage._dbInfo.db = null;
+    }
+  }, idleMs);
+}
+
 function createTransaction(
   dbInfo: DbInfo,
   mode: IDBTransactionMode,
@@ -462,10 +501,22 @@ function createTransaction(
   retries: number = 1
 ): void {
   try {
+    const dbContext = getDbContext(dbInfo);
+    if (dbContext?.idleTimer) {
+      clearTimeout(dbContext.idleTimer);
+      dbContext.idleTimer = null;
+    }
+
     const txOptions = getTransactionOptions(dbInfo, mode);
     const tx = txOptions
       ? dbInfo.db!.transaction(dbInfo.storeName!, mode, txOptions)
       : dbInfo.db!.transaction(dbInfo.storeName!, mode);
+
+    const scheduleIdle = () => scheduleIdleClose(dbInfo);
+    tx.addEventListener('complete', scheduleIdle);
+    tx.addEventListener('abort', scheduleIdle);
+    tx.addEventListener('error', scheduleIdle);
+
     callback(null, tx);
   } catch (err: any) {
     if (
@@ -555,11 +606,7 @@ async function _initStorage(
 
   const dbName = requireDbName(dbInfo);
   const contextKey = getDbContextKey(dbInfo);
-  let dbContext = dbContexts[contextKey];
-
-  if (!dbContext) {
-    dbContext = dbContexts[contextKey] = createDbContext();
-  }
+  let dbContext = ensureDbContext(dbInfo);
 
   dbContext.forages.push(self);
 
@@ -622,8 +669,7 @@ function fullyReady(
   const initReady = (self._initReady ?? self.ready).bind(self);
   const promise = initReady().then(() => {
     if (self._dbInfo) {
-      const contextKey = getDbContextKey(self._dbInfo);
-      const dbContext = dbContexts[contextKey];
+      const dbContext = getDbContext(self._dbInfo);
       if (dbContext && dbContext.dbReady) {
         return dbContext.dbReady;
       }

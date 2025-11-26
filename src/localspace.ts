@@ -11,6 +11,7 @@ import type {
   CompatibilitySuccessCallback,
   BatchItems,
   BatchResponse,
+  TransactionScope,
 } from './types';
 import {
   extend,
