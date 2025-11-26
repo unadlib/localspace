@@ -1231,19 +1231,22 @@ async function setItem<T>(
         }
       }
 
+      const normalizedValue = (value === undefined ? null : value) as T;
       const coalesce =
         dbInfo.coalesceWrites &&
         dbInfo.maxBatchSize === undefined &&
-        dbInfo.maxConcurrentTransactions !== 0;
+        dbInfo.maxConcurrentTransactions !== null &&
+        dbInfo.maxConcurrentTransactions !== undefined;
 
       if (coalesce) {
-        const promise = enqueueCoalescedWrite(dbInfo, {
+        enqueueCoalescedWrite(dbInfo, {
           type: 'set',
           key,
-          value,
-        }) as Promise<T>;
-        executeCallback(promise, callback);
-        return promise;
+          value: normalizedValue,
+        })
+          .then((result) => resolve(result as T))
+          .catch(reject);
+        return;
       }
 
       createTransaction(
@@ -1255,16 +1258,10 @@ async function setItem<T>(
           try {
             const storeName = requireStoreName(dbInfo);
             const store = transaction!.objectStore(storeName);
-            let actualValue: T | null | undefined = value;
-
-            if (actualValue === undefined) {
-              actualValue = null;
-            }
-
-            const req = store.put(actualValue, key);
+            const req = store.put(normalizedValue, key);
 
             transaction!.oncomplete = () => {
-              resolve(actualValue);
+              resolve(normalizedValue);
             };
 
             transaction!.onabort = transaction!.onerror = () => {
@@ -1301,7 +1298,8 @@ function removeItem(
         const coalesce =
           dbInfo.coalesceWrites &&
           dbInfo.maxBatchSize === undefined &&
-          dbInfo.maxConcurrentTransactions !== 0;
+          dbInfo.maxConcurrentTransactions !== null &&
+          dbInfo.maxConcurrentTransactions !== undefined;
 
         if (coalesce) {
           enqueueCoalescedWrite(dbInfo, { type: 'remove', key })
