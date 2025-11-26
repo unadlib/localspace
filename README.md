@@ -147,6 +147,17 @@ const limited = localspace.createInstance({ maxBatchSize: 200 });
 await limited.setDriver([limited.INDEXEDDB]);
 await limited.setItems(items); // will split into 200-item chunks
 
+// Optional: coalesce rapid single writes into one transaction (IndexedDB)
+const coalesced = localspace.createInstance({
+  coalesceWrites: true,
+  coalesceWindowMs: 8,
+});
+await coalesced.setDriver([coalesced.INDEXEDDB]);
+await Promise.all([
+  coalesced.setItem('fast-1', 'a'),
+  coalesced.setItem('fast-2', 'b'),
+]); // batched into one tx within the window
+
 // Note: localStorage batches are not atomic—writes are applied one by one.
 // For critical flows, prefer IndexedDB or handle your own compensating logic.
 ```
@@ -256,10 +267,11 @@ localspace.setItem('key', 'value', (err, value) => {
 - **Batch APIs outperform loops:** Playwright benchmark (`test/playwright/benchmark.spec.ts`) on 500 items x 256B showed `setItems()` ~6x faster and `getItems()` ~7.7x faster than per-item loops, with `removeItems()` ~2.8x faster (Chromium, relaxed durability).
 - **Transaction helpers:** `runTransaction()` lets you co-locate reads/writes in a single transaction for atomic migrations and to shorten lock time.
 - **Batch sizing:** Use `maxBatchSize` to split very large batches and keep transaction size in check.
+- **Write coalescing (IndexedDB):** enable `coalesceWrites` with a small `coalesceWindowMs` to merge rapid single writes into one transaction.
 - **IndexedDB durability defaults:** Chrome 121+ uses relaxed durability by default; keep it for speed or set `durability: 'strict'` in `config` for migration-style writes.
 - **Storage Buckets (Chromium 122+):** supply a `bucket` option to isolate critical data and hint durability/persistence per bucket.
 - **Connection warmup:** IndexedDB instances optionally pre-warm a transaction after init to reduce first-op latency (`prewarmTransactions` enabled by default; set to `false` to skip).
-- **Recommended defaults:** keep `durability` relaxed for perf, leave `prewarmTransactions` on, set `connectionIdleMs` if you want idle connections to auto-close, and set `maxBatchSize` only when you expect very large bulk writes; prefer IndexedDB for atomic/bulk writes, since localStorage batches are non-atomic.
+- **Recommended defaults:** keep `durability` relaxed for perf, leave `prewarmTransactions` on, set `connectionIdleMs` if you want idle connections to auto-close, and set `maxBatchSize` only when you expect very large bulk writes; prefer IndexedDB for atomic/bulk writes, since localStorage batches are non-atomic. Use `maxConcurrentTransactions` to throttle heavy parallel workloads when needed.
 - **localStorage batch atomicity:** When using localStorage driver, batch operations (`setItems()`, `removeItems()`) are **not atomic**. If an error occurs mid-operation, some items may be written or removed while others are not. In contrast, IndexedDB batch operations use transactions and guarantee atomicity (all-or-nothing). If atomicity is critical for your use case, prefer IndexedDB driver or implement application-level rollback logic.
 
 When `compatibilityMode` is off, driver setup methods also use Node-style callbacks. Promises are recommended for all new code.

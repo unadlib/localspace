@@ -54,6 +54,22 @@ export interface LocalSpaceConfig {
   connectionIdleMs?: number;
 
   /**
+   * Optional cap on concurrent transactions. When exceeded, new transactions
+   * are queued until one finishes.
+   */
+  maxConcurrentTransactions?: number;
+
+  /**
+   * Enable automatic write coalescing for single set/remove operations.
+   */
+  coalesceWrites?: boolean;
+
+  /**
+   * Time window (ms) to coalesce writes when coalesceWrites is enabled.
+   */
+  coalesceWindowMs?: number;
+
+  /**
    * Driver(s) to use (string or array of strings)
    */
   driver?: string | string[];

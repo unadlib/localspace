@@ -56,6 +56,11 @@ interface DbContext {
   prewarmPromise?: Promise<void> | null;
   prewarmed?: boolean;
   idleTimer?: ReturnType<typeof setTimeout> | null;
+  activeTransactions: number;
+  pendingTransactions: Array<() => void>;
+  coalesceQueue: CoalesceQueue;
+  coalesceTimer?: ReturnType<typeof setTimeout> | null;
+  coalescing?: boolean;
 }
 
 interface DeferredOperation {
@@ -63,6 +68,22 @@ interface DeferredOperation {
   resolve: () => void;
   reject: (error: Error) => void;
 }
+
+type QueuedWrite =
+  | {
+      type: 'set';
+      key: string;
+      value: unknown;
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+    }
+  | {
+      type: 'remove';
+      key: string;
+      resolve: () => void;
+      reject: (error: Error) => void;
+    };
+type CoalesceQueue = QueuedWrite[];
 
 function getDefaultIDB(): IDBFactory | null {
   if (typeof indexedDB !== 'undefined') {
@@ -252,6 +273,11 @@ function createDbContext(): DbContext {
     prewarmPromise: null,
     prewarmed: false,
     idleTimer: null,
+    activeTransactions: 0,
+  pendingTransactions: [],
+  coalesceQueue: [],
+  coalesceTimer: null,
+  coalescing: false,
   };
 }
 
@@ -491,7 +517,134 @@ function scheduleIdleClose(dbInfo: DbInfo): void {
     for (const forage of dbContext.forages) {
       forage._dbInfo.db = null;
     }
+    // If there are pending transactions, restart the loop so the next op reopens.
+    if (dbContext.pendingTransactions.length > 0) {
+      const next = dbContext.pendingTransactions.shift();
+      if (next) {
+        next();
+      }
+    }
   }, idleMs);
+}
+
+function enqueueCoalescedWrite(
+  dbInfo: DbInfo,
+  opData: { type: 'set'; key: string; value: unknown } | { type: 'remove'; key: string }
+): Promise<unknown> {
+  const dbContext = ensureDbContext(dbInfo);
+  const op: QueuedWrite =
+    opData.type === 'set'
+      ? {
+          type: 'set',
+          key: opData.key,
+          value: opData.value,
+          resolve: () => {},
+          reject: () => {},
+        }
+      : {
+          type: 'remove',
+          key: opData.key,
+          resolve: () => {},
+          reject: () => {},
+        };
+
+  dbContext.coalesceQueue.push(op);
+
+  const windowMs = dbInfo.coalesceWindowMs ?? 8;
+
+  if (!dbContext.coalesceTimer) {
+    dbContext.coalesceTimer = setTimeout(() => {
+      dbContext.coalesceTimer = null;
+      flushCoalescedWrites(dbInfo, dbContext);
+    }, windowMs);
+  }
+
+  return new Promise((resolve, reject) => {
+    op.resolve = resolve as (value: unknown) => void;
+    op.reject = reject;
+  });
+}
+
+function flushCoalescedWrites(
+  dbInfo: DbInfo,
+  dbContext: DbContext
+): void {
+  if (dbContext.coalescing) {
+    return;
+  }
+
+  const batch = dbContext.coalesceQueue.splice(0);
+  if (batch.length === 0) {
+    return;
+  }
+
+  dbContext.coalescing = true;
+
+  const rejectAll = (error: Error) => {
+    for (const op of batch) {
+      op.reject(error);
+    }
+  };
+
+  createTransaction(
+    dbInfo,
+    READ_WRITE,
+    (err: Error | null, transaction?: IDBTransaction) => {
+      if (err || !transaction) {
+        rejectAll(err || new Error('Failed to create transaction'));
+        dbContext.coalescing = false;
+        return;
+      }
+
+      try {
+        const storeName = requireStoreName(dbInfo);
+        const store = transaction.objectStore(storeName);
+        let requestError: Error | null = null;
+
+        for (const op of batch) {
+          if (op.type === 'set') {
+            const req = store.put(op.value, op.key);
+            req.onerror = () => {
+              requestError =
+                req.error || new Error(`Failed to set "${String(op.key)}"`);
+            };
+          } else {
+            const req = store.delete(op.key);
+            req.onerror = () => {
+              requestError =
+                req.error || new Error(`Failed to remove "${String(op.key)}"`);
+            };
+          }
+        }
+
+        transaction.oncomplete = () => {
+          for (const op of batch) {
+            if (op.type === 'set') {
+              op.resolve(op.value);
+            } else {
+              op.resolve();
+            }
+          }
+          dbContext.coalescing = false;
+          if (dbContext.coalesceQueue.length > 0) {
+            flushCoalescedWrites(dbInfo, dbContext);
+          }
+        };
+
+        transaction.onabort = transaction.onerror = () => {
+          rejectAll(
+            requestError ||
+              transaction.error ||
+              new Error('Failed to apply coalesced writes')
+          );
+          dbContext.coalescing = false;
+        };
+      } catch (error) {
+        rejectAll(error as Error);
+        dbContext.coalescing = false;
+      }
+    }
+  );
 }
 
 function createTransaction(
@@ -501,23 +654,56 @@ function createTransaction(
   retries: number = 1
 ): void {
   try {
-    const dbContext = getDbContext(dbInfo);
-    if (dbContext?.idleTimer) {
+    const dbContext = ensureDbContext(dbInfo);
+    if (dbContext.idleTimer) {
       clearTimeout(dbContext.idleTimer);
       dbContext.idleTimer = null;
     }
 
-    const txOptions = getTransactionOptions(dbInfo, mode);
-    const tx = txOptions
-      ? dbInfo.db!.transaction(dbInfo.storeName!, mode, txOptions)
-      : dbInfo.db!.transaction(dbInfo.storeName!, mode);
+    const maxTx = dbInfo.maxConcurrentTransactions;
+    const processPending = () => {
+      if (dbContext.pendingTransactions.length > 0) {
+        const next = dbContext.pendingTransactions.shift();
+        if (next) {
+          setTimeout(next, 0);
+        }
+      }
+    };
 
-    const scheduleIdle = () => scheduleIdleClose(dbInfo);
-    tx.addEventListener('complete', scheduleIdle);
-    tx.addEventListener('abort', scheduleIdle);
-    tx.addEventListener('error', scheduleIdle);
+    const start = () => {
+      try {
+        const txOptions = getTransactionOptions(dbInfo, mode);
+        const tx = txOptions
+          ? dbInfo.db!.transaction(dbInfo.storeName!, mode, txOptions)
+          : dbInfo.db!.transaction(dbInfo.storeName!, mode);
 
-    callback(null, tx);
+        dbContext.activeTransactions += 1;
+
+        const finalize = () => {
+          dbContext.activeTransactions = Math.max(
+            0,
+            dbContext.activeTransactions - 1
+          );
+          scheduleIdleClose(dbInfo);
+          processPending();
+        };
+
+        tx.addEventListener('complete', finalize);
+        tx.addEventListener('abort', finalize);
+        tx.addEventListener('error', finalize);
+
+        callback(null, tx);
+      } catch (error) {
+        callback(error as Error);
+      }
+    };
+
+    if (maxTx && maxTx > 0 && dbContext.activeTransactions >= maxTx) {
+      dbContext.pendingTransactions.push(start);
+      return;
+    }
+
+    start();
   } catch (err: any) {
     if (
       retries > 0 &&
@@ -565,6 +751,7 @@ function tryReconnect(dbInfo: DbInfo): Promise<void> {
     }
   }
   dbInfo.db = null;
+  dbContext.db = null;
 
   return getConnection(dbInfo, false)
     .then((db) => {
@@ -1004,6 +1191,21 @@ async function setItem<T>(
         }
       }
 
+      const coalesce =
+        dbInfo.coalesceWrites &&
+        dbInfo.maxBatchSize === undefined &&
+        dbInfo.maxConcurrentTransactions !== 0;
+
+      if (coalesce) {
+        const promise = enqueueCoalescedWrite(dbInfo, {
+          type: 'set',
+          key,
+          value,
+        }) as Promise<T>;
+        executeCallback(promise, callback);
+        return promise;
+      }
+
       createTransaction(
         dbInfo,
         READ_WRITE,
@@ -1055,14 +1257,27 @@ function removeItem(
     self
       .ready()
       .then(() => {
+        const dbInfo = self._dbInfo;
+        const coalesce =
+          dbInfo.coalesceWrites &&
+          dbInfo.maxBatchSize === undefined &&
+          dbInfo.maxConcurrentTransactions !== 0;
+
+        if (coalesce) {
+          enqueueCoalescedWrite(dbInfo, { type: 'remove', key })
+            .then(() => resolve())
+            .catch(reject);
+          return;
+        }
+
         createTransaction(
-          self._dbInfo,
+          dbInfo,
           READ_WRITE,
           (err: Error | null, transaction?: IDBTransaction) => {
             if (err) return reject(err);
 
             try {
-              const storeName = requireStoreName(self._dbInfo);
+              const storeName = requireStoreName(dbInfo);
               const store = transaction!.objectStore(storeName);
               const req = store.delete(key);
 
