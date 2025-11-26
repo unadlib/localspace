@@ -425,19 +425,36 @@ const localStorageWrapper: Driver = {
   keys,
   runTransaction<T>(
     this: LocalStorageDriverContext,
-    _mode: IDBTransactionMode,
+    mode: IDBTransactionMode,
     runner: (scope: TransactionScope) => Promise<T> | T,
     callback?: Callback<T>
   ): Promise<T> {
+    const makeReadOnlyGuard = () => {
+      if (mode === 'readonly') {
+        throw new Error('Transaction is readonly');
+      }
+    };
+
     const scope: TransactionScope = {
       get: <V>(key: string) => getItem.call(this, key) as Promise<V | null>,
-      set: <V>(key: string, value: V) =>
-        setItem.call(this, key, value) as Promise<V>,
-      remove: (key: string) => removeItem.call(this, key),
+      set: <V>(key: string, value: V) => {
+        makeReadOnlyGuard();
+        return setItem.call(this, key, value) as Promise<V>;
+      },
+      remove: (key: string) => {
+        makeReadOnlyGuard();
+        return removeItem.call(this, key);
+      },
       keys: () => keys.call(this),
       iterate: <V, U>(fn: (value: V, key: string, iteration: number) => U) =>
-        iterate.call(this, fn as (value: unknown, key: string, iteration: number) => unknown) as Promise<U>,
-      clear: () => clear.call(this),
+        iterate.call(
+          this,
+          fn as (value: unknown, key: string, iteration: number) => unknown
+        ) as Promise<U>,
+      clear: () => {
+        makeReadOnlyGuard();
+        return clear.call(this);
+      },
     };
 
     const promise = Promise.resolve()

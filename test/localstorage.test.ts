@@ -332,5 +332,17 @@ describe('LocalStorage driver tests', () => {
       expect(await instance.getItem('b')).toBe('2');
       expect(await instance.getItem('c')).toBe('1-c');
     });
+
+    it('should reject writes in readonly transactions', async () => {
+      await instance.setItem('ro-key', 'stay');
+
+      await expect(
+        instance.runTransaction('readonly', async (tx) => {
+          await tx.set('ro-key', 'mutated');
+        })
+      ).rejects.toBeInstanceOf(Error);
+
+      expect(await instance.getItem('ro-key')).toBe('stay');
+    });
   });
 });

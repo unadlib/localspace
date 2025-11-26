@@ -71,18 +71,18 @@ interface DeferredOperation {
 
 type QueuedWrite =
   | {
-      type: 'set';
-      key: string;
-      value: unknown;
-      resolve: (value: unknown) => void;
-      reject: (error: Error) => void;
-    }
+    type: 'set';
+    key: string;
+    value: unknown;
+    resolve: (value: unknown) => void;
+    reject: (error: Error) => void;
+  }
   | {
-      type: 'remove';
-      key: string;
-      resolve: () => void;
-      reject: (error: Error) => void;
-    };
+    type: 'remove';
+    key: string;
+    resolve: () => void;
+    reject: (error: Error) => void;
+  };
 type CoalesceQueue = QueuedWrite[];
 
 function getDefaultIDB(): IDBFactory | null {
@@ -219,6 +219,26 @@ function checkBlobSupport(db: IDBDatabase): Promise<boolean> {
   return detectBlobSupportPromise;
 }
 
+async function ensureBlobSupportForDb(
+  dbInfo: DbInfo,
+  dbOverride?: IDBDatabase | null
+): Promise<boolean> {
+  if (typeof supportsBlobs === 'boolean') {
+    return supportsBlobs;
+  }
+
+  const activeDb = dbOverride ?? dbInfo.db;
+  if (activeDb) {
+    return checkBlobSupport(activeDb);
+  }
+
+  await tryReconnect(dbInfo);
+  if (!dbInfo.db) {
+    throw new Error('IndexedDB not available');
+  }
+  return checkBlobSupport(dbInfo.db);
+}
+
 async function readBlobAsArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   if (typeof blob.arrayBuffer === 'function') {
     return blob.arrayBuffer();
@@ -274,10 +294,10 @@ function createDbContext(): DbContext {
     prewarmed: false,
     idleTimer: null,
     activeTransactions: 0,
-  pendingTransactions: [],
-  coalesceQueue: [],
-  coalesceTimer: null,
-  coalescing: false,
+    pendingTransactions: [],
+    coalesceQueue: [],
+    coalesceTimer: null,
+    coalescing: false,
   };
 }
 
@@ -535,18 +555,18 @@ function enqueueCoalescedWrite(
   const op: QueuedWrite =
     opData.type === 'set'
       ? {
-          type: 'set',
-          key: opData.key,
-          value: opData.value,
-          resolve: () => {},
-          reject: () => {},
-        }
+        type: 'set',
+        key: opData.key,
+        value: opData.value,
+        resolve: () => { },
+        reject: () => { },
+      }
       : {
-          type: 'remove',
-          key: opData.key,
-          resolve: () => {},
-          reject: () => {},
-        };
+        type: 'remove',
+        key: opData.key,
+        resolve: () => { },
+        reject: () => { },
+      };
 
   dbContext.coalesceQueue.push(op);
 
@@ -634,8 +654,8 @@ function flushCoalescedWrites(
         transaction.onabort = transaction.onerror = () => {
           rejectAll(
             requestError ||
-              transaction.error ||
-              new Error('Failed to apply coalesced writes')
+            transaction.error ||
+            new Error('Failed to apply coalesced writes')
           );
           dbContext.coalescing = false;
         };
@@ -653,6 +673,38 @@ function createTransaction(
   callback: (error: Error | null, transaction?: IDBTransaction) => void,
   retries: number = 1
 ): void {
+  const handleError = (err: any) => {
+    if (
+      retries > 0 &&
+      (!dbInfo.db ||
+        err.name === 'InvalidStateError' ||
+        err.name === 'NotFoundError')
+    ) {
+      Promise.resolve()
+        .then(() => {
+          if (
+            !dbInfo.db ||
+            (err.name === 'NotFoundError' &&
+              !dbInfo.db.objectStoreNames.contains(dbInfo.storeName!) &&
+              dbInfo.version! <= dbInfo.db.version)
+          ) {
+            if (dbInfo.db) {
+              dbInfo.version = dbInfo.db.version + 1;
+            }
+            return getConnection(dbInfo, true);
+          }
+        })
+        .then(() => {
+          return tryReconnect(dbInfo).then(() => {
+            createTransaction(dbInfo, mode, callback, retries - 1);
+          });
+        })
+        .catch(callback);
+      return;
+    }
+    callback(err);
+  };
+
   try {
     const dbContext = ensureDbContext(dbInfo);
     if (dbContext.idleTimer) {
@@ -694,7 +746,7 @@ function createTransaction(
 
         callback(null, tx);
       } catch (error) {
-        callback(error as Error);
+        handleError(error);
       }
     };
 
@@ -705,35 +757,7 @@ function createTransaction(
 
     start();
   } catch (err: any) {
-    if (
-      retries > 0 &&
-      (!dbInfo.db ||
-        err.name === 'InvalidStateError' ||
-        err.name === 'NotFoundError')
-    ) {
-      Promise.resolve()
-        .then(() => {
-          if (
-            !dbInfo.db ||
-            (err.name === 'NotFoundError' &&
-              !dbInfo.db.objectStoreNames.contains(dbInfo.storeName!) &&
-              dbInfo.version! <= dbInfo.db.version)
-          ) {
-            if (dbInfo.db) {
-              dbInfo.version = dbInfo.db.version + 1;
-            }
-            return getConnection(dbInfo, true);
-          }
-        })
-        .then(() => {
-          return tryReconnect(dbInfo).then(() => {
-            createTransaction(dbInfo, mode, callback, retries - 1);
-          });
-        })
-        .catch(callback);
-      return;
-    }
-    callback(err);
+    handleError(err);
   }
 }
 
@@ -975,8 +999,8 @@ function getItems<T>(
                 transaction!.onabort = transaction!.onerror = () => {
                   batchReject(
                     requestError ||
-                      transaction!.error ||
-                      new Error('Failed to get items transaction')
+                    transaction!.error ||
+                    new Error('Failed to get items transaction')
                   );
                 };
               } catch (e) {
@@ -1084,82 +1108,82 @@ function setItems<T>(
         (entry) => toString.call(entry.value) === '[object Blob]'
       );
 
-  if (needsBlobCheck) {
-    blobSupport = await checkBlobSupport(dbInfo.db!);
-  }
-
-  const batches = chunkArray(
-    normalized,
-    dbInfo.maxBatchSize ?? normalized.length
-  );
-
-  const allResults: BatchResponse<T> = [];
-
-  const processBatch = async (batch: KeyValuePair<T>[]) => {
-    const payloads: BatchResponse<T> = [];
-
-    for (const entry of batch) {
-      let value: T | null | undefined = entry.value;
-      if (value === undefined) {
-        value = null;
+      if (needsBlobCheck) {
+        blobSupport = await ensureBlobSupportForDb(dbInfo);
       }
 
-      if (toString.call(entry.value) === '[object Blob]') {
-        const canStoreBlob =
-          typeof blobSupport === 'boolean'
-            ? blobSupport
-            : await checkBlobSupport(dbInfo.db!);
-        if (!canStoreBlob) {
-          value = (await encodeBlob(entry.value as unknown as Blob)) as T;
-        }
-      }
-
-      payloads.push({ key: entry.key, value });
-    }
-
-    return new Promise<BatchResponse<T>>((batchResolve, batchReject) => {
-      createTransaction(
-        dbInfo,
-        READ_WRITE,
-        (err: Error | null, transaction?: IDBTransaction) => {
-          if (err) return batchReject(err);
-
-          try {
-            const storeName = requireStoreName(dbInfo);
-            const store = transaction!.objectStore(storeName);
-            let requestError: Error | null = null;
-
-            for (const entry of payloads) {
-              const req = store.put(entry.value, entry.key);
-              req.onerror = () => {
-                requestError =
-                  req.error ||
-                  new Error(`Failed to set "${String(entry.key)}"`);
-              };
-            }
-
-            transaction!.oncomplete = () => batchResolve(payloads);
-            transaction!.onabort = transaction!.onerror = () => {
-              batchReject(
-                requestError ||
-                  transaction!.error ||
-                  new Error('Failed to set items transaction')
-              );
-            };
-          } catch (e) {
-            batchReject(e);
-          }
-        }
+      const batches = chunkArray(
+        normalized,
+        dbInfo.maxBatchSize ?? normalized.length
       );
-    });
-  };
 
-  for (const batch of batches) {
-    const result = await processBatch(batch);
-    allResults.push(...result);
-  }
+      const allResults: BatchResponse<T> = [];
 
-  resolve(allResults);
+      const processBatch = async (batch: KeyValuePair<T>[]) => {
+        const payloads: BatchResponse<T> = [];
+
+        for (const entry of batch) {
+          let value: T | null | undefined = entry.value;
+          if (value === undefined) {
+            value = null;
+          }
+
+          if (toString.call(entry.value) === '[object Blob]') {
+            const canStoreBlob =
+              typeof blobSupport === 'boolean'
+                ? blobSupport
+                : await ensureBlobSupportForDb(dbInfo);
+            if (!canStoreBlob) {
+              value = (await encodeBlob(entry.value as unknown as Blob)) as T;
+            }
+          }
+
+          payloads.push({ key: entry.key, value });
+        }
+
+        return new Promise<BatchResponse<T>>((batchResolve, batchReject) => {
+          createTransaction(
+            dbInfo,
+            READ_WRITE,
+            (err: Error | null, transaction?: IDBTransaction) => {
+              if (err) return batchReject(err);
+
+              try {
+                const storeName = requireStoreName(dbInfo);
+                const store = transaction!.objectStore(storeName);
+                let requestError: Error | null = null;
+
+                for (const entry of payloads) {
+                  const req = store.put(entry.value, entry.key);
+                  req.onerror = () => {
+                    requestError =
+                      req.error ||
+                      new Error(`Failed to set "${String(entry.key)}"`);
+                  };
+                }
+
+                transaction!.oncomplete = () => batchResolve(payloads);
+                transaction!.onabort = transaction!.onerror = () => {
+                  batchReject(
+                    requestError ||
+                    transaction!.error ||
+                    new Error('Failed to set items transaction')
+                  );
+                };
+              } catch (e) {
+                batchReject(e);
+              }
+            }
+          );
+        });
+      };
+
+      for (const batch of batches) {
+        const result = await processBatch(batch);
+        allResults.push(...result);
+      }
+
+      resolve(allResults);
     } catch (err) {
       reject(err as Error);
     }
@@ -1185,7 +1209,7 @@ async function setItem<T>(
       dbInfo = self._dbInfo;
 
       if (toString.call(value) === '[object Blob]') {
-        const blobSupport = await checkBlobSupport(dbInfo.db!);
+        const blobSupport = await ensureBlobSupportForDb(dbInfo);
         if (!blobSupport) {
           value = (await encodeBlob(value as Blob)) as T;
         }
@@ -1344,8 +1368,8 @@ function removeItems(
                 transaction!.onabort = transaction!.onerror = () => {
                   batchReject(
                     requestError ||
-                      transaction!.error ||
-                      new Error('Failed to remove items transaction')
+                    transaction!.error ||
+                    new Error('Failed to remove items transaction')
                   );
                 };
               } catch (e) {
@@ -1382,142 +1406,160 @@ function runTransaction<T>(
     try {
       await self.ready();
       const dbInfo = self._dbInfo;
-      const storeName = requireStoreName(dbInfo);
-      const txOptions = getTransactionOptions(dbInfo, mode);
-      const tx = txOptions
-        ? dbInfo.db!.transaction(storeName, mode, txOptions)
-        : dbInfo.db!.transaction(storeName, mode);
-      const store = tx.objectStore(storeName);
-      let blobSupport: boolean | undefined;
-
-      const ensureBlobSupport = async (): Promise<boolean> => {
-        if (typeof blobSupport === 'boolean') return blobSupport;
-        blobSupport = await checkBlobSupport(dbInfo.db!);
-        return blobSupport!;
-      };
-
-      const makeReadOnlyGuard = () => {
-        if (mode === READ_ONLY) {
-          throw new Error('Transaction is readonly');
-        }
-      };
-
-      const scope: TransactionScope = {
-        get: <V>(key: string) =>
-          new Promise<V | null>((res, rej) => {
-            const req = store.get(normalizeKey(key));
-            req.onsuccess = () => {
-              let value = req.result;
-              if (value === undefined) value = null;
-              if (isEncodedBlob(value)) {
-                value = decodeBlob(value);
-              }
-              res(value);
-            };
-            req.onerror = () => rej(req.error);
-          }),
-        set: async <V>(key: string, value: V) => {
-          makeReadOnlyGuard();
-          let actual: V | null | undefined = value;
-          if (actual === undefined) actual = null;
-
-          if (toString.call(value) === '[object Blob]') {
-            const canStoreBlob = await ensureBlobSupport();
-            if (!canStoreBlob) {
-              actual = (await encodeBlob(value as unknown as Blob)) as V;
-            }
+      createTransaction(
+        dbInfo,
+        mode,
+        (err: Error | null, transaction?: IDBTransaction) => {
+          if (err || !transaction) {
+            reject(err || new Error('Failed to create transaction'));
+            return;
           }
 
-          return new Promise<V>((res, rej) => {
-            const req = store.put(actual, normalizeKey(key));
-            req.onsuccess = () => res(actual as V);
-            req.onerror = () => rej(req.error);
-          });
-        },
-        remove: (key: string) =>
-          new Promise<void>((res, rej) => {
-            makeReadOnlyGuard();
-            const req = store.delete(normalizeKey(key));
-            req.onsuccess = () => res();
-            req.onerror = () => rej(req.error);
-          }),
-        keys: () =>
-          new Promise<string[]>((res, rej) => {
-            const all: string[] = [];
-            const req = store.openKeyCursor();
-            req.onsuccess = () => {
-              const cursor = req.result;
-              if (!cursor) {
-                res(all);
-                return;
-              }
-              all.push(cursor.key as string);
-              cursor.continue();
+          try {
+            const storeName = requireStoreName(dbInfo);
+            const store = transaction.objectStore(storeName);
+            let blobSupport: boolean | undefined;
+
+            const ensureBlobSupport = async (): Promise<boolean> => {
+              if (typeof blobSupport === 'boolean') return blobSupport;
+              blobSupport = await ensureBlobSupportForDb(
+                dbInfo,
+                transaction.db
+              );
+              return blobSupport!;
             };
-            req.onerror = () => rej(req.error);
-          }),
-        iterate: <V, U>(fn: (value: V, key: string, iteration: number) => U) =>
-          new Promise<U>((res, rej) => {
-            const req = store.openCursor();
-            let iteration = 1;
-            req.onsuccess = () => {
-              const cursor = req.result;
-              if (cursor) {
-                let value = cursor.value;
-                if (value === undefined) value = null;
-                if (isEncodedBlob(value)) {
-                  value = decodeBlob(value);
-                }
-                const out = fn(value, cursor.key as string, iteration++);
-                if (out !== undefined) {
-                  res(out);
-                } else {
-                  cursor.continue();
-                }
-              } else {
-                res(undefined as U);
+
+            const makeReadOnlyGuard = () => {
+              if (mode === READ_ONLY) {
+                throw new Error('Transaction is readonly');
               }
             };
-            req.onerror = () => rej(req.error);
-          }),
-        clear: () =>
-          new Promise<void>((res, rej) => {
-            makeReadOnlyGuard();
-            const req = store.clear();
-            req.onsuccess = () => res();
-            req.onerror = () => rej(req.error);
-          }),
-      };
 
-      const runnerPromise = Promise.resolve().then(() => runner(scope));
-      const completion = new Promise<void>((res, rej) => {
-        tx.oncomplete = () => res();
-        tx.onabort = () => rej(tx.error || new Error('Transaction aborted'));
-        tx.onerror = () => rej(tx.error || new Error('Transaction error'));
-      });
+            const scope: TransactionScope = {
+              get: <V>(key: string) =>
+                new Promise<V | null>((res, rej) => {
+                  const req = store.get(normalizeKey(key));
+                  req.onsuccess = () => {
+                    let value = req.result;
+                    if (value === undefined) value = null;
+                    if (isEncodedBlob(value)) {
+                      value = decodeBlob(value);
+                    }
+                    res(value);
+                  };
+                  req.onerror = () => rej(req.error);
+                }),
+              set: async <V>(key: string, value: V) => {
+                makeReadOnlyGuard();
+                let actual: V | null | undefined = value;
+                if (actual === undefined) actual = null;
 
-      const guardedRunner = runnerPromise.catch((err) => {
-        try {
-          tx.abort();
-        } catch {
-          // ignore abort issues
+                if (toString.call(value) === '[object Blob]') {
+                  const canStoreBlob = await ensureBlobSupport();
+                  if (!canStoreBlob) {
+                    actual = (await encodeBlob(value as unknown as Blob)) as V;
+                  }
+                }
+
+                return new Promise<V>((res, rej) => {
+                  const req = store.put(actual, normalizeKey(key));
+                  req.onsuccess = () => res(actual as V);
+                  req.onerror = () => rej(req.error);
+                });
+              },
+              remove: (key: string) =>
+                new Promise<void>((res, rej) => {
+                  makeReadOnlyGuard();
+                  const req = store.delete(normalizeKey(key));
+                  req.onsuccess = () => res();
+                  req.onerror = () => rej(req.error);
+                }),
+              keys: () =>
+                new Promise<string[]>((res, rej) => {
+                  const all: string[] = [];
+                  const req = store.openKeyCursor();
+                  req.onsuccess = () => {
+                    const cursor = req.result;
+                    if (!cursor) {
+                      res(all);
+                      return;
+                    }
+                    all.push(cursor.key as string);
+                    cursor.continue();
+                  };
+                  req.onerror = () => rej(req.error);
+                }),
+              iterate: <V, U>(
+                fn: (value: V, key: string, iteration: number) => U
+              ) =>
+                new Promise<U>((res, rej) => {
+                  const req = store.openCursor();
+                  let iteration = 1;
+                  req.onsuccess = () => {
+                    const cursor = req.result;
+                    if (cursor) {
+                      let value = cursor.value;
+                      if (value === undefined) value = null;
+                      if (isEncodedBlob(value)) {
+                        value = decodeBlob(value);
+                      }
+                      const out = fn(value, cursor.key as string, iteration++);
+                      if (out !== undefined) {
+                        res(out);
+                      } else {
+                        cursor.continue();
+                      }
+                    } else {
+                      res(undefined as U);
+                    }
+                  };
+                  req.onerror = () => rej(req.error);
+                }),
+              clear: () =>
+                new Promise<void>((res, rej) => {
+                  makeReadOnlyGuard();
+                  const req = store.clear();
+                  req.onsuccess = () => res();
+                  req.onerror = () => rej(req.error);
+                }),
+            };
+
+            const runnerPromise = Promise.resolve().then(() => runner(scope));
+            const completion = new Promise<void>((res, rej) => {
+              transaction.oncomplete = () => res();
+              transaction.onabort = () =>
+                rej(transaction.error || new Error('Transaction aborted'));
+              transaction.onerror = () =>
+                rej(transaction.error || new Error('Transaction error'));
+            });
+
+            const guardedRunner = runnerPromise.catch((runnerError) => {
+              try {
+                transaction.abort();
+              } catch {
+                // ignore abort issues
+              }
+              throw runnerError;
+            });
+
+            Promise.allSettled([guardedRunner, completion]).then(
+              ([runnerOutcome, completionOutcome]) => {
+                if (runnerOutcome.status === 'rejected') {
+                  reject(runnerOutcome.reason);
+                  return;
+                }
+                if (completionOutcome.status === 'rejected') {
+                  reject(completionOutcome.reason);
+                  return;
+                }
+                resolve(runnerOutcome.value);
+              }
+            );
+          } catch (error) {
+            reject(error as Error);
+          }
         }
-        throw err;
-      });
-
-      const [runnerOutcome, completionOutcome] = await Promise.allSettled([
-        guardedRunner,
-        completion,
-      ]);
-
-      if (runnerOutcome.status === 'rejected') {
-        throw runnerOutcome.reason;
-      }
-      if (completionOutcome.status === 'rejected') {
-        throw completionOutcome.reason;
-      }
-
-      resolve(runnerOutcome.value);
+      );
     } catch (err) {
       reject(err as Error);
     }

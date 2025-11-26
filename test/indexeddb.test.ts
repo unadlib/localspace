@@ -904,6 +904,76 @@ describe('IndexedDB driver tests', () => {
     });
   });
 
+  describe('Connection idle handling', () => {
+    it('should reopen after idle timeout for blob setItem', async () => {
+      const idleInstance = localspace.createInstance({
+        name: `indexeddb-idle-${Math.random().toString(36).slice(2)}`,
+        storeName: 'idleStore',
+        connectionIdleMs: 5,
+      });
+      await idleInstance.setDriver([idleInstance.INDEXEDDB]);
+      await idleInstance.ready();
+      await idleInstance.setItem('warm', 'up');
+
+      await new Promise((resolve) => setTimeout(resolve, 25));
+
+      const blob = new Blob(['idle-blob'], { type: 'text/plain' });
+      const stored = await idleInstance.setItem('blob-after-idle', blob);
+      expect(stored).toBeTruthy();
+
+      const retrieved = await idleInstance.getItem<any>('blob-after-idle');
+      if (retrieved instanceof Blob) {
+        expect(await retrieved.text()).toBe('idle-blob');
+      } else if (
+        retrieved &&
+        typeof retrieved === 'object' &&
+        '__local_forage_encoded_blob' in retrieved
+      ) {
+        expect((retrieved as any).__local_forage_encoded_blob).toBe(true);
+      } else {
+        expect(retrieved).toBeDefined();
+      }
+
+      await idleInstance.dropInstance();
+    });
+
+    it('should run transaction with blob after idle close', async () => {
+      const idleTxInstance = localspace.createInstance({
+        name: `indexeddb-idle-tx-${Math.random().toString(36).slice(2)}`,
+        storeName: 'idleTxStore',
+        connectionIdleMs: 5,
+      });
+      await idleTxInstance.setDriver([idleTxInstance.INDEXEDDB]);
+      await idleTxInstance.ready();
+      await idleTxInstance.setItem('seed', 'value');
+
+      await new Promise((resolve) => setTimeout(resolve, 25));
+
+      const blob = new Blob(['tx-blob'], { type: 'text/plain' });
+      await idleTxInstance.runTransaction('readwrite', async (tx) => {
+        const current = await tx.get<string>('seed');
+        await tx.set('echo', current ?? 'missing');
+        await tx.set('blob-tx', blob);
+      });
+
+      const retrieved = await idleTxInstance.getItem<any>('blob-tx');
+      if (retrieved instanceof Blob) {
+        expect(await retrieved.text()).toBe('tx-blob');
+      } else if (
+        retrieved &&
+        typeof retrieved === 'object' &&
+        '__local_forage_encoded_blob' in retrieved
+      ) {
+        expect((retrieved as any).__local_forage_encoded_blob).toBe(true);
+      } else {
+        expect(retrieved).toBeDefined();
+      }
+      expect(await idleTxInstance.getItem('echo')).toBe('value');
+
+      await idleTxInstance.dropInstance();
+    });
+  });
+
   describe('dropInstance edge cases', () => {
     it('should handle dropInstance on non-existent database', async () => {
       const fakeDbName = `non-existent-${Math.random().toString(36).slice(2)}`;
