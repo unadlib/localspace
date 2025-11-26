@@ -52,10 +52,10 @@ localspace is built on a foundation designed for growth. Here's what's planned:
 - [x] Comprehensive test coverage
 - [x] Modern build pipeline (ES modules, CommonJS, UMD)
 - [x] Batch operations (`setItems()`, `getItems()`, `removeItems()`) for higher throughput
+- [x] Connection pooling, transaction batching
 
 ### TODO
 - [ ] **Improved error handling** - Structured error types with detailed context
-- [ ] **Performance optimizations** - Connection pooling, transaction batching
 - [ ] **Plugin system** - Middleware architecture for cross-cutting concerns
 - [ ] **Cache API driver** - Native browser caching with automatic HTTP semantics
 - [ ] **OPFS driver** - Origin Private File System for high-performance file storage
