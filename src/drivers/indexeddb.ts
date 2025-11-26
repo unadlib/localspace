@@ -1974,7 +1974,8 @@ function getPerformanceStats(
   const stats = dbContext.stats;
   const avgCoalesceSize =
     stats.coalescedWrites > 0
-      ? stats.coalescedWrites / (stats.totalWrites - stats.transactionsSaved || 1)
+      ? stats.coalescedWrites /
+        (stats.totalWrites - stats.transactionsSaved || 1)
       : 0;
 
   return {
