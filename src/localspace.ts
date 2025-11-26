@@ -68,6 +68,8 @@ const DefaultConfig: LocalSpaceConfig = {
   storeName: 'keyvaluepairs',
   version: 1.0,
   compatibilityMode: false,
+  coalesceWrites: true,
+  coalesceWindowMs: 8,
 };
 
 type ReadyAwareInstance = {

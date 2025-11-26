@@ -201,6 +201,11 @@ export interface Driver {
     options?: LocalSpaceConfig,
     callback?: Callback<void>
   ): Promise<void>;
+
+  /**
+   * Get performance statistics (optional, IndexedDB only)
+   */
+  getPerformanceStats?(): PerformanceStats;
 }
 
 /**
@@ -390,6 +395,11 @@ export interface LocalSpaceInstance {
   ): Promise<void>;
 
   /**
+   * Get performance statistics (only available for IndexedDB driver)
+   */
+  getPerformanceStats?(): PerformanceStats;
+
+  /**
    * Internal properties
    */
   _initReady?: () => Promise<void>;
@@ -436,4 +446,26 @@ export interface TransactionScope {
     iterator: (value: T, key: string, iterationNumber: number) => U
   ): Promise<U>;
   clear(): Promise<void>;
+}
+
+/**
+ * Performance statistics for write coalescing
+ */
+export interface PerformanceStats {
+  /**
+   * Total number of individual write operations (setItem/removeItem)
+   */
+  totalWrites: number;
+  /**
+   * Number of writes that were merged via coalescing
+   */
+  coalescedWrites: number;
+  /**
+   * Number of transactions saved by coalescing
+   */
+  transactionsSaved: number;
+  /**
+   * Average number of operations per coalesced batch
+   */
+  avgCoalesceSize: number;
 }

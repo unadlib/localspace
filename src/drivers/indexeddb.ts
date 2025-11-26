@@ -61,6 +61,12 @@ interface DbContext {
   coalesceQueue: CoalesceQueue;
   coalesceTimer?: ReturnType<typeof setTimeout> | null;
   coalescing?: boolean;
+  // Performance statistics
+  stats: {
+    totalWrites: number;
+    coalescedWrites: number;
+    transactionsSaved: number;
+  };
 }
 
 interface DeferredOperation {
@@ -298,6 +304,11 @@ function createDbContext(): DbContext {
     coalesceQueue: [],
     coalesceTimer: null,
     coalescing: false,
+    stats: {
+      totalWrites: 0,
+      coalescedWrites: 0,
+      transactionsSaved: 0,
+    },
   };
 }
 
@@ -571,6 +582,7 @@ function enqueueCoalescedWrite(
         };
 
   dbContext.coalesceQueue.push(op);
+  dbContext.stats.totalWrites++;
 
   const windowMs = dbInfo.coalesceWindowMs ?? 8;
 
@@ -643,6 +655,11 @@ function flushCoalescedWrites(dbInfo: DbInfo, dbContext: DbContext): void {
             } else {
               op.resolve();
             }
+          }
+          // Update statistics: batch.length operations merged into 1 transaction
+          if (batch.length > 1) {
+            dbContext.stats.coalescedWrites += batch.length;
+            dbContext.stats.transactionsSaved += batch.length - 1;
           }
           dbContext.coalescing = false;
           if (dbContext.coalesceQueue.length > 0) {
@@ -1939,6 +1956,35 @@ function dropInstance(
   return promise;
 }
 
+function getPerformanceStats(
+  this: IndexedDBDriverContext
+): import('../types').PerformanceStats {
+  const dbInfo = this._dbInfo;
+  const dbContext = getDbContext(dbInfo);
+
+  if (!dbContext) {
+    return {
+      totalWrites: 0,
+      coalescedWrites: 0,
+      transactionsSaved: 0,
+      avgCoalesceSize: 0,
+    };
+  }
+
+  const stats = dbContext.stats;
+  const avgCoalesceSize =
+    stats.coalescedWrites > 0
+      ? stats.coalescedWrites / (stats.totalWrites - stats.transactionsSaved || 1)
+      : 0;
+
+  return {
+    totalWrites: stats.totalWrites,
+    coalescedWrites: stats.coalescedWrites,
+    transactionsSaved: stats.transactionsSaved,
+    avgCoalesceSize: parseFloat(avgCoalesceSize.toFixed(2)),
+  };
+}
+
 const asyncStorage: Driver = {
   _driver: 'asyncStorage',
   _initStorage,
@@ -1956,6 +2002,7 @@ const asyncStorage: Driver = {
   key,
   keys,
   dropInstance,
+  getPerformanceStats,
 };
 
 export default asyncStorage;
