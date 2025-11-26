@@ -71,18 +71,18 @@ interface DeferredOperation {
 
 type QueuedWrite =
   | {
-    type: 'set';
-    key: string;
-    value: unknown;
-    resolve: (value: unknown) => void;
-    reject: (error: Error) => void;
-  }
+      type: 'set';
+      key: string;
+      value: unknown;
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+    }
   | {
-    type: 'remove';
-    key: string;
-    resolve: () => void;
-    reject: (error: Error) => void;
-  };
+      type: 'remove';
+      key: string;
+      resolve: () => void;
+      reject: (error: Error) => void;
+    };
 type CoalesceQueue = QueuedWrite[];
 
 function getDefaultIDB(): IDBFactory | null {
@@ -549,24 +549,26 @@ function scheduleIdleClose(dbInfo: DbInfo): void {
 
 function enqueueCoalescedWrite(
   dbInfo: DbInfo,
-  opData: { type: 'set'; key: string; value: unknown } | { type: 'remove'; key: string }
+  opData:
+    | { type: 'set'; key: string; value: unknown }
+    | { type: 'remove'; key: string }
 ): Promise<unknown> {
   const dbContext = ensureDbContext(dbInfo);
   const op: QueuedWrite =
     opData.type === 'set'
       ? {
-        type: 'set',
-        key: opData.key,
-        value: opData.value,
-        resolve: () => { },
-        reject: () => { },
-      }
+          type: 'set',
+          key: opData.key,
+          value: opData.value,
+          resolve: () => {},
+          reject: () => {},
+        }
       : {
-        type: 'remove',
-        key: opData.key,
-        resolve: () => { },
-        reject: () => { },
-      };
+          type: 'remove',
+          key: opData.key,
+          resolve: () => {},
+          reject: () => {},
+        };
 
   dbContext.coalesceQueue.push(op);
 
@@ -585,10 +587,7 @@ function enqueueCoalescedWrite(
   });
 }
 
-function flushCoalescedWrites(
-  dbInfo: DbInfo,
-  dbContext: DbContext
-): void {
+function flushCoalescedWrites(dbInfo: DbInfo, dbContext: DbContext): void {
   if (dbContext.coalescing) {
     return;
   }
@@ -654,8 +653,8 @@ function flushCoalescedWrites(
         transaction.onabort = transaction.onerror = () => {
           rejectAll(
             requestError ||
-            transaction.error ||
-            new Error('Failed to apply coalesced writes')
+              transaction.error ||
+              new Error('Failed to apply coalesced writes')
           );
           dbContext.coalescing = false;
         };
@@ -999,8 +998,8 @@ function getItems<T>(
                 transaction!.onabort = transaction!.onerror = () => {
                   batchReject(
                     requestError ||
-                    transaction!.error ||
-                    new Error('Failed to get items transaction')
+                      transaction!.error ||
+                      new Error('Failed to get items transaction')
                   );
                 };
               } catch (e) {
@@ -1166,8 +1165,8 @@ function setItems<T>(
                 transaction!.onabort = transaction!.onerror = () => {
                   batchReject(
                     requestError ||
-                    transaction!.error ||
-                    new Error('Failed to set items transaction')
+                      transaction!.error ||
+                      new Error('Failed to set items transaction')
                   );
                 };
               } catch (e) {
@@ -1368,8 +1367,8 @@ function removeItems(
                 transaction!.onabort = transaction!.onerror = () => {
                   batchReject(
                     requestError ||
-                    transaction!.error ||
-                    new Error('Failed to remove items transaction')
+                      transaction!.error ||
+                      new Error('Failed to remove items transaction')
                   );
                 };
               } catch (e) {

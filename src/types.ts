@@ -161,10 +161,7 @@ export interface Driver {
   /**
    * Batch remove multiple items.
    */
-  removeItems(
-    keys: string[],
-    callback?: Callback<void>
-  ): Promise<void>;
+  removeItems(keys: string[], callback?: Callback<void>): Promise<void>;
 
   /**
    * Execute multiple operations within a single driver-level transaction
@@ -358,10 +355,7 @@ export interface LocalSpaceInstance {
   /**
    * Batch remove items
    */
-  removeItems(
-    keys: string[],
-    callback?: Callback<void>
-  ): Promise<void>;
+  removeItems(keys: string[], callback?: Callback<void>): Promise<void>;
 
   /**
    * Run multiple operations in a single transaction when supported.

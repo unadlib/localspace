@@ -186,7 +186,9 @@ export function createBlob(
 /**
  * Normalize batch inputs (array/map/object) into a flat list of key/value pairs
  */
-export function normalizeBatchEntries<T>(items: BatchItems<T>): KeyValuePair<T>[] {
+export function normalizeBatchEntries<T>(
+  items: BatchItems<T>
+): KeyValuePair<T>[] {
   if (Array.isArray(items)) {
     return items.map(({ key, value }) => ({ key: normalizeKey(key), value }));
   }

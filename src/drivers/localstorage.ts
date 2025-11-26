@@ -322,17 +322,13 @@ function setItems<T>(
 
     for (const batch of chunkArray(normalized, batchSize)) {
       for (const entry of batch) {
-        const normalizedValue = (entry.value === undefined
-          ? null
-          : entry.value) as T;
-        const serializedValue = await dbInfo.serializer.serialize(
-          normalizedValue
-        );
+        const normalizedValue = (
+          entry.value === undefined ? null : entry.value
+        ) as T;
+        const serializedValue =
+          await dbInfo.serializer.serialize(normalizedValue);
 
-        localStorage.setItem(
-          dbInfo.keyPrefix + entry.key,
-          serializedValue
-        );
+        localStorage.setItem(dbInfo.keyPrefix + entry.key, serializedValue);
         stored.push({ key: entry.key, value: normalizedValue });
       }
     }
