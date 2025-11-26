@@ -291,5 +291,46 @@ describe('LocalStorage driver tests', () => {
 
       await instance1.clear();
     });
+
+    it('should batch set/get/remove with maxBatchSize', async () => {
+      const batchInstance = localspace.createInstance({
+        name: `ls-batch-${Math.random().toString(36).slice(2)}`,
+        storeName: 'batchStore',
+        maxBatchSize: 1,
+      });
+
+      await batchInstance.setDriver([batchInstance.LOCALSTORAGE]);
+      await batchInstance.ready();
+
+      const entries = [
+        { key: 'k1', value: 'v1' },
+        { key: 'k2', value: 'v2' },
+      ];
+
+      const setResult = await batchInstance.setItems(entries);
+      expect(setResult.map((r) => r.key)).toEqual(['k1', 'k2']);
+
+      const got = await batchInstance.getItems(entries.map((e) => e.key));
+      expect(got.map((r) => r.value)).toEqual(['v1', 'v2']);
+
+      await batchInstance.removeItems(entries.map((e) => e.key));
+      const after = await batchInstance.getItems(entries.map((e) => e.key));
+      expect(after.every((r) => r.value === null)).toBe(true);
+
+      await batchInstance.dropInstance();
+    });
+
+    it('should support runTransaction for grouped work', async () => {
+      await instance.runTransaction('readwrite', async (tx) => {
+        await tx.set('a', '1');
+        await tx.set('b', '2');
+        const aVal = await tx.get('a');
+        await tx.set('c', `${aVal}-c`);
+      });
+
+      expect(await instance.getItem('a')).toBe('1');
+      expect(await instance.getItem('b')).toBe('2');
+      expect(await instance.getItem('c')).toBe('1-c');
+    });
   });
 });

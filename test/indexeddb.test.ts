@@ -187,6 +187,56 @@ describe('IndexedDB driver tests', () => {
     });
   });
 
+  describe('Batch operations and transactions', () => {
+    it('should batch set/get/remove in order', async () => {
+      const maxBatchInstance = localspace.createInstance({
+        name: `indexeddb-batch-${Math.random().toString(36).slice(2)}`,
+        storeName: 'batchStore',
+        maxBatchSize: 2,
+      });
+      await maxBatchInstance.setDriver([maxBatchInstance.INDEXEDDB]);
+      await maxBatchInstance.ready();
+
+      const entries = [
+        { key: 'k1', value: 'v1' },
+        { key: 'k2', value: 'v2' },
+        { key: 'k3', value: 'v3' },
+      ];
+
+      const setResult = await maxBatchInstance.setItems(entries);
+      expect(setResult.map((r) => r.key)).toEqual(['k1', 'k2', 'k3']);
+
+      const got = await maxBatchInstance.getItems(entries.map((e) => e.key));
+      expect(got.map((r) => r.value)).toEqual(['v1', 'v2', 'v3']);
+
+      await maxBatchInstance.removeItems(entries.map((e) => e.key));
+      const after = await maxBatchInstance.getItems(entries.map((e) => e.key));
+      expect(after.every((r) => r.value === null)).toBe(true);
+
+      await maxBatchInstance.dropInstance();
+    });
+
+    it('should run multiple writes in a single transaction', async () => {
+      await instance.runTransaction('readwrite', async (tx) => {
+        const current = (await tx.get<number>('counter')) ?? 0;
+        await tx.set('counter', current + 1);
+        await tx.set('last', 'done');
+      });
+
+      expect(await instance.getItem('counter')).toBe(1);
+      expect(await instance.getItem('last')).toBe('done');
+    });
+
+    it('should prevent writes in readonly transactions', async () => {
+      await instance.setItem('rkey', 'rval');
+      await expect(
+        instance.runTransaction('readonly', async (tx) => {
+          return tx.set('rkey', 'should-fail');
+        })
+      ).rejects.toBeInstanceOf(Error);
+    });
+  });
+
   describe('Callback support', () => {
     it('should support callbacks for setItem', async () => {
       await new Promise<void>((resolve) => {

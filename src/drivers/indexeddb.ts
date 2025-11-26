@@ -1189,17 +1189,28 @@ function runTransaction<T>(
         tx.onerror = () => rej(tx.error || new Error('Transaction error'));
       });
 
-      runnerPromise.catch((err) => {
+      const guardedRunner = runnerPromise.catch((err) => {
         try {
           tx.abort();
-        } catch (abortError) {
-          // swallow abort errors
+        } catch {
+          // ignore abort issues
         }
         throw err;
       });
 
-      const [result] = await Promise.all([runnerPromise, completion]);
-      resolve(result);
+      const [runnerOutcome, completionOutcome] = await Promise.allSettled([
+        guardedRunner,
+        completion,
+      ]);
+
+      if (runnerOutcome.status === 'rejected') {
+        throw runnerOutcome.reason;
+      }
+      if (completionOutcome.status === 'rejected') {
+        throw completionOutcome.reason;
+      }
+
+      resolve(runnerOutcome.value);
     } catch (err) {
       reject(err as Error);
     }

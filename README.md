@@ -141,6 +141,24 @@ console.log(result); // [{ key: 'user:1', value: {…} }, { key: 'user:2', value
 
 // Single transaction delete
 await localspace.removeItems(items.map((item) => item.key));
+
+// For very large batches, set a chunk size to avoid huge transactions
+const limited = localspace.createInstance({ maxBatchSize: 200 });
+await limited.setDriver([limited.INDEXEDDB]);
+await limited.setItems(items); // will split into 200-item chunks
+```
+
+### Run your own transaction
+When you need atomic multi-step work (migrations, dependent writes), wrap operations in a single transaction. On IndexedDB this uses one `IDBTransaction`; on localStorage it executes sequentially.
+
+```ts
+await localspace.setDriver([localspace.INDEXEDDB]);
+await localspace.runTransaction('readwrite', async (tx) => {
+  const current = await tx.get<number>('counter');
+  const next = (current ?? 0) + 1;
+  await tx.set('counter', next);
+  await tx.set('lastUpdated', Date.now());
+});
 ```
 
 ### Configure isolated stores for clear data boundaries
@@ -233,6 +251,8 @@ localspace.setItem('key', 'value', (err, value) => {
 
 ## Performance notes
 - **Batch APIs outperform loops:** Playwright benchmark (`test/playwright/benchmark.spec.ts`) on 500 items x 256B showed `setItems()` ~6x faster and `getItems()` ~7.7x faster than per-item loops, with `removeItems()` ~2.8x faster (Chromium, relaxed durability).
+- **Transaction helpers:** `runTransaction()` lets you co-locate reads/writes in a single transaction for atomic migrations and to shorten lock time.
+- **Batch sizing:** Use `maxBatchSize` to split very large batches and keep transaction size in check.
 - **IndexedDB durability defaults:** Chrome 121+ uses relaxed durability by default; keep it for speed or set `durability: 'strict'` in `config` for migration-style writes.
 - **Storage Buckets (Chromium 122+):** supply a `bucket` option to isolate critical data and hint durability/persistence per bucket.
 - **localStorage batch atomicity:** When using localStorage driver, batch operations (`setItems()`, `removeItems()`) are **not atomic**. If an error occurs mid-operation, some items may be written or removed while others are not. In contrast, IndexedDB batch operations use transactions and guarantee atomicity (all-or-nothing). If atomicity is critical for your use case, prefer IndexedDB driver or implement application-level rollback logic.
