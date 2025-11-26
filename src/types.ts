@@ -41,6 +41,12 @@ export interface LocalSpaceConfig {
   maxBatchSize?: number;
 
   /**
+   * Pre-warm an IndexedDB transaction after initialization to avoid the
+   * first-op latency hit. Enabled by default; set to false to skip.
+   */
+  prewarmTransactions?: boolean;
+
+  /**
    * Driver(s) to use (string or array of strings)
    */
   driver?: string | string[];

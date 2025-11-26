@@ -255,6 +255,7 @@ localspace.setItem('key', 'value', (err, value) => {
 - **Batch sizing:** Use `maxBatchSize` to split very large batches and keep transaction size in check.
 - **IndexedDB durability defaults:** Chrome 121+ uses relaxed durability by default; keep it for speed or set `durability: 'strict'` in `config` for migration-style writes.
 - **Storage Buckets (Chromium 122+):** supply a `bucket` option to isolate critical data and hint durability/persistence per bucket.
+- **Connection warmup:** IndexedDB instances optionally pre-warm a transaction after init to reduce first-op latency (`prewarmTransactions` enabled by default; set to `false` to skip).
 - **localStorage batch atomicity:** When using localStorage driver, batch operations (`setItems()`, `removeItems()`) are **not atomic**. If an error occurs mid-operation, some items may be written or removed while others are not. In contrast, IndexedDB batch operations use transactions and guarantee atomicity (all-or-nothing). If atomicity is critical for your use case, prefer IndexedDB driver or implement application-level rollback logic.
 
 When `compatibilityMode` is off, driver setup methods also use Node-style callbacks. Promises are recommended for all new code.

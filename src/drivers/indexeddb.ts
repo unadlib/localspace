@@ -53,6 +53,8 @@ interface DbContext {
   db: IDBDatabase | null;
   dbReady: Promise<void> | null;
   deferredOperations: DeferredOperation[];
+  prewarmPromise?: Promise<void> | null;
+  prewarmed?: boolean;
 }
 
 interface DeferredOperation {
@@ -246,6 +248,8 @@ function createDbContext(): DbContext {
     db: null,
     dbReady: null,
     deferredOperations: [],
+    prewarmPromise: null,
+    prewarmed: false,
   };
 }
 
@@ -415,6 +419,42 @@ function getTransactionOptions(
   }
 }
 
+function maybePrewarmTransaction(
+  dbInfo: DbInfo,
+  dbContext: DbContext
+): Promise<void> | undefined {
+  if (dbInfo.prewarmTransactions === false) {
+    return undefined;
+  }
+  if (dbContext.prewarmed || dbContext.prewarmPromise) {
+    return dbContext.prewarmPromise || Promise.resolve();
+  }
+
+  const promise = new Promise<void>((resolve) => {
+    try {
+      const storeName = requireStoreName(dbInfo);
+      const txOptions = getTransactionOptions(dbInfo, READ_ONLY);
+      const tx = txOptions
+        ? dbInfo.db!.transaction(storeName, READ_ONLY, txOptions)
+        : dbInfo.db!.transaction(storeName, READ_ONLY);
+      // A lightweight request warms up the connection without mutating data.
+      tx.objectStore(storeName).count();
+
+      tx.oncomplete = () => resolve();
+      tx.onabort = tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+
+  dbContext.prewarmPromise = promise;
+  promise.finally(() => {
+    dbContext.prewarmPromise = null;
+    dbContext.prewarmed = true;
+  });
+  return promise;
+}
+
 function createTransaction(
   dbInfo: DbInfo,
   mode: IDBTransactionMode,
@@ -564,6 +604,12 @@ async function _initStorage(
       forage._dbInfo.db = dbInfo.db;
       forage._dbInfo.version = dbInfo.version;
     }
+  }
+
+  // Opportunistic prewarm to avoid cold-start latency on first operation
+  const prewarm = maybePrewarmTransaction(dbInfo, dbContext);
+  if (prewarm) {
+    prewarm.catch(() => undefined);
   }
 }
 
