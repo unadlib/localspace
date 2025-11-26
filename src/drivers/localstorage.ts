@@ -7,11 +7,13 @@ import type {
   LocalSpaceInstance,
   BatchItems,
   BatchResponse,
+  TransactionScope,
 } from '../types';
 import {
   executeCallback,
   normalizeBatchEntries,
   normalizeKey,
+  chunkArray,
 } from '../utils/helpers';
 import serializer from '../utils/serializer';
 
@@ -258,8 +260,12 @@ function removeItems(
 
   const promise = this.ready().then(() => {
     const dbInfo = this._dbInfo;
-    for (const key of normalizedKeys) {
-      localStorage.removeItem(dbInfo.keyPrefix + key);
+    const batchSize = dbInfo.maxBatchSize ?? normalizedKeys.length;
+
+    for (const batch of chunkArray(normalizedKeys, batchSize)) {
+      for (const key of batch) {
+        localStorage.removeItem(dbInfo.keyPrefix + key);
+      }
     }
   });
 
@@ -312,20 +318,23 @@ function setItems<T>(
   const promise = this.ready().then(async () => {
     const dbInfo = this._dbInfo;
     const stored: BatchResponse<T> = [];
+    const batchSize = dbInfo.maxBatchSize ?? normalized.length;
 
-    for (const entry of normalized) {
-      const normalizedValue = (entry.value === undefined
-        ? null
-        : entry.value) as T;
-      const serializedValue = await dbInfo.serializer.serialize(
-        normalizedValue
-      );
+    for (const batch of chunkArray(normalized, batchSize)) {
+      for (const entry of batch) {
+        const normalizedValue = (entry.value === undefined
+          ? null
+          : entry.value) as T;
+        const serializedValue = await dbInfo.serializer.serialize(
+          normalizedValue
+        );
 
-      localStorage.setItem(
-        dbInfo.keyPrefix + entry.key,
-        serializedValue
-      );
-      stored.push({ key: entry.key, value: normalizedValue });
+        localStorage.setItem(
+          dbInfo.keyPrefix + entry.key,
+          serializedValue
+        );
+        stored.push({ key: entry.key, value: normalizedValue });
+      }
     }
 
     return stored;
@@ -345,15 +354,18 @@ function getItems<T>(
   const promise = this.ready().then(() => {
     const dbInfo = this._dbInfo;
     const results: BatchResponse<T> = [];
+    const batchSize = dbInfo.maxBatchSize ?? normalizedKeys.length;
 
-    for (const key of normalizedKeys) {
-      const raw = localStorage.getItem(dbInfo.keyPrefix + key);
-      if (raw === null) {
-        results.push({ key, value: null });
-        continue;
+    for (const batch of chunkArray(normalizedKeys, batchSize)) {
+      for (const key of batch) {
+        const raw = localStorage.getItem(dbInfo.keyPrefix + key);
+        if (raw === null) {
+          results.push({ key, value: null });
+          continue;
+        }
+        const value = dbInfo.serializer.deserialize(raw) as T;
+        results.push({ key, value });
       }
-      const value = dbInfo.serializer.deserialize(raw) as T;
-      results.push({ key, value });
     }
 
     return results;
@@ -411,6 +423,30 @@ const localStorageWrapper: Driver = {
   length,
   key,
   keys,
+  runTransaction<T>(
+    this: LocalStorageDriverContext,
+    _mode: IDBTransactionMode,
+    runner: (scope: TransactionScope) => Promise<T> | T,
+    callback?: Callback<T>
+  ): Promise<T> {
+    const scope: TransactionScope = {
+      get: (key) => getItem.call(this, key),
+      set: (key, value) => setItem.call(this, key, value),
+      remove: (key) => removeItem.call(this, key),
+      keys: () => keys.call(this),
+      iterate: (fn) => iterate.call(this, fn),
+      clear: () => clear.call(this),
+    };
+
+    const promise = Promise.resolve()
+      .then(() => runner(scope))
+      .catch((err) => {
+        throw err;
+      });
+
+    executeCallback(promise, callback);
+    return promise;
+  },
   dropInstance,
 };
 

@@ -35,6 +35,12 @@ export interface LocalSpaceConfig {
   bucket?: StorageBucketConfig;
 
   /**
+   * Optional max batch size for bulk operations. When set, large batches
+   * will be split into multiple transactions/chunks.
+   */
+  maxBatchSize?: number;
+
+  /**
    * Driver(s) to use (string or array of strings)
    */
   driver?: string | string[];
@@ -130,6 +136,17 @@ export interface Driver {
     keys: string[],
     callback?: Callback<void>
   ): Promise<void>;
+
+  /**
+   * Execute multiple operations within a single driver-level transaction
+   * when supported. Drivers without transactional support should still
+   * run the callback sequentially.
+   */
+  runTransaction<T>(
+    mode: IDBTransactionMode,
+    runner: (scope: TransactionScope) => Promise<T> | T,
+    callback?: Callback<T>
+  ): Promise<T>;
 
   /**
    * Clear all items
@@ -318,6 +335,15 @@ export interface LocalSpaceInstance {
   ): Promise<void>;
 
   /**
+   * Run multiple operations in a single transaction when supported.
+   */
+  runTransaction<T>(
+    mode: IDBTransactionMode,
+    runner: (scope: TransactionScope) => Promise<T> | T,
+    callback?: Callback<T>
+  ): Promise<T>;
+
+  /**
    * Get length
    */
   length(callback?: Callback<number>): Promise<number>;
@@ -377,3 +403,14 @@ export type BatchItems<T> =
   | Record<string, T>;
 
 export type BatchResponse<T> = Array<{ key: string; value: T | null }>;
+
+export interface TransactionScope {
+  get<T>(key: string): Promise<T | null>;
+  set<T>(key: string, value: T): Promise<T>;
+  remove(key: string): Promise<void>;
+  keys(): Promise<string[]>;
+  iterate<T, U>(
+    iterator: (value: T, key: string, iterationNumber: number) => U
+  ): Promise<U>;
+  clear(): Promise<void>;
+}

@@ -7,12 +7,14 @@ import type {
   BatchItems,
   BatchResponse,
   KeyValuePair,
+  TransactionScope,
 } from '../types';
 import {
   executeCallback,
   normalizeBatchEntries,
   normalizeKey,
   createBlob,
+  chunkArray,
 } from '../utils/helpers';
 import serializer from '../utils/serializer';
 
@@ -642,66 +644,80 @@ function getItems<T>(
   const self = this;
   const normalizedKeys = keys.map((key) => normalizeKey(key));
 
-  const promise = new Promise<BatchResponse<T>>((resolve, reject) => {
-    self
-      .ready()
-      .then(() => {
-        if (normalizedKeys.length === 0) {
-          resolve([]);
-          return;
-        }
+  const promise = new Promise<BatchResponse<T>>(async (resolve, reject) => {
+    try {
+      await self.ready();
 
-        createTransaction(
-          self._dbInfo,
-          READ_ONLY,
-          (err: Error | null, transaction?: IDBTransaction) => {
-            if (err) return reject(err);
+      if (normalizedKeys.length === 0) {
+        resolve([]);
+        return;
+      }
 
-            try {
-              const storeName = requireStoreName(self._dbInfo);
-              const store = transaction!.objectStore(storeName);
-              const results: BatchResponse<T> = new Array(
-                normalizedKeys.length
-              );
-              let remaining = normalizedKeys.length;
-              let requestError: Error | null = null;
+      const dbInfo = self._dbInfo;
+      const batchSize = dbInfo.maxBatchSize ?? normalizedKeys.length;
+      const results: BatchResponse<T> = new Array(normalizedKeys.length);
 
-              normalizedKeys.forEach((key, index) => {
-                const req = store.get(key);
-                req.onsuccess = () => {
-                  let value = req.result;
-                  if (value === undefined) {
-                    value = null;
-                  }
-                  if (isEncodedBlob(value)) {
-                    value = decodeBlob(value);
-                  }
-                  results[index] = { key, value };
-                  remaining -= 1;
-                  if (remaining === 0) {
-                    resolve(results);
-                  }
+      const processBatch = (batchKeys: string[], offset: number) =>
+        new Promise<void>((batchResolve, batchReject) => {
+          createTransaction(
+            dbInfo,
+            READ_ONLY,
+            (err: Error | null, transaction?: IDBTransaction) => {
+              if (err) return batchReject(err);
+
+              try {
+                const storeName = requireStoreName(dbInfo);
+                const store = transaction!.objectStore(storeName);
+                let requestError: Error | null = null;
+                let remaining = batchKeys.length;
+
+                batchKeys.forEach((key, index) => {
+                  const req = store.get(key);
+                  req.onsuccess = () => {
+                    let value = req.result;
+                    if (value === undefined) {
+                      value = null;
+                    }
+                    if (isEncodedBlob(value)) {
+                      value = decodeBlob(value);
+                    }
+                    results[offset + index] = { key, value };
+                    remaining -= 1;
+                    if (remaining === 0) {
+                      batchResolve();
+                    }
+                  };
+                  req.onerror = () => {
+                    requestError =
+                      req.error || new Error(`Failed to get "${key}"`);
+                  };
+                });
+
+                transaction!.onabort = transaction!.onerror = () => {
+                  batchReject(
+                    requestError ||
+                      transaction!.error ||
+                      new Error('Failed to get items transaction')
+                  );
                 };
-                req.onerror = () => {
-                  requestError =
-                    req.error || new Error(`Failed to get "${key}"`);
-                };
-              });
-
-              transaction!.onabort = transaction!.onerror = () => {
-                reject(
-                  requestError ||
-                    transaction!.error ||
-                    new Error('Failed to get items transaction')
-                );
-              };
-            } catch (e) {
-              reject(e);
+              } catch (e) {
+                batchReject(e);
+              }
             }
-          }
-        );
-      })
-      .catch(reject);
+          );
+        });
+
+      const batches = chunkArray(normalizedKeys, batchSize);
+      let offset = 0;
+      for (const batch of batches) {
+        await processBatch(batch, offset);
+        offset += batch.length;
+      }
+
+      resolve(results);
+    } catch (err) {
+      reject(err as Error);
+    }
   });
 
   executeCallback(promise, callback);
@@ -784,40 +800,50 @@ function setItems<T>(
       const dbInfo = self._dbInfo;
 
       let blobSupport: boolean | undefined;
-      const payloads: BatchResponse<T> = [];
 
       const needsBlobCheck = normalized.some(
         (entry) => toString.call(entry.value) === '[object Blob]'
       );
 
-      if (needsBlobCheck) {
-        blobSupport = await checkBlobSupport(dbInfo.db!);
+  if (needsBlobCheck) {
+    blobSupport = await checkBlobSupport(dbInfo.db!);
+  }
+
+  const batches = chunkArray(
+    normalized,
+    dbInfo.maxBatchSize ?? normalized.length
+  );
+
+  const allResults: BatchResponse<T> = [];
+
+  const processBatch = async (batch: KeyValuePair<T>[]) => {
+    const payloads: BatchResponse<T> = [];
+
+    for (const entry of batch) {
+      let value: T | null | undefined = entry.value;
+      if (value === undefined) {
+        value = null;
       }
 
-      for (const entry of normalized) {
-        let value: T | null | undefined = entry.value;
-        if (value === undefined) {
-          value = null;
+      if (toString.call(entry.value) === '[object Blob]') {
+        const canStoreBlob =
+          typeof blobSupport === 'boolean'
+            ? blobSupport
+            : await checkBlobSupport(dbInfo.db!);
+        if (!canStoreBlob) {
+          value = (await encodeBlob(entry.value as unknown as Blob)) as T;
         }
-
-        if (toString.call(entry.value) === '[object Blob]') {
-          const canStoreBlob =
-            typeof blobSupport === 'boolean'
-              ? blobSupport
-              : await checkBlobSupport(dbInfo.db!);
-          if (!canStoreBlob) {
-            value = (await encodeBlob(entry.value as unknown as Blob)) as T;
-          }
-        }
-
-        payloads.push({ key: entry.key, value });
       }
 
+      payloads.push({ key: entry.key, value });
+    }
+
+    return new Promise<BatchResponse<T>>((batchResolve, batchReject) => {
       createTransaction(
         dbInfo,
         READ_WRITE,
         (err: Error | null, transaction?: IDBTransaction) => {
-          if (err) return reject(err);
+          if (err) return batchReject(err);
 
           try {
             const storeName = requireStoreName(dbInfo);
@@ -833,19 +859,28 @@ function setItems<T>(
               };
             }
 
-            transaction!.oncomplete = () => resolve(payloads);
+            transaction!.oncomplete = () => batchResolve(payloads);
             transaction!.onabort = transaction!.onerror = () => {
-              reject(
+              batchReject(
                 requestError ||
                   transaction!.error ||
                   new Error('Failed to set items transaction')
               );
             };
           } catch (e) {
-            reject(e);
+            batchReject(e);
           }
         }
       );
+    });
+  };
+
+  for (const batch of batches) {
+    const result = await processBatch(batch);
+    allResults.push(...result);
+  }
+
+  resolve(allResults);
     } catch (err) {
       reject(err as Error);
     }
@@ -966,49 +1001,208 @@ function removeItems(
   const self = this;
   const normalizedKeys = keys.map((key) => normalizeKey(key));
 
-  const promise = new Promise<void>((resolve, reject) => {
-    self
-      .ready()
-      .then(() => {
-        if (normalizedKeys.length === 0) {
-          resolve();
-          return;
-        }
+  const promise = new Promise<void>(async (resolve, reject) => {
+    try {
+      await self.ready();
+      if (normalizedKeys.length === 0) {
+        resolve();
+        return;
+      }
 
-        createTransaction(
-          self._dbInfo,
-          READ_WRITE,
-          (err: Error | null, transaction?: IDBTransaction) => {
-            if (err) return reject(err);
+      const dbInfo = self._dbInfo;
+      const batchSize = dbInfo.maxBatchSize ?? normalizedKeys.length;
 
-            try {
-              const storeName = requireStoreName(self._dbInfo);
-              const store = transaction!.objectStore(storeName);
-              let requestError: Error | null = null;
+      const processBatch = (batchKeys: string[]) =>
+        new Promise<void>((batchResolve, batchReject) => {
+          createTransaction(
+            dbInfo,
+            READ_WRITE,
+            (err: Error | null, transaction?: IDBTransaction) => {
+              if (err) return batchReject(err);
 
-              for (const key of normalizedKeys) {
-                const req = store.delete(key);
-                req.onerror = () => {
-                  requestError =
-                    req.error || new Error(`Failed to remove "${key}"`);
+              try {
+                const storeName = requireStoreName(dbInfo);
+                const store = transaction!.objectStore(storeName);
+                let requestError: Error | null = null;
+
+                for (const key of batchKeys) {
+                  const req = store.delete(key);
+                  req.onerror = () => {
+                    requestError =
+                      req.error || new Error(`Failed to remove "${key}"`);
+                  };
+                }
+
+                transaction!.oncomplete = () => batchResolve();
+                transaction!.onabort = transaction!.onerror = () => {
+                  batchReject(
+                    requestError ||
+                      transaction!.error ||
+                      new Error('Failed to remove items transaction')
+                  );
                 };
+              } catch (e) {
+                batchReject(e);
               }
+            }
+          );
+        });
 
-              transaction!.oncomplete = () => resolve();
-              transaction!.onabort = transaction!.onerror = () => {
-                reject(
-                  requestError ||
-                    transaction!.error ||
-                    new Error('Failed to remove items transaction')
-                );
-              };
-            } catch (e) {
-              reject(e);
+      const batches = chunkArray(normalizedKeys, batchSize);
+      for (const batch of batches) {
+        await processBatch(batch);
+      }
+
+      resolve();
+    } catch (err) {
+      reject(err as Error);
+    }
+  });
+
+  executeCallback(promise, callback);
+  return promise;
+}
+
+function runTransaction<T>(
+  this: IndexedDBDriverContext,
+  mode: IDBTransactionMode,
+  runner: (scope: TransactionScope) => Promise<T> | T,
+  callback?: Callback<T>
+): Promise<T> {
+  const self = this;
+
+  const promise = new Promise<T>(async (resolve, reject) => {
+    try {
+      await self.ready();
+      const dbInfo = self._dbInfo;
+      const storeName = requireStoreName(dbInfo);
+      const txOptions = getTransactionOptions(dbInfo, mode);
+      const tx = txOptions
+        ? dbInfo.db!.transaction(storeName, mode, txOptions)
+        : dbInfo.db!.transaction(storeName, mode);
+      const store = tx.objectStore(storeName);
+      let blobSupport: boolean | undefined;
+
+      const ensureBlobSupport = async (): Promise<boolean> => {
+        if (typeof blobSupport === 'boolean') return blobSupport;
+        blobSupport = await checkBlobSupport(dbInfo.db!);
+        return blobSupport!;
+      };
+
+      const makeReadOnlyGuard = () => {
+        if (mode === READ_ONLY) {
+          throw new Error('Transaction is readonly');
+        }
+      };
+
+      const scope: TransactionScope = {
+        get: <V>(key: string) =>
+          new Promise<V | null>((res, rej) => {
+            const req = store.get(normalizeKey(key));
+            req.onsuccess = () => {
+              let value = req.result;
+              if (value === undefined) value = null;
+              if (isEncodedBlob(value)) {
+                value = decodeBlob(value);
+              }
+              res(value);
+            };
+            req.onerror = () => rej(req.error);
+          }),
+        set: async <V>(key: string, value: V) => {
+          makeReadOnlyGuard();
+          let actual: V | null | undefined = value;
+          if (actual === undefined) actual = null;
+
+          if (toString.call(value) === '[object Blob]') {
+            const canStoreBlob = await ensureBlobSupport();
+            if (!canStoreBlob) {
+              actual = (await encodeBlob(value as unknown as Blob)) as V;
             }
           }
-        );
-      })
-      .catch(reject);
+
+          return new Promise<V>((res, rej) => {
+            const req = store.put(actual, normalizeKey(key));
+            req.onsuccess = () => res(actual as V);
+            req.onerror = () => rej(req.error);
+          });
+        },
+        remove: (key: string) =>
+          new Promise<void>((res, rej) => {
+            makeReadOnlyGuard();
+            const req = store.delete(normalizeKey(key));
+            req.onsuccess = () => res();
+            req.onerror = () => rej(req.error);
+          }),
+        keys: () =>
+          new Promise<string[]>((res, rej) => {
+            const all: string[] = [];
+            const req = store.openKeyCursor();
+            req.onsuccess = () => {
+              const cursor = req.result;
+              if (!cursor) {
+                res(all);
+                return;
+              }
+              all.push(cursor.key as string);
+              cursor.continue();
+            };
+            req.onerror = () => rej(req.error);
+          }),
+        iterate: <V, U>(fn: (value: V, key: string, iteration: number) => U) =>
+          new Promise<U>((res, rej) => {
+            const req = store.openCursor();
+            let iteration = 1;
+            req.onsuccess = () => {
+              const cursor = req.result;
+              if (cursor) {
+                let value = cursor.value;
+                if (value === undefined) value = null;
+                if (isEncodedBlob(value)) {
+                  value = decodeBlob(value);
+                }
+                const out = fn(value, cursor.key as string, iteration++);
+                if (out !== undefined) {
+                  res(out);
+                } else {
+                  cursor.continue();
+                }
+              } else {
+                res(undefined as U);
+              }
+            };
+            req.onerror = () => rej(req.error);
+          }),
+        clear: () =>
+          new Promise<void>((res, rej) => {
+            makeReadOnlyGuard();
+            const req = store.clear();
+            req.onsuccess = () => res();
+            req.onerror = () => rej(req.error);
+          }),
+      };
+
+      const runnerPromise = Promise.resolve().then(() => runner(scope));
+      const completion = new Promise<void>((res, rej) => {
+        tx.oncomplete = () => res();
+        tx.onabort = () => rej(tx.error || new Error('Transaction aborted'));
+        tx.onerror = () => rej(tx.error || new Error('Transaction error'));
+      });
+
+      runnerPromise.catch((err) => {
+        try {
+          tx.abort();
+        } catch (abortError) {
+          // swallow abort errors
+        }
+        throw err;
+      });
+
+      const [result] = await Promise.all([runnerPromise, completion]);
+      resolve(result);
+    } catch (err) {
+      reject(err as Error);
+    }
   });
 
   executeCallback(promise, callback);
@@ -1397,6 +1591,7 @@ const asyncStorage: Driver = {
   setItems,
   removeItem,
   removeItems,
+  runTransaction,
   clear,
   length,
   key,

@@ -41,6 +41,7 @@ const OptionalDriverMethods = [
   'setItems',
   'getItems',
   'removeItems',
+  'runTransaction',
 ];
 
 const LibraryMethods = [
@@ -55,6 +56,7 @@ const LibraryMethods = [
   'removeItems',
   'setItem',
   'setItems',
+  'runTransaction',
 ].concat(OptionalDriverMethods);
 
 const DefaultConfig: LocalSpaceConfig = {
@@ -604,6 +606,14 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   async removeItems(keys: string[], callback?: Callback<void>): Promise<void> {
+    throw new Error('Driver not initialized');
+  }
+
+  async runTransaction<T>(
+    mode: IDBTransactionMode,
+    runner: (scope: TransactionScope) => Promise<T> | T,
+    callback?: Callback<T>
+  ): Promise<T> {
     throw new Error('Driver not initialized');
   }
 

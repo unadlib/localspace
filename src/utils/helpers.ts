@@ -205,3 +205,18 @@ export function normalizeBatchEntries<T>(items: BatchItems<T>): KeyValuePair<T>[
   }
   return normalized;
 }
+
+/**
+ * Split an array into chunks respecting the provided size.
+ */
+export function chunkArray<T>(items: T[], size: number): T[][] {
+  if (size <= 0 || size >= items.length) {
+    return [items];
+  }
+
+  const batches: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    batches.push(items.slice(i, i + size));
+  }
+  return batches;
+}
