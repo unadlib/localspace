@@ -1302,8 +1302,8 @@ function removeItem(
       .ready()
       .then(() => {
         const dbInfo = self._dbInfo;
-      const coalesce =
-        dbInfo.coalesceWrites && dbInfo.maxBatchSize === undefined;
+        const coalesce =
+          dbInfo.coalesceWrites && dbInfo.maxBatchSize === undefined;
 
         if (coalesce) {
           enqueueCoalescedWrite(dbInfo, { type: 'remove', key })
