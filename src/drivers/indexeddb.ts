@@ -443,6 +443,15 @@ function getConnection(
       const db = openreq.result;
       db.onversionchange = (e: IDBVersionChangeEvent) => {
         (e.target as IDBDatabase).close();
+        const contextKey = getDbContextKey(dbInfo);
+        const dbContext = dbContexts[contextKey];
+        if (dbContext) {
+          dbContext.db = null;
+          dbContext.prewarmed = false;
+          for (const forage of dbContext.forages) {
+            forage._dbInfo.db = null;
+          }
+        }
       };
       resolve(db);
       advanceReadiness(dbInfo);
@@ -538,6 +547,14 @@ function scheduleIdleClose(dbInfo: DbInfo): void {
   }
 
   dbContext.idleTimer = setTimeout(() => {
+    if (
+      dbContext.pendingTransactions.length > 0 ||
+      dbContext.activeTransactions > 0
+    ) {
+      // Defer closing until the queue drains.
+      scheduleIdleClose(dbInfo);
+      return;
+    }
     try {
       dbContext.db?.close();
     } catch {
@@ -1235,8 +1252,7 @@ async function setItem<T>(
       const coalesce =
         dbInfo.coalesceWrites &&
         dbInfo.maxBatchSize === undefined &&
-        dbInfo.maxConcurrentTransactions !== null &&
-        dbInfo.maxConcurrentTransactions !== undefined;
+        dbInfo.maxConcurrentTransactions !== 0;
 
       if (coalesce) {
         enqueueCoalescedWrite(dbInfo, {
@@ -1295,11 +1311,10 @@ function removeItem(
       .ready()
       .then(() => {
         const dbInfo = self._dbInfo;
-        const coalesce =
-          dbInfo.coalesceWrites &&
-          dbInfo.maxBatchSize === undefined &&
-          dbInfo.maxConcurrentTransactions !== null &&
-          dbInfo.maxConcurrentTransactions !== undefined;
+      const coalesce =
+        dbInfo.coalesceWrites &&
+        dbInfo.maxBatchSize === undefined &&
+        dbInfo.maxConcurrentTransactions !== 0;
 
         if (coalesce) {
           enqueueCoalescedWrite(dbInfo, { type: 'remove', key })
@@ -1420,6 +1435,13 @@ function runTransaction<T>(
     try {
       await self.ready();
       const dbInfo = self._dbInfo;
+      // Compute blob support once up front so we don't pause an empty transaction later.
+      let precomputedBlobSupport: boolean | undefined;
+      try {
+        precomputedBlobSupport = await ensureBlobSupportForDb(dbInfo);
+      } catch {
+        precomputedBlobSupport = undefined;
+      }
       createTransaction(
         dbInfo,
         mode,
@@ -1432,7 +1454,16 @@ function runTransaction<T>(
           try {
             const storeName = requireStoreName(dbInfo);
             const store = transaction.objectStore(storeName);
-            let blobSupport: boolean | undefined;
+            let blobSupport: boolean | undefined = precomputedBlobSupport;
+
+            const isTransactionActive = (): boolean => {
+              try {
+                transaction.objectStore(storeName);
+                return true;
+              } catch {
+                return false;
+              }
+            };
 
             const ensureBlobSupport = async (): Promise<boolean> => {
               if (typeof blobSupport === 'boolean') return blobSupport;
@@ -1473,6 +1504,12 @@ function runTransaction<T>(
                   if (!canStoreBlob) {
                     actual = (await encodeBlob(value as unknown as Blob)) as V;
                   }
+                }
+
+                if (!isTransactionActive()) {
+                  throw new Error(
+                    'Transaction became inactive while preparing data.'
+                  );
                 }
 
                 return new Promise<V>((res, rej) => {
@@ -1870,6 +1907,7 @@ function dropInstance(
             for (const forage of forages) {
               advanceReadiness(forage._dbInfo);
             }
+            delete dbContexts[contextKey];
           }
         })
         .catch((err) => {
