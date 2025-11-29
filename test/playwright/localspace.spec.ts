@@ -122,7 +122,7 @@ test.describe('localspace browser interoperability', () => {
     expect(breakValue).toBe('Some value!');
   });
 
-  test('key(n) and keys() follow insertion order', async ({ page }) => {
+  test('key(n) and keys() return a consistent order', async ({ page }) => {
     await ensureFixtureReady(page);
 
     const keys = await page.evaluate(async (storeName) => {
@@ -146,9 +146,12 @@ test.describe('localspace browser interoperability', () => {
       return { first, second, all };
     }, randomStoreName('keys'));
 
-    expect(keys.first).toBe('alpha');
-    expect(keys.second).toBe('beta');
-    expect(keys.all).toEqual(['alpha', 'beta']);
+    // localStorage key enumeration is not strictly specified across engines; just assert consistency.
+    expect(new Set([keys.first, keys.second])).toEqual(new Set(['alpha', 'beta']));
+    expect(keys.all).toEqual(expect.arrayContaining(['alpha', 'beta']));
+    expect(keys.all).toHaveLength(2);
+    expect(keys.all[0]).toBe(keys.first);
+    expect(keys.all[1]).toBe(keys.second);
   });
 
   test('dropInstance removes persisted entries for localStorage', async ({ page }) => {
