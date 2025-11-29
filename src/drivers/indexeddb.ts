@@ -565,13 +565,6 @@ function scheduleIdleClose(dbInfo: DbInfo): void {
     for (const forage of dbContext.forages) {
       forage._dbInfo.db = null;
     }
-    // If there are pending transactions, restart the loop so the next op reopens.
-    if (dbContext.pendingTransactions.length > 0) {
-      const next = dbContext.pendingTransactions.shift();
-      if (next) {
-        next();
-      }
-    }
   }, idleMs);
 }
 
