@@ -1243,9 +1243,7 @@ async function setItem<T>(
 
       const normalizedValue = (value === undefined ? null : value) as T;
       const coalesce =
-        dbInfo.coalesceWrites &&
-        dbInfo.maxBatchSize === undefined &&
-        dbInfo.maxConcurrentTransactions !== 0;
+        dbInfo.coalesceWrites && dbInfo.maxBatchSize === undefined;
 
       if (coalesce) {
         enqueueCoalescedWrite(dbInfo, {
@@ -1305,9 +1303,7 @@ function removeItem(
       .then(() => {
         const dbInfo = self._dbInfo;
       const coalesce =
-        dbInfo.coalesceWrites &&
-        dbInfo.maxBatchSize === undefined &&
-        dbInfo.maxConcurrentTransactions !== 0;
+        dbInfo.coalesceWrites && dbInfo.maxBatchSize === undefined;
 
         if (coalesce) {
           enqueueCoalescedWrite(dbInfo, { type: 'remove', key })
