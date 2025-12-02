@@ -5,6 +5,7 @@ import type {
   BatchItems,
   KeyValuePair,
 } from '../types';
+import { createLocalSpaceError, normalizeUnknownError } from '../errors';
 
 /**
  * Execute callback if provided, handling errors gracefully
@@ -16,7 +17,7 @@ export function executeCallback<T>(
   if (callback) {
     promise.then(
       (result) => callback(null, result),
-      (error) => callback(error, undefined)
+      (error) => callback(normalizeUnknownError(error) as Error, undefined)
     );
   }
   return promise;
@@ -34,9 +35,8 @@ export function executeTwoCallbacks<T>(
     | Callback<T>,
   options?: { compatibilityMode?: boolean }
 ): Promise<T> {
-  const normalizeError = (error: unknown): Error => {
-    return error instanceof Error ? error : new Error(String(error));
-  };
+  const normalizeError = (error: unknown): Error =>
+    normalizeUnknownError(error) as Error;
 
   if (options?.compatibilityMode) {
     if (typeof callback === 'function') {
@@ -172,7 +172,10 @@ export function createBlob(
       legacyWindow.WebKitBlobBuilder;
 
     if (!BlobBuilder) {
-      throw new Error('Blob constructor not supported');
+      throw createLocalSpaceError(
+        'BLOB_UNSUPPORTED',
+        'Blob constructor not supported'
+      );
     }
 
     const builder = new BlobBuilder();

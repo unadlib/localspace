@@ -9,6 +9,7 @@ import {
   createBlob,
   executeCallback,
 } from '../src/utils/helpers';
+import { LocalSpaceError } from '../src/errors';
 
 describe('executeTwoCallbacks', () => {
   beforeEach(() => {
@@ -30,7 +31,11 @@ describe('executeTwoCallbacks', () => {
     });
     await executeTwoCallbacks(rejectingPromise, callback).catch(() => undefined);
 
-    expect(callback).toHaveBeenCalledWith(error, undefined);
+    const [errArg, value] = callback.mock.calls[0];
+    expect(errArg).toBeInstanceOf(LocalSpaceError);
+    expect((errArg as LocalSpaceError).message).toBe(error.message);
+    expect((errArg as LocalSpaceError).cause).toBe(error);
+    expect(value).toBeUndefined();
   });
 
   it('supports legacy success/error callbacks in compatibility mode', async () => {
@@ -57,7 +62,11 @@ describe('executeTwoCallbacks', () => {
 
     executeTwoCallbacks(fakePromise, success, failure, { compatibilityMode: true });
     handlers.onCatch?.(rejection);
-    expect(failure).toHaveBeenCalledWith(rejection);
+    expect(failure).toHaveBeenCalledTimes(1);
+    const errArg = failure.mock.calls[0][0] as LocalSpaceError;
+    expect(errArg).toBeInstanceOf(LocalSpaceError);
+    expect(errArg.message).toBe(rejection.message);
+    expect(errArg.cause).toBe(rejection);
   });
 });
 
@@ -237,7 +246,11 @@ describe('helper utilities', () => {
       const callback = vi.fn();
       const error = new Error('test error');
       await executeCallback(Promise.reject(error), callback).catch(() => {});
-      expect(callback).toHaveBeenCalledWith(error, undefined);
+      const [errArg, valueArg] = callback.mock.calls[0];
+      expect(errArg).toBeInstanceOf(LocalSpaceError);
+      expect((errArg as LocalSpaceError).cause).toBe(error);
+      expect((errArg as LocalSpaceError).message).toBe(error.message);
+      expect(valueArg).toBeUndefined();
     });
 
     it('returns promise even when callback is provided', async () => {
@@ -259,7 +272,10 @@ describe('helper utilities', () => {
       const errorCallback = vi.fn();
       const error = new Error('test error');
       await executeTwoCallbacks(Promise.reject(error), undefined, errorCallback).catch(() => {});
-      expect(errorCallback).toHaveBeenCalledWith(error);
+      const [errArg] = errorCallback.mock.calls[0];
+      expect(errArg).toBeInstanceOf(LocalSpaceError);
+      expect((errArg as LocalSpaceError).cause).toBe(error);
+      expect((errArg as LocalSpaceError).message).toBe(error.message);
     });
 
     it('normalizes non-Error objects to Error', async () => {
@@ -267,7 +283,7 @@ describe('helper utilities', () => {
       await executeTwoCallbacks(Promise.reject('string error'), callback).catch(() => {});
       expect(callback).toHaveBeenCalled();
       const callArg = callback.mock.calls[0][0];
-      expect(callArg).toBeInstanceOf(Error);
+      expect(callArg).toBeInstanceOf(LocalSpaceError);
       expect(callArg.message).toBe('string error');
     });
 

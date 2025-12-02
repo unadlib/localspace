@@ -56,7 +56,7 @@ localspace is built on a foundation designed for growth. Here's what's planned:
 - [x] Connection pooling, transaction batching, and warmup
 
 ### TODO
-- [ ] **Improved error handling** - Structured error types with detailed context
+- [x] **Improved error handling** - Structured error types with detailed context
 - [ ] **Plugin system** - Middleware architecture for cross-cutting concerns
 - [ ] **Cache API driver** - Native browser caching with automatic HTTP semantics
 - [ ] **OPFS driver** - Origin Private File System for high-performance file storage
@@ -339,7 +339,8 @@ When `compatibilityMode` is off, driver setup methods also use Node-style callba
 ## Troubleshooting
 - **Wait for readiness:** Call `await localspace.ready()` before the first operation when you need to confirm driver selection.
 - **Inspect drivers:** Use `localspace.driver()` to confirm which driver is active in different environments.
-- **Handle quota errors:** Catch `DOMException` errors from `setItem` to inform users about storage limits.
+- **Read structured errors:** Rejections surface as `LocalSpaceError` with a `code`, contextual `details` (driver, operation, key, attemptedDrivers), and the original `cause`. Branch on `error.code` instead of parsing strings.
+- **Handle quota errors:** Check for `error.code === 'QUOTA_EXCEEDED'` (or inspect `error.cause`) from `setItem` to inform users about storage limits.
 - **Run unit tests:** The project ships with Vitest and Playwright suites covering API behavior; run `yarn test` to verify changes.
 
 ## License

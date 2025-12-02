@@ -25,6 +25,8 @@ export type {
   CompatibilitySuccessCallback,
   CompatibilityErrorCallback,
 };
+export type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from './errors';
+export { LocalSpaceError } from './errors';
 
 // Export class for creating instances
 export { LocalSpace };

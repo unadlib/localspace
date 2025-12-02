@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import localspace, { LocalSpace } from '../src/index';
+import { LocalSpaceError } from '../src/errors';
 
 describe('LocalSpace class tests', () => {
   describe('Configuration', () => {
@@ -80,7 +81,12 @@ describe('LocalSpace class tests', () => {
 
     it('should reject getting non-existent driver', async () => {
       const instance = new LocalSpace();
-      await expect(instance.getDriver('non-existent-driver')).rejects.toThrow('Driver not found');
+      const promise = instance.getDriver('non-existent-driver');
+      await expect(promise).rejects.toBeInstanceOf(LocalSpaceError);
+      await expect(promise).rejects.toMatchObject({
+        code: 'DRIVER_NOT_FOUND',
+        details: { driver: 'non-existent-driver' },
+      });
     });
 
     it('should get serializer', async () => {
@@ -109,8 +115,13 @@ describe('LocalSpace class tests', () => {
       const originalSupports = instance.supports.bind(instance);
       instance.supports = vi.fn().mockReturnValue(false);
 
-      await expect(instance.setDriver([instance.INDEXEDDB, instance.LOCALSTORAGE]))
-        .rejects.toThrow('No available storage method found');
+      const attemptedDrivers = [instance.INDEXEDDB, instance.LOCALSTORAGE];
+      await expect(
+        instance.setDriver(attemptedDrivers)
+      ).rejects.toMatchObject({
+        code: 'DRIVER_UNAVAILABLE',
+        details: { attemptedDrivers },
+      });
 
       instance.supports = originalSupports;
     });

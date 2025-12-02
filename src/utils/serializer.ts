@@ -1,5 +1,6 @@
 import { createBlob } from './helpers';
 import type { Serializer } from '../types';
+import { createLocalSpaceError } from '../errors';
 
 const BASE_CHARS =
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -128,7 +129,11 @@ async function serialize(value: unknown): Promise<string> {
   if (isTypedArray(value)) {
     const marker = typedArrayTagMap[valueType];
     if (!marker) {
-      throw new Error('Failed to get type for BinaryArray');
+      throw createLocalSpaceError(
+        'SERIALIZATION_FAILED',
+        'Failed to get type for BinaryArray',
+        { valueType }
+      );
     }
     const sourceBuffer = value.buffer;
     const normalizedBuffer =
@@ -207,16 +212,31 @@ function deserialize(value: string): unknown {
       return new scope.Float64Array(buffer);
     case TYPE_BIGINT64ARRAY:
       if (typeof scope.BigInt64Array === 'undefined') {
-        throw new Error('BigInt64Array is not supported in this environment');
+        throw createLocalSpaceError(
+          'DESERIALIZATION_FAILED',
+          'BigInt64Array is not supported in this environment',
+          { operation: 'deserialize', type }
+        );
       }
       return new scope.BigInt64Array(buffer);
     case TYPE_BIGUINT64ARRAY:
       if (typeof scope.BigUint64Array === 'undefined') {
-        throw new Error('BigUint64Array is not supported in this environment');
+        throw createLocalSpaceError(
+          'DESERIALIZATION_FAILED',
+          'BigUint64Array is not supported in this environment',
+          { operation: 'deserialize', type }
+        );
       }
       return new scope.BigUint64Array(buffer);
     default:
-      throw new Error('Unknown type: ' + type);
+      throw createLocalSpaceError(
+        'DESERIALIZATION_FAILED',
+        'Unknown type: ' + type,
+        {
+          operation: 'deserialize',
+          type,
+        }
+      );
   }
 }
 

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import localspace, { LocalSpace } from '../src/index';
 import { executeTwoCallbacks } from '../src/utils/helpers';
 import type { LocalSpaceInstance } from '../src/types';
+import { LocalSpaceError } from '../src/errors';
 
 describe('localspace localStorage parity checks', () => {
   let instance: LocalSpaceInstance;
@@ -62,6 +63,9 @@ describe('localspace config compatibility snapshots', () => {
 
     const result = instance.config({ description: 'should fail' });
     expect(result).toBeInstanceOf(Error);
+    expect(result).toBeInstanceOf(LocalSpaceError);
+    expect((result as LocalSpaceError).code).toBe('CONFIG_LOCKED');
+    expect((result as LocalSpaceError).details?.operation).toBe('config');
   });
 });
 

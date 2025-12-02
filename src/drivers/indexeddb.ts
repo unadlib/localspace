@@ -9,6 +9,8 @@ import type {
   KeyValuePair,
   TransactionScope,
 } from '../types';
+import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors';
+import { createLocalSpaceError, toLocalSpaceError } from '../errors';
 import {
   executeCallback,
   normalizeBatchEntries,
@@ -31,10 +33,29 @@ const DETECT_BLOB_SUPPORT_STORE = 'local-forage-detect-blob-support';
 let supportsBlobs: boolean | undefined;
 const dbContexts: Record<string, DbContext> = {};
 const toString = Object.prototype.toString;
+const DRIVER_NAME = 'asyncStorage';
 
 const READ_ONLY = 'readonly';
 const READ_WRITE = 'readwrite';
 let detectBlobSupportPromise: Promise<boolean> | null = null;
+
+const withIdbErrorContext = <T>(
+  promise: Promise<T>,
+  operation: string,
+  details?: LocalSpaceErrorDetails,
+  code: LocalSpaceErrorCode = 'OPERATION_FAILED'
+): Promise<T> =>
+  promise.catch((error) => {
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : `IndexedDB ${operation} failed`;
+    throw toLocalSpaceError(error, code, message, {
+      driver: DRIVER_NAME,
+      operation,
+      ...(details ?? {}),
+    });
+  });
 
 const getNavigatorObject = (): Navigator | undefined => {
   if (typeof window !== 'undefined' && window.navigator) {
@@ -247,7 +268,11 @@ async function ensureBlobSupportForDb(
 
   await tryReconnect(dbInfo);
   if (!dbInfo.db) {
-    throw new Error('IndexedDB not available');
+    throw createLocalSpaceError(
+      'DRIVER_UNAVAILABLE',
+      'IndexedDB not available',
+      { driver: DRIVER_NAME }
+    );
   }
   return checkBlobSupport(dbInfo.db);
 }
@@ -258,7 +283,11 @@ async function readBlobAsArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   }
 
   if (typeof FileReader === 'undefined') {
-    throw new Error('Blob serialization not supported in this environment');
+    throw createLocalSpaceError(
+      'BLOB_UNSUPPORTED',
+      'Blob serialization not supported in this environment',
+      { driver: DRIVER_NAME }
+    );
   }
 
   return new Promise<ArrayBuffer>((resolve, reject) => {
@@ -323,14 +352,22 @@ function requireDbName(dbInfo: DbInfo): string {
   if (dbInfo.name) {
     return dbInfo.name;
   }
-  throw new Error('IndexedDB database name is not configured.');
+  throw createLocalSpaceError(
+    'INVALID_CONFIG',
+    'IndexedDB database name is not configured.',
+    { driver: DRIVER_NAME, configKey: 'name' }
+  );
 }
 
 function requireStoreName(dbInfo: DbInfo): string {
   if (dbInfo.storeName) {
     return dbInfo.storeName;
   }
-  throw new Error('IndexedDB storeName is not configured.');
+  throw createLocalSpaceError(
+    'INVALID_CONFIG',
+    'IndexedDB storeName is not configured.',
+    { driver: DRIVER_NAME, configKey: 'storeName' }
+  );
 }
 
 function getDbContextKey(dbInfo: DbInfo): string {
@@ -402,7 +439,11 @@ function getConnection(
   return new Promise((resolve, reject) => {
     const idb = getIDB(dbInfo);
     if (!idb) {
-      return reject(new Error('IndexedDB not available'));
+      return reject(
+        createLocalSpaceError('DRIVER_UNAVAILABLE', 'IndexedDB not available', {
+          driver: DRIVER_NAME,
+        })
+      );
     }
 
     const contextKey = getDbContextKey(dbInfo);
@@ -845,7 +886,11 @@ async function _initStorage(
 
   dbInfo.idbFactory = await resolveIdbFactory(config);
   if (!dbInfo.idbFactory) {
-    throw new Error('IndexedDB not available');
+    throw createLocalSpaceError(
+      'DRIVER_UNAVAILABLE',
+      'IndexedDB not available',
+      { driver: DRIVER_NAME }
+    );
   }
 
   const dbName = requireDbName(dbInfo);
@@ -911,14 +956,17 @@ function fullyReady(
   const self = this;
 
   const initReady = (self._initReady ?? self.ready).bind(self);
-  const promise = initReady().then(() => {
-    if (self._dbInfo) {
-      const dbContext = getDbContext(self._dbInfo);
-      if (dbContext && dbContext.dbReady) {
-        return dbContext.dbReady;
+  const promise = withIdbErrorContext(
+    initReady().then(() => {
+      if (self._dbInfo) {
+        const dbContext = getDbContext(self._dbInfo);
+        if (dbContext && dbContext.dbReady) {
+          return dbContext.dbReady;
+        }
       }
-    }
-  });
+    }),
+    'ready'
+  );
 
   executeCallback(promise, callback);
   return promise;
@@ -968,8 +1016,15 @@ function getItem<T>(
       .catch(reject);
   });
 
-  executeCallback(promise, callback as Callback<T | null>);
-  return promise;
+  const wrappedPromise = withIdbErrorContext(
+    promise,
+    'getItem',
+    { key },
+    'OPERATION_FAILED'
+  );
+
+  executeCallback(wrappedPromise, callback as Callback<T | null>);
+  return wrappedPromise;
 }
 
 function getItems<T>(
@@ -1056,8 +1111,15 @@ function getItems<T>(
     }
   });
 
-  executeCallback(promise, callback);
-  return promise;
+  const wrappedPromise = withIdbErrorContext(
+    promise,
+    'getItems',
+    { keys: normalizedKeys },
+    'OPERATION_FAILED'
+  );
+
+  executeCallback(wrappedPromise, callback);
+  return wrappedPromise;
 }
 
 function iterate<T, U>(
@@ -1118,8 +1180,10 @@ function iterate<T, U>(
       .catch(reject);
   });
 
-  executeCallback(promise, callback);
-  return promise;
+  const wrappedPromise = withIdbErrorContext(promise, 'iterate');
+
+  executeCallback(wrappedPromise, callback);
+  return wrappedPromise;
 }
 
 function setItems<T>(
@@ -1129,6 +1193,7 @@ function setItems<T>(
 ): Promise<BatchResponse<T>> {
   const self = this;
   const normalized = normalizeBatchEntries(items);
+  const itemKeys = normalized.map((entry) => entry.key);
 
   const promise = new Promise<BatchResponse<T>>(async (resolve, reject) => {
     try {
@@ -1222,8 +1287,15 @@ function setItems<T>(
     }
   });
 
-  executeCallback(promise, callback);
-  return promise;
+  const wrappedPromise = withIdbErrorContext(
+    promise,
+    'setItems',
+    { keys: itemKeys },
+    'OPERATION_FAILED'
+  );
+
+  executeCallback(wrappedPromise, callback);
+  return wrappedPromise;
 }
 
 async function setItem<T>(
@@ -1291,8 +1363,12 @@ async function setItem<T>(
     }
   });
 
-  executeCallback(promise as Promise<T>, callback);
-  return promise as Promise<T>;
+  const wrappedPromise = withIdbErrorContext(promise as Promise<T>, 'setItem', {
+    key,
+  });
+
+  executeCallback(wrappedPromise, callback);
+  return wrappedPromise as Promise<T>;
 }
 
 function removeItem(
@@ -1343,8 +1419,10 @@ function removeItem(
       .catch(reject);
   });
 
-  executeCallback(promise, callback);
-  return promise;
+  const wrappedPromise = withIdbErrorContext(promise, 'removeItem', { key });
+
+  executeCallback(wrappedPromise, callback);
+  return wrappedPromise;
 }
 
 function removeItems(
@@ -1413,8 +1491,12 @@ function removeItems(
     }
   });
 
-  executeCallback(promise, callback);
-  return promise;
+  const wrappedPromise = withIdbErrorContext(promise, 'removeItems', {
+    keys: normalizedKeys,
+  });
+
+  executeCallback(wrappedPromise, callback);
+  return wrappedPromise;
 }
 
 function runTransaction<T>(
@@ -1470,7 +1552,15 @@ function runTransaction<T>(
 
             const makeReadOnlyGuard = () => {
               if (mode === READ_ONLY) {
-                throw new Error('Transaction is readonly');
+                throw createLocalSpaceError(
+                  'TRANSACTION_READONLY',
+                  'Transaction is readonly',
+                  {
+                    driver: DRIVER_NAME,
+                    operation: 'runTransaction',
+                    transactionMode: mode,
+                  }
+                );
               }
             };
 
@@ -1610,8 +1700,12 @@ function runTransaction<T>(
     }
   });
 
-  executeCallback(promise, callback);
-  return promise;
+  const wrappedPromise = withIdbErrorContext(promise, 'runTransaction', {
+    transactionMode: mode,
+  });
+
+  executeCallback(wrappedPromise, callback);
+  return wrappedPromise;
 }
 
 function clear(
@@ -1649,8 +1743,10 @@ function clear(
       .catch(reject);
   });
 
-  executeCallback(promise, callback);
-  return promise;
+  const wrappedPromise = withIdbErrorContext(promise, 'clear');
+
+  executeCallback(wrappedPromise, callback);
+  return wrappedPromise;
 }
 
 function length(
@@ -1685,8 +1781,10 @@ function length(
       .catch(reject);
   });
 
-  executeCallback(promise, callback);
-  return promise;
+  const wrappedPromise = withIdbErrorContext(promise, 'length');
+
+  executeCallback(wrappedPromise, callback);
+  return wrappedPromise;
 }
 
 function key(
@@ -1746,8 +1844,10 @@ function key(
       .catch(reject);
   });
 
-  executeCallback(promise, callback as Callback<string | null>);
-  return promise;
+  const wrappedPromise = withIdbErrorContext(promise, 'key', { keyIndex: n });
+
+  executeCallback(wrappedPromise, callback as Callback<string | null>);
+  return wrappedPromise;
 }
 
 function keys(
@@ -1792,8 +1892,10 @@ function keys(
       .catch(reject);
   });
 
-  executeCallback(promise, callback);
-  return promise;
+  const wrappedPromise = withIdbErrorContext(promise, 'keys');
+
+  executeCallback(wrappedPromise, callback);
+  return wrappedPromise;
 }
 
 function dropInstance(
@@ -1818,9 +1920,18 @@ function dropInstance(
 
   // Validate options
   if (!effectiveOptions.name) {
-    const promise = Promise.reject(new Error('Invalid arguments'));
-    executeCallback(promise, callback);
-    return promise;
+    const promise = Promise.reject(
+      createLocalSpaceError('INVALID_ARGUMENT', 'Invalid arguments', {
+        driver: DRIVER_NAME,
+        operation: 'dropInstance',
+      })
+    );
+    const wrappedInvalid = withIdbErrorContext(promise, 'dropInstance', {
+      name: effectiveOptions.name,
+      storeName: effectiveOptions.storeName,
+    });
+    executeCallback(wrappedInvalid, callback);
+    return wrappedInvalid;
   }
 
   const dropDbInfo: DbInfo = {
@@ -1874,7 +1985,13 @@ function dropInstance(
       const dropDBPromise = new Promise<void>((resolve, reject) => {
         const idb = getIDB(dropDbInfo);
         if (!idb) {
-          return reject(new Error('IndexedDB not available'));
+          return reject(
+            createLocalSpaceError(
+              'DRIVER_UNAVAILABLE',
+              'IndexedDB not available',
+              { driver: DRIVER_NAME }
+            )
+          );
         }
 
         const req = idb.deleteDatabase(targetName);
@@ -1937,7 +2054,13 @@ function dropInstance(
       const dropObjectPromise = new Promise<IDBDatabase>((resolve, reject) => {
         const idb = getIDB(dropDbInfo);
         if (!idb) {
-          return reject(new Error('IndexedDB not available'));
+          return reject(
+            createLocalSpaceError(
+              'DRIVER_UNAVAILABLE',
+              'IndexedDB not available',
+              { driver: DRIVER_NAME }
+            )
+          );
         }
 
         const req = idb.open(targetName, newVersion);
@@ -1982,8 +2105,13 @@ function dropInstance(
     });
   }
 
-  executeCallback(promise, callback);
-  return promise;
+  const wrappedPromise = withIdbErrorContext(promise, 'dropInstance', {
+    name: effectiveOptions.name,
+    storeName: effectiveOptions.storeName,
+  });
+
+  executeCallback(wrappedPromise, callback);
+  return wrappedPromise;
 }
 
 function getPerformanceStats(

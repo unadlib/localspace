@@ -9,6 +9,8 @@ import type {
   BatchResponse,
   TransactionScope,
 } from '../types';
+import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors';
+import { createLocalSpaceError, toLocalSpaceError } from '../errors';
 import {
   executeCallback,
   normalizeBatchEntries,
@@ -29,6 +31,26 @@ type LocalStorageDriverContext = LocalSpaceInstance &
     ready(): Promise<void>;
     config(): LocalSpaceConfig;
   };
+
+const DRIVER_NAME = 'localStorageWrapper';
+
+const withLocalStorageErrorContext = <T>(
+  promise: Promise<T>,
+  operation: string,
+  details?: LocalSpaceErrorDetails,
+  code: LocalSpaceErrorCode = 'OPERATION_FAILED'
+): Promise<T> =>
+  promise.catch((error) => {
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : `localStorage ${operation} failed`;
+    throw toLocalSpaceError(error, code, message, {
+      driver: DRIVER_NAME,
+      operation,
+      ...(details ?? {}),
+    });
+  });
 
 function isLocalStorageValid(): boolean {
   try {
@@ -81,7 +103,11 @@ async function _initStorage(
   };
 
   if (!isLocalStorageUsable()) {
-    throw new Error('localStorage not usable');
+    throw createLocalSpaceError(
+      'DRIVER_UNAVAILABLE',
+      'localStorage not usable',
+      { driver: DRIVER_NAME }
+    );
   }
 
   this._dbInfo = dbInfo;
@@ -91,16 +117,19 @@ function clear(
   this: LocalStorageDriverContext,
   callback?: Callback<void>
 ): Promise<void> {
-  const promise = this.ready().then(() => {
-    const keyPrefix = this._dbInfo.keyPrefix;
+  const promise = withLocalStorageErrorContext(
+    this.ready().then(() => {
+      const keyPrefix = this._dbInfo.keyPrefix;
 
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const key = localStorage.key(i);
-      if (key && key.indexOf(keyPrefix) === 0) {
-        localStorage.removeItem(key);
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && key.indexOf(keyPrefix) === 0) {
+          localStorage.removeItem(key);
+        }
       }
-    }
-  });
+    }),
+    'clear'
+  );
 
   executeCallback(promise, callback);
   return promise;
@@ -113,16 +142,20 @@ function getItem<T>(
 ): Promise<T | null> {
   const normalizedKey = normalizeKey(key);
 
-  const promise = this.ready().then(() => {
-    const dbInfo = this._dbInfo;
-    const raw = localStorage.getItem(dbInfo.keyPrefix + normalizedKey);
+  const promise = withLocalStorageErrorContext(
+    this.ready().then(() => {
+      const dbInfo = this._dbInfo;
+      const raw = localStorage.getItem(dbInfo.keyPrefix + normalizedKey);
 
-    if (raw === null) {
-      return null;
-    }
+      if (raw === null) {
+        return null;
+      }
 
-    return dbInfo.serializer.deserialize(raw) as T;
-  });
+      return dbInfo.serializer.deserialize(raw) as T;
+    }),
+    'getItem',
+    { key: normalizedKey }
+  );
 
   executeCallback(
     promise as Promise<T | null>,
@@ -136,38 +169,41 @@ function iterate<T, U>(
   iterator: (value: T, key: string, iterationNumber: number) => U,
   callback?: Callback<U>
 ): Promise<U> {
-  const promise = this.ready().then(() => {
-    const dbInfo = this._dbInfo;
-    const keyPrefix = dbInfo.keyPrefix;
-    const keyPrefixLength = keyPrefix.length;
-    const length = localStorage.length;
-    let iterationNumber = 1;
+  const promise = withLocalStorageErrorContext(
+    this.ready().then(() => {
+      const dbInfo = this._dbInfo;
+      const keyPrefix = dbInfo.keyPrefix;
+      const keyPrefixLength = keyPrefix.length;
+      const length = localStorage.length;
+      let iterationNumber = 1;
 
-    for (let i = 0; i < length; i++) {
-      const key = localStorage.key(i);
-      if (!key || key.indexOf(keyPrefix) !== 0) {
-        continue;
+      for (let i = 0; i < length; i++) {
+        const key = localStorage.key(i);
+        if (!key || key.indexOf(keyPrefix) !== 0) {
+          continue;
+        }
+
+        const rawValue = localStorage.getItem(key);
+        let value: T | null = null;
+        if (rawValue !== null) {
+          value = dbInfo.serializer.deserialize(rawValue) as T;
+        }
+
+        const result = iterator(
+          value as T,
+          key.substring(keyPrefixLength),
+          iterationNumber++
+        );
+
+        if (result !== undefined) {
+          return result;
+        }
       }
 
-      const rawValue = localStorage.getItem(key);
-      let value: T | null = null;
-      if (rawValue !== null) {
-        value = dbInfo.serializer.deserialize(rawValue) as T;
-      }
-
-      const result = iterator(
-        value as T,
-        key.substring(keyPrefixLength),
-        iterationNumber++
-      );
-
-      if (result !== undefined) {
-        return result;
-      }
-    }
-
-    return undefined as unknown as U;
-  });
+      return undefined as unknown as U;
+    }),
+    'iterate'
+  );
 
   executeCallback(promise, callback);
   return promise;
@@ -178,25 +214,29 @@ function key(
   n: number,
   callback?: Callback<string>
 ): Promise<string | null> {
-  const promise = this.ready().then(() => {
-    const dbInfo = this._dbInfo;
-    const keyPrefix = dbInfo.keyPrefix;
-    const keys: string[] = [];
+  const promise = withLocalStorageErrorContext(
+    this.ready().then(() => {
+      const dbInfo = this._dbInfo;
+      const keyPrefix = dbInfo.keyPrefix;
+      const keys: string[] = [];
 
-    // Collect keys that match the prefix; keep native storage iteration order
-    for (let i = 0; i < localStorage.length; i++) {
-      const itemKey = localStorage.key(i);
-      if (itemKey && itemKey.indexOf(keyPrefix) === 0) {
-        keys.push(itemKey.substring(keyPrefix.length));
+      // Collect keys that match the prefix; keep native storage iteration order
+      for (let i = 0; i < localStorage.length; i++) {
+        const itemKey = localStorage.key(i);
+        if (itemKey && itemKey.indexOf(keyPrefix) === 0) {
+          keys.push(itemKey.substring(keyPrefix.length));
+        }
       }
-    }
 
-    if (n < 0 || n >= keys.length) {
-      return null;
-    }
+      if (n < 0 || n >= keys.length) {
+        return null;
+      }
 
-    return keys[n];
-  });
+      return keys[n];
+    }),
+    'key',
+    { keyIndex: n }
+  );
 
   executeCallback(promise, callback as Callback<string | null> | undefined);
   return promise;
@@ -206,20 +246,23 @@ function keys(
   this: LocalStorageDriverContext,
   callback?: Callback<string[]>
 ): Promise<string[]> {
-  const promise = this.ready().then(() => {
-    const dbInfo = this._dbInfo;
-    const length = localStorage.length;
-    const keys: string[] = [];
+  const promise = withLocalStorageErrorContext(
+    this.ready().then(() => {
+      const dbInfo = this._dbInfo;
+      const length = localStorage.length;
+      const keys: string[] = [];
 
-    for (let i = 0; i < length; i++) {
-      const itemKey = localStorage.key(i);
-      if (itemKey && itemKey.indexOf(dbInfo.keyPrefix) === 0) {
-        keys.push(itemKey.substring(dbInfo.keyPrefix.length));
+      for (let i = 0; i < length; i++) {
+        const itemKey = localStorage.key(i);
+        if (itemKey && itemKey.indexOf(dbInfo.keyPrefix) === 0) {
+          keys.push(itemKey.substring(dbInfo.keyPrefix.length));
+        }
       }
-    }
 
-    return keys;
-  });
+      return keys;
+    }),
+    'keys'
+  );
 
   executeCallback(promise, callback);
   return promise;
@@ -229,7 +272,10 @@ function length(
   this: LocalStorageDriverContext,
   callback?: Callback<number>
 ): Promise<number> {
-  const promise = keys.call(this).then((derivedKeys) => derivedKeys.length);
+  const promise = withLocalStorageErrorContext(
+    keys.call(this).then((derivedKeys) => derivedKeys.length),
+    'length'
+  );
 
   executeCallback(promise, callback);
   return promise;
@@ -242,10 +288,14 @@ function removeItem(
 ): Promise<void> {
   const normalizedKey = normalizeKey(key);
 
-  const promise = this.ready().then(() => {
-    const dbInfo = this._dbInfo;
-    localStorage.removeItem(dbInfo.keyPrefix + normalizedKey);
-  });
+  const promise = withLocalStorageErrorContext(
+    this.ready().then(() => {
+      const dbInfo = this._dbInfo;
+      localStorage.removeItem(dbInfo.keyPrefix + normalizedKey);
+    }),
+    'removeItem',
+    { key: normalizedKey }
+  );
 
   executeCallback(promise, callback);
   return promise;
@@ -258,16 +308,20 @@ function removeItems(
 ): Promise<void> {
   const normalizedKeys = keys.map((key) => normalizeKey(key));
 
-  const promise = this.ready().then(() => {
-    const dbInfo = this._dbInfo;
-    const batchSize = dbInfo.maxBatchSize ?? normalizedKeys.length;
+  const promise = withLocalStorageErrorContext(
+    this.ready().then(() => {
+      const dbInfo = this._dbInfo;
+      const batchSize = dbInfo.maxBatchSize ?? normalizedKeys.length;
 
-    for (const batch of chunkArray(normalizedKeys, batchSize)) {
-      for (const key of batch) {
-        localStorage.removeItem(dbInfo.keyPrefix + key);
+      for (const batch of chunkArray(normalizedKeys, batchSize)) {
+        for (const key of batch) {
+          localStorage.removeItem(dbInfo.keyPrefix + key);
+        }
       }
-    }
-  });
+    }),
+    'removeItems',
+    { keys: normalizedKeys }
+  );
 
   executeCallback(promise, callback);
   return promise;
@@ -281,28 +335,42 @@ async function setItem<T>(
 ): Promise<T> {
   const normalizedKey = normalizeKey(key);
 
-  const promise = this.ready().then(async () => {
-    const normalizedValue = (value === undefined ? null : value) as T;
-    const serializedValue =
-      await this._dbInfo.serializer.serialize(normalizedValue);
+  const promise = withLocalStorageErrorContext(
+    this.ready().then(async () => {
+      const normalizedValue = (value === undefined ? null : value) as T;
+      const serializedValue =
+        await this._dbInfo.serializer.serialize(normalizedValue);
 
-    try {
-      localStorage.setItem(
-        this._dbInfo.keyPrefix + normalizedKey,
-        serializedValue
-      );
-      return normalizedValue;
-    } catch (error: unknown) {
-      if (
-        error instanceof Error &&
-        (error.name === 'QuotaExceededError' ||
-          error.name === 'NS_ERROR_DOM_QUOTA_REACHED')
-      ) {
-        throw error;
+      try {
+        localStorage.setItem(
+          this._dbInfo.keyPrefix + normalizedKey,
+          serializedValue
+        );
+        return normalizedValue;
+      } catch (error: unknown) {
+        if (
+          error instanceof Error &&
+          (error.name === 'QuotaExceededError' ||
+            error.name === 'NS_ERROR_DOM_QUOTA_REACHED')
+        ) {
+          throw toLocalSpaceError(
+            error,
+            'QUOTA_EXCEEDED',
+            error.message || 'Storage quota exceeded',
+            { driver: DRIVER_NAME, operation: 'setItem', key: normalizedKey }
+          );
+        }
+        throw toLocalSpaceError(
+          error,
+          'OPERATION_FAILED',
+          'Failed to set item in localStorage',
+          { driver: DRIVER_NAME, operation: 'setItem', key: normalizedKey }
+        );
       }
-      throw error;
-    }
-  });
+    }),
+    'setItem',
+    { key: normalizedKey }
+  );
 
   executeCallback(promise, callback);
   return promise;
@@ -314,27 +382,32 @@ function setItems<T>(
   callback?: Callback<BatchResponse<T>>
 ): Promise<BatchResponse<T>> {
   const normalized = normalizeBatchEntries(items);
+  const itemKeys = normalized.map((entry) => entry.key);
 
-  const promise = this.ready().then(async () => {
-    const dbInfo = this._dbInfo;
-    const stored: BatchResponse<T> = [];
-    const batchSize = dbInfo.maxBatchSize ?? normalized.length;
+  const promise = withLocalStorageErrorContext(
+    this.ready().then(async () => {
+      const dbInfo = this._dbInfo;
+      const stored: BatchResponse<T> = [];
+      const batchSize = dbInfo.maxBatchSize ?? normalized.length;
 
-    for (const batch of chunkArray(normalized, batchSize)) {
-      for (const entry of batch) {
-        const normalizedValue = (
-          entry.value === undefined ? null : entry.value
-        ) as T;
-        const serializedValue =
-          await dbInfo.serializer.serialize(normalizedValue);
+      for (const batch of chunkArray(normalized, batchSize)) {
+        for (const entry of batch) {
+          const normalizedValue = (
+            entry.value === undefined ? null : entry.value
+          ) as T;
+          const serializedValue =
+            await dbInfo.serializer.serialize(normalizedValue);
 
-        localStorage.setItem(dbInfo.keyPrefix + entry.key, serializedValue);
-        stored.push({ key: entry.key, value: normalizedValue });
+          localStorage.setItem(dbInfo.keyPrefix + entry.key, serializedValue);
+          stored.push({ key: entry.key, value: normalizedValue });
+        }
       }
-    }
 
-    return stored;
-  });
+      return stored;
+    }),
+    'setItems',
+    { keys: itemKeys }
+  );
 
   executeCallback(promise, callback);
   return promise;
@@ -347,25 +420,29 @@ function getItems<T>(
 ): Promise<BatchResponse<T>> {
   const normalizedKeys = keys.map((key) => normalizeKey(key));
 
-  const promise = this.ready().then(() => {
-    const dbInfo = this._dbInfo;
-    const results: BatchResponse<T> = [];
-    const batchSize = dbInfo.maxBatchSize ?? normalizedKeys.length;
+  const promise = withLocalStorageErrorContext(
+    this.ready().then(() => {
+      const dbInfo = this._dbInfo;
+      const results: BatchResponse<T> = [];
+      const batchSize = dbInfo.maxBatchSize ?? normalizedKeys.length;
 
-    for (const batch of chunkArray(normalizedKeys, batchSize)) {
-      for (const key of batch) {
-        const raw = localStorage.getItem(dbInfo.keyPrefix + key);
-        if (raw === null) {
-          results.push({ key, value: null });
-          continue;
+      for (const batch of chunkArray(normalizedKeys, batchSize)) {
+        for (const key of batch) {
+          const raw = localStorage.getItem(dbInfo.keyPrefix + key);
+          if (raw === null) {
+            results.push({ key, value: null });
+            continue;
+          }
+          const value = dbInfo.serializer.deserialize(raw) as T;
+          results.push({ key, value });
         }
-        const value = dbInfo.serializer.deserialize(raw) as T;
-        results.push({ key, value });
       }
-    }
 
-    return results;
-  });
+      return results;
+    }),
+    'getItems',
+    { keys: normalizedKeys }
+  );
 
   executeCallback(promise, callback);
   return promise;
@@ -385,7 +462,12 @@ function dropInstance(
   }
 
   const promise = !effectiveOptions.name
-    ? Promise.reject(new Error('Invalid arguments'))
+    ? Promise.reject(
+        createLocalSpaceError('INVALID_ARGUMENT', 'Invalid arguments', {
+          driver: DRIVER_NAME,
+          operation: 'dropInstance',
+        })
+      )
     : new Promise<void>((resolve) => {
         const keyPrefix = !effectiveOptions.storeName
           ? `${effectiveOptions.name}/`
@@ -400,8 +482,13 @@ function dropInstance(
         resolve();
       });
 
-  executeCallback(promise, callback);
-  return promise;
+  const wrapped = withLocalStorageErrorContext(promise, 'dropInstance', {
+    name: effectiveOptions.name,
+    storeName: effectiveOptions.storeName ?? this._defaultConfig.storeName,
+  });
+
+  executeCallback(wrapped, callback);
+  return wrapped;
 }
 
 const localStorageWrapper: Driver = {
@@ -427,7 +514,15 @@ const localStorageWrapper: Driver = {
   ): Promise<T> {
     const makeReadOnlyGuard = () => {
       if (mode === 'readonly') {
-        throw new Error('Transaction is readonly');
+        throw createLocalSpaceError(
+          'TRANSACTION_READONLY',
+          'Transaction is readonly',
+          {
+            driver: DRIVER_NAME,
+            operation: 'runTransaction',
+            transactionMode: mode,
+          }
+        );
       }
     };
 
@@ -453,11 +548,15 @@ const localStorageWrapper: Driver = {
       },
     };
 
-    const promise = Promise.resolve()
-      .then(() => runner(scope))
-      .catch((err) => {
-        throw err;
-      });
+    const promise = withLocalStorageErrorContext(
+      Promise.resolve()
+        .then(() => runner(scope))
+        .catch((err) => {
+          throw err;
+        }),
+      'runTransaction',
+      { transactionMode: mode }
+    );
 
     executeCallback(promise, callback);
     return promise;

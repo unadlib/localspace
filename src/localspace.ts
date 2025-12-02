@@ -19,6 +19,7 @@ import {
   includes,
   executeTwoCallbacks,
 } from './utils/helpers';
+import { createLocalSpaceError, LocalSpaceError } from './errors';
 import serializer from './utils/serializer';
 import idbDriver from './drivers/indexeddb';
 import localstorageDriver from './drivers/localstorage';
@@ -183,7 +184,11 @@ export class LocalSpace implements LocalSpaceInstance {
   config(optionsOrKey?: LocalSpaceConfig | keyof LocalSpaceConfig) {
     if (typeof optionsOrKey === 'object' && optionsOrKey !== null) {
       if (this._ready) {
-        return new Error("Can't call config() after LocalSpace has been used.");
+        return createLocalSpaceError(
+          'CONFIG_LOCKED',
+          "Can't call config() after LocalSpace has been used.",
+          { operation: 'config' }
+        );
       }
 
       const suppliedOptions = optionsOrKey as Partial<LocalSpaceConfig>;
@@ -201,7 +206,11 @@ export class LocalSpace implements LocalSpaceInstance {
         }
 
         if (key === 'version' && typeof value !== 'number') {
-          return new Error('Database version must be a number.');
+          return createLocalSpaceError(
+            'INVALID_CONFIG',
+            'Database version must be a number.',
+            { configKey: 'version', providedType: typeof value }
+          );
         }
 
         configRecord[key as string] = value as unknown;
@@ -234,7 +243,11 @@ export class LocalSpace implements LocalSpaceInstance {
     const promise = new Promise<void>(async (resolve, reject) => {
       try {
         const driverName = driverObject._driver;
-        const complianceError = new Error('Custom driver not compliant');
+        const complianceError = createLocalSpaceError(
+          'DRIVER_COMPLIANCE',
+          'Custom driver not compliant',
+          { driver: driverName }
+        );
 
         if (!driverObject._driver) {
           reject(complianceError);
@@ -255,8 +268,10 @@ export class LocalSpace implements LocalSpaceInstance {
         const configureMissingMethods = () => {
           const methodNotImplementedFactory = (methodName: string) => {
             return function (...callbackArgs: unknown[]) {
-              const error = new Error(
-                `Method ${methodName} is not implemented by the current driver`
+              const error = createLocalSpaceError(
+                'UNSUPPORTED_OPERATION',
+                `Method ${methodName} is not implemented by the current driver`,
+                { operation: methodName }
               );
               const maybeCallback = callbackArgs[callbackArgs.length - 1];
               if (typeof maybeCallback === 'function') {
@@ -330,7 +345,11 @@ export class LocalSpace implements LocalSpaceInstance {
   ): Promise<Driver> {
     const getDriverPromise = DefinedDrivers[driverName]
       ? Promise.resolve(DefinedDrivers[driverName])
-      : Promise.reject(new Error('Driver not found.'));
+      : Promise.reject(
+          createLocalSpaceError('DRIVER_NOT_FOUND', 'Driver not found.', {
+            driver: driverName,
+          })
+        );
 
     const callbackOptions = this._getCallbackOptions();
     executeTwoCallbacks(
@@ -405,11 +424,16 @@ export class LocalSpace implements LocalSpaceInstance {
       drivers = [drivers];
     }
 
-    const supportedDrivers = this._getSupportedDrivers(drivers);
+    const requestedDrivers = drivers as string[];
+    const supportedDrivers = this._getSupportedDrivers(requestedDrivers);
     const callbackOptions = this._getCallbackOptions();
 
     if (supportedDrivers.length === 0) {
-      const error = new Error('No available storage method found.');
+      const error = createLocalSpaceError(
+        'DRIVER_UNAVAILABLE',
+        'No available storage method found.',
+        { attemptedDrivers: requestedDrivers }
+      );
       const rejection = Promise.resolve().then<never>(() => {
         throw error;
       });
@@ -470,7 +494,11 @@ export class LocalSpace implements LocalSpaceInstance {
           }
 
           setDriverToConfig();
-          const error = new Error('No available storage method found.');
+          const error = createLocalSpaceError(
+            'DRIVER_UNAVAILABLE',
+            'No available storage method found.',
+            { attemptedDrivers: supportedDrivers }
+          );
           this._driverSet = Promise.resolve().then<never>(() => {
             throw error;
           });
@@ -500,7 +528,11 @@ export class LocalSpace implements LocalSpaceInstance {
       })
       .catch(() => {
         setDriverToConfig();
-        const error = new Error('No available storage method found.');
+        const error = createLocalSpaceError(
+          'DRIVER_UNAVAILABLE',
+          'No available storage method found.',
+          { attemptedDrivers: supportedDrivers }
+        );
         this._driverSet = Promise.resolve().then<never>(() => {
           throw error;
         });
@@ -574,42 +606,50 @@ export class LocalSpace implements LocalSpaceInstance {
     return { compatibilityMode };
   }
 
+  private _notInitializedError(operation: string): LocalSpaceError {
+    return createLocalSpaceError(
+      'DRIVER_NOT_INITIALIZED',
+      'Driver not initialized',
+      { operation }
+    );
+  }
+
   // Driver methods (will be replaced by actual driver implementations)
   async iterate<T, U>(
     iteratorCallback: (value: T, key: string, iterationNumber: number) => U,
     successCallback?: Callback<U>
   ): Promise<U> {
-    throw new Error('Driver not initialized');
+    throw this._notInitializedError('iterate');
   }
 
   async getItems<T>(
     keys: string[],
     callback?: Callback<BatchResponse<T>>
   ): Promise<BatchResponse<T>> {
-    throw new Error('Driver not initialized');
+    throw this._notInitializedError('getItems');
   }
 
   async getItem<T>(key: string, callback?: Callback<T>): Promise<T | null> {
-    throw new Error('Driver not initialized');
+    throw this._notInitializedError('getItem');
   }
 
   async setItem<T>(key: string, value: T, callback?: Callback<T>): Promise<T> {
-    throw new Error('Driver not initialized');
+    throw this._notInitializedError('setItem');
   }
 
   async setItems<T>(
     entries: BatchItems<T>,
     callback?: Callback<BatchResponse<T>>
   ): Promise<BatchResponse<T>> {
-    throw new Error('Driver not initialized');
+    throw this._notInitializedError('setItems');
   }
 
   async removeItem(key: string, callback?: Callback<void>): Promise<void> {
-    throw new Error('Driver not initialized');
+    throw this._notInitializedError('removeItem');
   }
 
   async removeItems(keys: string[], callback?: Callback<void>): Promise<void> {
-    throw new Error('Driver not initialized');
+    throw this._notInitializedError('removeItems');
   }
 
   async runTransaction<T>(
@@ -617,32 +657,32 @@ export class LocalSpace implements LocalSpaceInstance {
     runner: (scope: TransactionScope) => Promise<T> | T,
     callback?: Callback<T>
   ): Promise<T> {
-    throw new Error('Driver not initialized');
+    throw this._notInitializedError('runTransaction');
   }
 
   async clear(callback?: Callback<void>): Promise<void> {
-    throw new Error('Driver not initialized');
+    throw this._notInitializedError('clear');
   }
 
   async length(callback?: Callback<number>): Promise<number> {
-    throw new Error('Driver not initialized');
+    throw this._notInitializedError('length');
   }
 
   async key(
     keyIndex: number,
     callback?: Callback<string>
   ): Promise<string | null> {
-    throw new Error('Driver not initialized');
+    throw this._notInitializedError('key');
   }
 
   async keys(callback?: Callback<string[]>): Promise<string[]> {
-    throw new Error('Driver not initialized');
+    throw this._notInitializedError('keys');
   }
 
   async dropInstance(
     options?: LocalSpaceConfig,
     callback?: Callback<void>
   ): Promise<void> {
-    throw new Error('Driver not initialized');
+    throw this._notInitializedError('dropInstance');
   }
 }
