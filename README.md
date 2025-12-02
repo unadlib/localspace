@@ -54,9 +54,9 @@ localspace is built on a foundation designed for growth. Here's what's planned:
 - [x] Batch operations (`setItems()`, `getItems()`, `removeItems()`) for higher throughput
 - [x] Automatic write coalescing (3-10x faster rapid writes, enabled by default)
 - [x] Connection pooling, transaction batching, and warmup
+- [x] **Improved error handling** - Structured error types with detailed context
 
 ### TODO
-- [x] **Improved error handling** - Structured error types with detailed context
 - [ ] **Plugin system** - Middleware architecture for cross-cutting concerns
 - [ ] **Cache API driver** - Native browser caching with automatic HTTP semantics
 - [ ] **OPFS driver** - Origin Private File System for high-performance file storage
