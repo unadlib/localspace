@@ -91,6 +91,13 @@ type QueuedWrite =
     };
 type CoalesceQueue = QueuedWrite[];
 
+const createEmptyStats = () => ({
+  totalWrites: 0,
+  coalescedWrites: 0,
+  transactionsSaved: 0,
+  avgCoalesceSize: 0,
+});
+
 function getDefaultIDB(): IDBFactory | null {
   if (typeof indexedDB !== 'undefined') {
     return indexedDB;
@@ -1242,8 +1249,7 @@ async function setItem<T>(
       }
 
       const normalizedValue = (value === undefined ? null : value) as T;
-      const coalesce =
-        dbInfo.coalesceWrites && dbInfo.maxBatchSize === undefined;
+      const coalesce = !!dbInfo.coalesceWrites;
 
       if (coalesce) {
         enqueueCoalescedWrite(dbInfo, {
@@ -1302,8 +1308,7 @@ function removeItem(
       .ready()
       .then(() => {
         const dbInfo = self._dbInfo;
-        const coalesce =
-          dbInfo.coalesceWrites && dbInfo.maxBatchSize === undefined;
+        const coalesce = !!dbInfo.coalesceWrites;
 
         if (coalesce) {
           enqueueCoalescedWrite(dbInfo, { type: 'remove', key })
@@ -1985,15 +1990,14 @@ function getPerformanceStats(
   this: IndexedDBDriverContext
 ): import('../types').PerformanceStats {
   const dbInfo = this._dbInfo;
+  if (!dbInfo) {
+    return createEmptyStats();
+  }
+
   const dbContext = getDbContext(dbInfo);
 
   if (!dbContext) {
-    return {
-      totalWrites: 0,
-      coalescedWrites: 0,
-      transactionsSaved: 0,
-      avgCoalesceSize: 0,
-    };
+    return createEmptyStats();
   }
 
   const stats = dbContext.stats;

@@ -210,6 +210,14 @@ await Promise.all([
   coalesced.setItem('fast-2', 'b'),
 ]); // batched into one tx within the window
 
+// These features work independently and can be combined
+const optimized = localspace.createInstance({
+  coalesceWrites: true,    // optimizes single-item writes (setItem/removeItem)
+  coalesceWindowMs: 8,
+  maxBatchSize: 200,       // limits batch API chunk size (setItems/removeItems)
+});
+await optimized.setDriver([optimized.INDEXEDDB]);
+
 // Note: localStorage batches are not atomic—writes are applied one by one.
 // For critical flows, prefer IndexedDB or handle your own compensating logic.
 ```
@@ -316,10 +324,10 @@ localspace.setItem('key', 'value', (err, value) => {
 ```
 
 ## Performance notes
-- **Automatic write coalescing (enabled by default):** localspace automatically merges rapid single writes within an 8ms window into one transaction, giving you 3-10x performance improvement with zero code changes. This is enabled by default for IndexedDB. Set `coalesceWrites: false` if you need strict per-operation durability.
+- **Automatic write coalescing (enabled by default):** localspace automatically merges rapid single writes (`setItem`/`removeItem`) within an 8ms window into one transaction, giving you 3-10x performance improvement with zero code changes. This is enabled by default for IndexedDB. Set `coalesceWrites: false` if you need strict per-operation durability.
 - **Batch APIs outperform loops:** Playwright benchmark (`test/playwright/benchmark.spec.ts`) on 500 items x 256B showed `setItems()` ~6x faster and `getItems()` ~7.7x faster than per-item loops, with `removeItems()` ~2.8x faster (Chromium, relaxed durability).
 - **Transaction helpers:** `runTransaction()` lets you co-locate reads/writes in a single transaction for atomic migrations and to shorten lock time.
-- **Batch sizing:** Use `maxBatchSize` to split very large batches and keep transaction size in check.
+- **Batch sizing:** Use `maxBatchSize` to split very large batch operations (`setItems`/`removeItems`/`getItems`) and keep transaction size in check. This works independently from `coalesceWrites`, which optimizes single-item operations.
 - **IndexedDB durability defaults:** Chrome 121+ uses relaxed durability by default; keep it for speed or set `durability: 'strict'` in `config` for migration-style writes.
 - **Storage Buckets (Chromium 122+):** supply a `bucket` option to isolate critical data and hint durability/persistence per bucket.
 - **Connection warmup:** IndexedDB instances pre-warm a transaction after init to reduce first-op latency (`prewarmTransactions` enabled by default; set to `false` to skip).

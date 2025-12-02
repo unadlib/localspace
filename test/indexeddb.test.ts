@@ -974,6 +974,61 @@ describe('IndexedDB driver tests', () => {
     });
   });
 
+  describe('Performance statistics', () => {
+    const zeroStats = {
+      totalWrites: 0,
+      coalescedWrites: 0,
+      transactionsSaved: 0,
+      avgCoalesceSize: 0,
+    };
+
+    it('should return default stats when db context is missing', async () => {
+      const statsInstance = localspace.createInstance({
+        name: `stats-guard-${Math.random().toString(36).slice(2)}`,
+        storeName: 'statsStore',
+      });
+
+      await statsInstance.setDriver([statsInstance.INDEXEDDB]);
+      await statsInstance.ready();
+      await statsInstance.clear();
+
+      const originalDbInfo = (statsInstance as any)._dbInfo;
+      (statsInstance as any)._dbInfo = null;
+
+      const stats = statsInstance.getPerformanceStats?.();
+      expect(stats).toEqual(zeroStats);
+
+      (statsInstance as any)._dbInfo = originalDbInfo;
+      await statsInstance.dropInstance();
+    });
+
+    it('should coalesce writes even when maxBatchSize is configured', async () => {
+      const coalesceInstance = localspace.createInstance({
+        name: `stats-coalesce-${Math.random().toString(36).slice(2)}`,
+        storeName: 'statsCoalesceStore',
+        coalesceWrites: true,
+        coalesceWindowMs: 50,
+        maxBatchSize: 2,
+      });
+
+      await coalesceInstance.setDriver([coalesceInstance.INDEXEDDB]);
+      await coalesceInstance.ready();
+      await coalesceInstance.clear();
+
+      await Promise.all([
+        coalesceInstance.setItem('c1', 'v1'),
+        coalesceInstance.setItem('c2', 'v2'),
+        coalesceInstance.setItem('c3', 'v3'),
+      ]);
+
+      const stats = coalesceInstance.getPerformanceStats?.();
+      expect(stats).toBeDefined();
+      expect(stats!.coalescedWrites).toBeGreaterThanOrEqual(2);
+
+      await coalesceInstance.dropInstance();
+    });
+  });
+
   describe('dropInstance edge cases', () => {
     it('should handle dropInstance on non-existent database', async () => {
       const fakeDbName = `non-existent-${Math.random().toString(36).slice(2)}`;
