@@ -236,7 +236,7 @@ export const encryptionPlugin = (
             iv: new Uint8Array(ivBuffer),
           },
           key,
-          dataBuffer
+          new Uint8Array(dataBuffer)
         );
         const decoded = new TextDecoder().decode(plainBuffer);
         return serializer.deserialize(decoded) as T;
