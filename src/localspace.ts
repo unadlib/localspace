@@ -806,7 +806,7 @@ export class LocalSpace implements LocalSpaceInstance {
         for (const entry of driverResponse) {
           const entryContext = this._pluginManager.createContext('getItem');
           entryContext.operationState.isBatch = true;
-          entryContext.operationState.batchSize = driverResponse.length;
+          entryContext.operationState.batchSize = requestedKeys.length;
           const processedValue = await this._pluginManager.afterGet(
             entry.key,
             entry.value,
