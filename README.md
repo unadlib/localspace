@@ -57,7 +57,7 @@ localspace is built on a foundation designed for growth. Here's what's planned:
 - [x] **Improved error handling** - Structured error types with detailed context
 
 ### TODO
-- [ ] **Plugin system** - Middleware architecture for cross-cutting concerns
+- [x] **Plugin system** - Middleware architecture for cross-cutting concerns
 - [ ] **Cache API driver** - Native browser caching with automatic HTTP semantics
 - [ ] **OPFS driver** - Origin Private File System for high-performance file storage
 - [ ] **Memory driver** - In-memory storage for testing and SSR
@@ -66,11 +66,11 @@ localspace is built on a foundation designed for growth. Here's what's planned:
 - [ ] **React Native** - AsyncStorage and SQLite drivers
 - [ ] **Electron** - Main and renderer process coordination
 - [ ] **Deno** - Native KV store integration
-- [ ] **TTL plugin** - Time-to-live expiration with automatic cleanup
-- [ ] **Encryption plugin** - Transparent encryption/decryption with Web Crypto API
-- [ ] **Compression plugin** - LZ-string or Brotli compression for large values
-- [ ] **Sync plugin** - Multi-tab synchronization with BroadcastChannel
-- [ ] **Quota plugin** - Automatic quota management and cleanup strategies
+- [x] **TTL plugin** - Time-to-live expiration with automatic cleanup
+- [x] **Encryption plugin** - Transparent encryption/decryption with Web Crypto API
+- [x] **Compression plugin** - LZ-string or Brotli compression for large values
+- [x] **Sync plugin** - Multi-tab synchronization with BroadcastChannel
+- [x] **Quota plugin** - Automatic quota management and cleanup strategies
 
 ### 📊 Community Priorities
 
@@ -282,6 +282,82 @@ const file = new Blob(['hello'], { type: 'text/plain' });
 await localspace.setItem('file', file);
 const restored = await localspace.getItem<Blob>('file');
 ```
+
+## Plugin System
+
+localspace now ships with a first-class plugin engine. Attach middleware when creating an instance or call `use()` later; plugins can mutate payloads, observe driver context, and run async interceptors around every storage call.
+
+```ts
+const store = localspace.createInstance({
+  name: 'secure-store',
+  storeName: 'primary',
+  plugins: [
+    ttlPlugin({ defaultTTL: 60_000 }),
+    encryptionPlugin({ key: '0123456789abcdef0123456789abcdef' }),
+    compressionPlugin({ threshold: 1024 }),
+    syncPlugin({ channelName: 'localspace-sync' }),
+    quotaPlugin({ maxSize: 5 * 1024 * 1024, evictionPolicy: 'lru' }),
+  ],
+});
+```
+
+### Lifecycle and hooks
+
+- **Registration** – supply `plugins` when calling `createInstance()` or chain `instance.use(plugin)` later. Each plugin can also expose `enabled` (boolean or function) and `priority` to control execution order.
+- **Lifecycle events** – `onInit(context)` is invoked after `ready()`, and `onDestroy` lets you tear down timers or channels. Call `await instance.destroy()` when disposing of an instance to run every `onDestroy` hook (executed in reverse priority order). Context exposes the active driver, db info, config, and a shared `metadata` bag for cross-plugin coordination.
+- **Interceptors** – hook into `beforeSet/afterSet`, `beforeGet/afterGet`, `beforeRemove/afterRemove`, plus batch-specific methods such as `beforeSetItems` or `beforeGetItems`. Hooks run sequentially: `before*` hooks execute from highest to lowest priority, while `after*` hooks unwind in reverse order so layered transformations (compression → encryption → TTL) remain invertible. Returning a value passes it to the next plugin, while throwing a `LocalSpaceError` aborts the operation.
+- **Per-call state** – plugins can stash data on `context.operationState` (e.g., capture the original value in `beforeSet` and reuse it in `afterSet`). For batch operations, `context.operationState.isBatch` is `true` and `context.operationState.batchSize` provides the total count.
+- **Error handling** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (quota violations, failed decryptions, etc.).
+
+### Plugin execution order
+
+Plugins are sorted by `priority` (higher runs first in `before*`, last in `after*`). Default priorities:
+
+| Plugin | Priority | Notes |
+|--------|----------|-------|
+| sync | -100 | Runs last in `afterSet` to broadcast original (untransformed) values |
+| quota | -10 | Runs late so it measures final payload sizes |
+| ttl, encryption, compression | 0 | Default; chain in registration order |
+
+**Recommended order**: `[ttlPlugin, encryptionPlugin, compressionPlugin, syncPlugin, quotaPlugin]`
+
+### Built-in plugins
+
+#### TTL plugin
+Wraps values as `{ data, expiresAt }`, invalidates stale reads, and optionally runs background cleanup. Options:
+
+- `defaultTTL` (ms) and `keyTTL` overrides
+- `cleanupInterval` to periodically scan `iterate()` output
+- `onExpire(key, value)` callback before removal
+
+#### Encryption plugin
+Encrypts serialized payloads using the Web Crypto API (AES-GCM by default) and decrypts transparently on reads.
+
+- Provide a `key` (CryptoKey/ArrayBuffer/string) or `keyDerivation` block (PBKDF2)
+- Customize `algorithm`, `ivLength`, `ivGenerator`, or `randomSource`
+- Works in browsers and modern Node runtimes (pass your own `subtle` when needed)
+
+#### Compression plugin
+Runs LZ-string compression (or a custom codec) when payloads exceed a `threshold` and restores them on read.
+
+- `threshold` (bytes) controls when compression kicks in
+- Supply a custom `{ compress, decompress }` codec if you prefer pako/Brotli
+
+#### Sync plugin
+Keeps multiple tabs/processes in sync via `BroadcastChannel` (with `storage`-event fallback).
+
+- `channelName` separates logical buses
+- `syncKeys` lets you scope which keys broadcast
+- `conflictStrategy` defaults to `last-write-wins`; provide `onConflict` (return `false` to drop remote writes) for merge logic
+
+#### Quota plugin
+Tracks approximate storage usage after every mutation and enforces limits.
+
+- `maxSize` (bytes) and optional `useNavigatorEstimate` to read the browser’s quota
+- `evictionPolicy: 'error' | 'lru'` (LRU removes least-recently-used keys automatically)
+- `onQuotaExceeded(info)` fires before throwing so you can log/alert users
+
+> Tip: place quota plugins last so they see the final payload size after other transformations (TTL, encryption, compression, etc.).
 
 ## Migration Guide
 

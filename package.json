@@ -82,5 +82,8 @@
     "commitizen": {
       "path": "cz-conventional-changelog"
     }
+  },
+  "dependencies": {
+    "lz-string": "^1.5.0"
   }
 }

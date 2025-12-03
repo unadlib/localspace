@@ -101,6 +101,16 @@ export interface LocalSpaceConfig {
 }
 
 /**
+ * Extended configuration that enables instance-scoped plugins.
+ */
+export interface LocalSpaceOptions extends LocalSpaceConfig {
+  /**
+   * Optional plugins to attach to the instance.
+   */
+  plugins?: LocalSpacePlugin[];
+}
+
+/**
  * Driver interface that all storage drivers must implement
  */
 export interface Driver {
@@ -264,7 +274,17 @@ export interface LocalSpaceInstance {
   /**
    * Create a new instance
    */
-  createInstance(options?: LocalSpaceConfig): LocalSpaceInstance;
+  createInstance(options?: LocalSpaceOptions): LocalSpaceInstance;
+
+  /**
+   * Register one or more plugins on this instance.
+   */
+  use(plugin: LocalSpacePlugin | LocalSpacePlugin[]): LocalSpaceInstance;
+
+  /**
+   * Tear down plugins and release their resources.
+   */
+  destroy(): Promise<void>;
 
   /**
    * Define a custom driver
@@ -468,4 +488,91 @@ export interface PerformanceStats {
    * Average number of operations per coalesced batch
    */
   avgCoalesceSize: number;
+}
+
+export type PluginEnabledPredicate = boolean | (() => boolean);
+
+export type PluginOperation =
+  | 'setItem'
+  | 'getItem'
+  | 'removeItem'
+  | 'setItems'
+  | 'getItems'
+  | 'removeItems'
+  | 'lifecycle';
+
+export type PluginStage = 'init' | 'before' | 'after' | 'destroy' | 'error';
+
+export interface PluginContext {
+  instance: LocalSpaceInstance;
+  driver: string | null;
+  dbInfo: DbInfo | null;
+  config: LocalSpaceConfig;
+  metadata: Record<string, unknown>;
+  operation: PluginOperation | null;
+  operationState: Record<string, unknown>;
+}
+
+export interface PluginErrorInfo {
+  plugin: string;
+  operation: PluginOperation;
+  stage: PluginStage;
+  key?: string;
+  context: PluginContext;
+  error: unknown;
+}
+
+export interface LocalSpacePlugin {
+  name: string;
+  version?: string;
+  priority?: number;
+  enabled?: PluginEnabledPredicate;
+
+  onInit?(context: PluginContext): Promise<void> | void;
+  onDestroy?(context: PluginContext): Promise<void> | void;
+  onError?(error: unknown, info: PluginErrorInfo): Promise<void> | void;
+
+  beforeSet?<T>(key: string, value: T, context: PluginContext): Promise<T> | T;
+  afterSet?<T>(
+    key: string,
+    value: T,
+    context: PluginContext
+  ): Promise<void> | void;
+
+  beforeGet?(key: string, context: PluginContext): Promise<string> | string;
+  afterGet?<T>(
+    key: string,
+    value: T | null,
+    context: PluginContext
+  ): Promise<T | null> | T | null;
+
+  beforeRemove?(key: string, context: PluginContext): Promise<string> | string;
+  afterRemove?(key: string, context: PluginContext): Promise<void> | void;
+
+  beforeSetItems?<T>(
+    entries: BatchItems<T>,
+    context: PluginContext
+  ): Promise<BatchItems<T>> | BatchItems<T>;
+  afterSetItems?<T>(
+    entries: BatchResponse<T>,
+    context: PluginContext
+  ): Promise<BatchResponse<T>> | BatchResponse<T>;
+
+  beforeGetItems?(
+    keys: string[],
+    context: PluginContext
+  ): Promise<string[]> | string[];
+  afterGetItems?<T>(
+    entries: BatchResponse<T>,
+    context: PluginContext
+  ): Promise<BatchResponse<T>> | BatchResponse<T>;
+
+  beforeRemoveItems?(
+    keys: string[],
+    context: PluginContext
+  ): Promise<string[]> | string[];
+  afterRemoveItems?(
+    keys: string[],
+    context: PluginContext
+  ): Promise<void> | void;
 }
