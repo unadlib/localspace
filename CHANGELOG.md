@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.3.0] - 2025-12-04
+
+### Added
+
+- **Plugin System**: Full plugin architecture for extensible functionality
+  - Support for custom plugins with lifecycle hooks
+  - Plugin manager for registering and managing plugins
+  - Encryption plugin support
+
+### Fixed
+
+- **Typed Array Serialization**: Fixed serialization issues with TypedArray (Uint8Array, Int8Array, etc.)
+- **Batch Operations**: Fixed `setItems`/`getItems` wrapper issues
+- **Batch Size**: Fixed `batchSize` configuration issue
+- **Plugin Manager**: Fixed plugin manager initialization and lifecycle issues
+- **Plugin Encryption**: Fixed encryption plugin functionality
+
+### Changed
+
+- Updated TypeScript configuration for better type safety
+
+### Documentation
+
+- Updated README with plugin system documentation
+
 ## [0.2.2] - 2025-12-03
 
 ### Added
