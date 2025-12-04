@@ -202,8 +202,8 @@ export const syncPlugin = (
 
   return {
     name: 'sync',
-    // High priority so afterSet runs last (afterSet executes plugins in reverse order)
-    priority: 100,
+    // Low priority so afterSet runs last (afterSet executes plugins in reverse order)
+    priority: -100,
     onInit: async (context) => {
       const metadata = getMetadata(context);
       if (!metadata.channel) {
