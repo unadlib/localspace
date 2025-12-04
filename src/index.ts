@@ -14,6 +14,7 @@ import type {
   Serializer,
   CompatibilitySuccessCallback,
   CompatibilityErrorCallback,
+  PerformanceStats,
 } from './types';
 
 // Create default instance
@@ -38,6 +39,7 @@ export type {
   Serializer,
   CompatibilitySuccessCallback,
   CompatibilityErrorCallback,
+  PerformanceStats,
 };
 export type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from './errors';
 export { LocalSpaceError } from './errors';

@@ -96,6 +96,28 @@ describe('Plugin system', () => {
     expect(value).toBeNull();
   });
 
+  it('cleans up expired ttl entries via scheduled sweep', async () => {
+    const onExpire = vi.fn();
+    const store = localspace.createInstance({
+      name: 'ttl-cleanup-plugin',
+      storeName: 'ttl-cleanup-store',
+      plugins: [
+        ttlPlugin({
+          defaultTTL: 5,
+          cleanupInterval: 10,
+          onExpire,
+        }),
+      ],
+    });
+
+    await store.setItem('ephemeral', 'value');
+    await sleep(40);
+
+    expect(onExpire).toHaveBeenCalledWith('ephemeral', 'value');
+    const remaining = await store.getItem('ephemeral');
+    expect(remaining).toBeNull();
+  });
+
   it('encrypts and decrypts values', async () => {
     const key = '0123456789abcdef0123456789abcdef';
     const secure = localspace.createInstance({
@@ -116,6 +138,55 @@ describe('Plugin system', () => {
 
     const decrypted = await secure.getItem<{ user: string }>('secret');
     expect(decrypted?.user).toBe('ada');
+  });
+
+  it('derives encryption keys and detects tampered payloads', async () => {
+    const secure = localspace.createInstance({
+      name: 'secure-derived-db',
+      storeName: 'secure-derived-store',
+      plugins: [
+        encryptionPlugin({
+          keyDerivation: {
+            passphrase: 'correct horse battery staple',
+            salt: 'salty-salt',
+            iterations: 1000,
+            hash: 'SHA-256',
+            length: 256,
+          },
+        }),
+      ],
+    });
+
+    await secure.setItem('record', { id: 42 });
+
+    const rawReader = localspace.createInstance({
+      name: 'secure-derived-db',
+      storeName: 'secure-derived-store',
+    });
+    const raw = await rawReader.getItem('record');
+    expect(raw).not.toBeNull();
+    expect(raw).toMatchObject({ __ls_encrypted: true });
+
+    if (!raw || typeof raw !== 'object') {
+      throw new Error('Encrypted payload missing');
+    }
+
+    type RawEncryptedPayload = {
+      __ls_encrypted: true;
+      algorithm: string;
+      iv: string;
+      data: string;
+    };
+    const encryptedPayload = raw as RawEncryptedPayload;
+    const tampered: RawEncryptedPayload = {
+      ...encryptedPayload,
+      data: `tampered-${encryptedPayload.data}`,
+    };
+    await rawReader.setItem('record', tampered);
+
+    await expect(secure.getItem('record')).rejects.toThrow(
+      'Failed to decrypt payload'
+    );
   });
 
   it('compresses large payloads transparently', async () => {
