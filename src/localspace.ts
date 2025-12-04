@@ -750,6 +750,10 @@ export class LocalSpace implements LocalSpaceInstance {
           value: unknown;
           context: PluginContext;
         }> = [];
+        const contextByKey = new Map<
+          string,
+          { value: unknown; context: PluginContext }
+        >();
 
         for (const entry of normalized) {
           const entryContext = this._pluginManager.createContext('setItem');
@@ -761,11 +765,13 @@ export class LocalSpace implements LocalSpaceInstance {
             entry.value,
             entryContext
           );
-          processedEntries.push({
+          const entryRecord = {
             key: entry.key,
             value: processedValue,
             context: entryContext,
-          });
+          };
+          processedEntries.push(entryRecord);
+          contextByKey.set(entry.key, { value: processedValue, context: entryContext });
         }
 
         const driverResponse = (await original(
@@ -784,14 +790,17 @@ export class LocalSpace implements LocalSpaceInstance {
           );
         }
 
-        const finalReturn = finalized.map((entry, index) => {
-          const processed = processedEntries[index];
-          const mappedValue =
-            processed?.context.operationState.returnValue ??
-            processed?.context.operationState.originalValue ??
-            processed?.value;
+        const finalReturn = finalized.map((entry) => {
+          const entryContext = contextByKey.get(entry.key);
+          const contextualValue =
+            entryContext?.context.operationState.returnValue;
           const value =
-            typeof mappedValue === 'undefined' ? entry.value : mappedValue;
+            typeof contextualValue !== 'undefined'
+              ? contextualValue
+              : typeof entry.value !== 'undefined'
+                ? entry.value
+                : entryContext?.context.operationState.originalValue ??
+                  entryContext?.value;
           return { key: entry.key, value };
         });
 
@@ -818,6 +827,7 @@ export class LocalSpace implements LocalSpaceInstance {
           targetKey: string;
           context: PluginContext;
         }> = [];
+        const targetToRequested = new Map<string, string>();
 
         for (const key of requestedKeys) {
           const entryContext = this._pluginManager.createContext('getItem');
@@ -827,6 +837,7 @@ export class LocalSpace implements LocalSpaceInstance {
             key,
             entryContext
           );
+          targetToRequested.set(targetKey, key);
           entryContexts.push({ requestedKey: key, targetKey, context: entryContext });
         }
 
@@ -857,7 +868,10 @@ export class LocalSpace implements LocalSpaceInstance {
           processedEntries,
           batchContext
         );
-        return finalEntries;
+        return finalEntries.map((entry) => {
+          const requestedKey = targetToRequested.get(entry.key) ?? entry.key;
+          return { key: requestedKey, value: entry.value };
+        });
       })();
       return executeCallback(promise, cb);
     }) as typeof this.getItems;
