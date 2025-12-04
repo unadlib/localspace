@@ -472,7 +472,9 @@ export class LocalSpace implements LocalSpaceInstance {
     }
 
     const requestedDrivers = drivers as string[];
-    const supportedDrivers = this._getSupportedDrivers(requestedDrivers);
+    const supportedDrivers = await this._resolveSupportedDrivers(
+      requestedDrivers
+    );
     const callbackOptions = this._getCallbackOptions();
 
     if (supportedDrivers.length === 0) {
@@ -780,7 +782,18 @@ export class LocalSpace implements LocalSpaceInstance {
           );
         }
 
-        return finalized;
+        const finalReturn = finalized.map((entry, index) => {
+          const processed = processedEntries[index];
+          const mappedValue =
+            processed?.context.operationState.returnValue ??
+            processed?.context.operationState.originalValue ??
+            processed?.value;
+          const value =
+            typeof mappedValue === 'undefined' ? entry.value : mappedValue;
+          return { key: entry.key, value };
+        });
+
+        return finalReturn;
       })();
       return executeCallback(promise, cb);
     }) as typeof this.setItems;
@@ -798,19 +811,42 @@ export class LocalSpace implements LocalSpaceInstance {
           keys,
           batchContext
         );
-        const driverResponse = (await original(
-          requestedKeys
-        )) as BatchResponse<unknown>;
-        const processedEntries: BatchResponse<unknown> = [];
+        const entryContexts: Array<{
+          requestedKey: string;
+          targetKey: string;
+          context: PluginContext;
+        }> = [];
 
-        for (const entry of driverResponse) {
+        for (const key of requestedKeys) {
           const entryContext = this._pluginManager.createContext('getItem');
           entryContext.operationState.isBatch = true;
           entryContext.operationState.batchSize = requestedKeys.length;
+          const targetKey = await this._pluginManager.beforeGet(
+            key,
+            entryContext
+          );
+          entryContexts.push({ requestedKey: key, targetKey, context: entryContext });
+        }
+
+        const targetKeys = entryContexts.map((entry) => entry.targetKey);
+        const driverResponse = (await original(
+          targetKeys
+        )) as BatchResponse<unknown>;
+        const processedEntries: BatchResponse<unknown> = [];
+
+        for (let i = 0; i < driverResponse.length; i++) {
+          const entry = driverResponse[i];
+          const context =
+            entryContexts[i]?.context ??
+            entryContexts.find((candidate) => candidate.targetKey === entry.key)
+              ?.context ??
+            this._pluginManager.createContext('getItem');
+          context.operationState.isBatch = true;
+          context.operationState.batchSize = requestedKeys.length;
           const processedValue = await this._pluginManager.afterGet(
             entry.key,
             entry.value,
-            entryContext
+            context
           );
           processedEntries.push({ key: entry.key, value: processedValue });
         }
@@ -866,6 +902,32 @@ export class LocalSpace implements LocalSpaceInstance {
   _getSupportedDrivers(drivers: string[]): string[] {
     const supportedDrivers: string[] = [];
     for (const driverName of drivers) {
+      if (this.supports(driverName)) {
+        supportedDrivers.push(driverName);
+      }
+    }
+    return supportedDrivers;
+  }
+
+  private async _resolveSupportedDrivers(
+    drivers: string[]
+  ): Promise<string[]> {
+    const supportedDrivers: string[] = [];
+    for (const driverName of drivers) {
+      const driver = DefinedDrivers[driverName];
+      if (!driver) {
+        continue;
+      }
+
+      if (!DriverSupport[driverName] && typeof driver._support === 'function') {
+        try {
+          const supportResult = await driver._support();
+          DriverSupport[driverName] = !!supportResult;
+        } catch {
+          DriverSupport[driverName] = false;
+        }
+      }
+
       if (this.supports(driverName)) {
         supportedDrivers.push(driverName);
       }

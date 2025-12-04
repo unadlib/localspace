@@ -42,6 +42,8 @@ export class PluginManager {
 
   private readonly initialized = new WeakSet<LocalSpacePlugin>();
 
+  private readonly initPromises = new WeakMap<LocalSpacePlugin, Promise<void>>();
+
   private readonly destroyed = new WeakSet<LocalSpacePlugin>();
 
   private orderCounter = 0;
@@ -102,29 +104,42 @@ export class PluginManager {
 
   async ensureInitialized(): Promise<void> {
     for (const plugin of this.getActivePlugins()) {
-      if (this.initialized.has(plugin) || typeof plugin.onInit !== 'function') {
-        if (
-          !this.initialized.has(plugin) &&
-          typeof plugin.onInit !== 'function'
-        ) {
-          this.initialized.add(plugin);
-        }
+      if (this.initialized.has(plugin)) {
         continue;
       }
-      const context = this.createContext(null);
-      try {
-        await plugin.onInit?.(context);
-      } catch (error) {
-        await this.dispatchPluginError(
-          plugin,
-          error,
-          'init',
-          'lifecycle',
-          undefined,
-          context
-        );
+
+      if (typeof plugin.onInit !== 'function') {
+        this.initialized.add(plugin);
+        continue;
       }
-      this.initialized.add(plugin);
+
+      const pendingInit = this.initPromises.get(plugin);
+      if (pendingInit) {
+        await pendingInit;
+        continue;
+      }
+
+      const context = this.createContext(null);
+      const initPromise = (async () => {
+        try {
+          await plugin.onInit!(context);
+        } catch (error) {
+          await this.dispatchPluginError(
+            plugin,
+            error,
+            'init',
+            'lifecycle',
+            undefined,
+            context
+          );
+        } finally {
+          this.initialized.add(plugin);
+          this.initPromises.delete(plugin);
+        }
+      })();
+
+      this.initPromises.set(plugin, initPromise);
+      await initPromise;
     }
   }
 

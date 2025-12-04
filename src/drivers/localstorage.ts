@@ -494,7 +494,7 @@ function dropInstance(
 const localStorageWrapper: Driver = {
   _driver: 'localStorageWrapper',
   _initStorage,
-  _support: isLocalStorageValid(),
+  _support: async () => isLocalStorageValid(),
   iterate,
   getItem,
   getItems,

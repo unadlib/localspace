@@ -216,7 +216,7 @@ export const encryptionPlugin = (
       return {
         __ls_encrypted: true,
         algorithm: algorithmName,
-        iv: serializer.bufferToString(iv.buffer as ArrayBuffer),
+        iv: serializer.bufferToString(new Uint8Array(iv).buffer),
         data: serializer.bufferToString(encrypted),
       } as unknown as T;
     },

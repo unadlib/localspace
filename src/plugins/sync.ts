@@ -202,7 +202,8 @@ export const syncPlugin = (
 
   return {
     name: 'sync',
-    priority: -100, // Execute last in afterSet to get original value before transformations
+    // High priority so afterSet runs last (afterSet executes plugins in reverse order)
+    priority: 100,
     onInit: async (context) => {
       const metadata = getMetadata(context);
       if (!metadata.channel) {
