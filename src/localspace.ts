@@ -474,9 +474,8 @@ export class LocalSpace implements LocalSpaceInstance {
     }
 
     const requestedDrivers = drivers as string[];
-    const supportedDrivers = await this._resolveSupportedDrivers(
-      requestedDrivers
-    );
+    const supportedDrivers =
+      await this._resolveSupportedDrivers(requestedDrivers);
     const callbackOptions = this._getCallbackOptions();
 
     if (supportedDrivers.length === 0) {
@@ -771,7 +770,10 @@ export class LocalSpace implements LocalSpaceInstance {
             context: entryContext,
           };
           processedEntries.push(entryRecord);
-          contextByKey.set(entry.key, { value: processedValue, context: entryContext });
+          contextByKey.set(entry.key, {
+            value: processedValue,
+            context: entryContext,
+          });
         }
 
         const driverResponse = (await original(
@@ -799,8 +801,8 @@ export class LocalSpace implements LocalSpaceInstance {
               ? contextualValue
               : typeof entry.value !== 'undefined'
                 ? entry.value
-                : entryContext?.context.operationState.originalValue ??
-                  entryContext?.value;
+                : (entryContext?.context.operationState.originalValue ??
+                  entryContext?.value);
           return { key: entry.key, value };
         });
 
@@ -838,7 +840,11 @@ export class LocalSpace implements LocalSpaceInstance {
             entryContext
           );
           targetToRequested.set(targetKey, key);
-          entryContexts.push({ requestedKey: key, targetKey, context: entryContext });
+          entryContexts.push({
+            requestedKey: key,
+            targetKey,
+            context: entryContext,
+          });
         }
 
         const targetKeys = entryContexts.map((entry) => entry.targetKey);
@@ -925,9 +931,7 @@ export class LocalSpace implements LocalSpaceInstance {
     return supportedDrivers;
   }
 
-  private async _resolveSupportedDrivers(
-    drivers: string[]
-  ): Promise<string[]> {
+  private async _resolveSupportedDrivers(drivers: string[]): Promise<string[]> {
     const supportedDrivers: string[] = [];
     for (const driverName of drivers) {
       const driver = DefinedDrivers[driverName];

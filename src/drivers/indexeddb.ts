@@ -712,7 +712,8 @@ function flushCoalescedWrites(
               const req = store.delete(op.key);
               req.onerror = () => {
                 requestError =
-                  req.error || new Error(`Failed to remove "${String(op.key)}"`);
+                  req.error ||
+                  new Error(`Failed to remove "${String(op.key)}"`);
               };
             }
           }

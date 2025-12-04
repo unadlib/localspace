@@ -42,7 +42,10 @@ export class PluginManager {
 
   private readonly initialized = new WeakSet<LocalSpacePlugin>();
 
-  private readonly initPromises = new WeakMap<LocalSpacePlugin, Promise<void>>();
+  private readonly initPromises = new WeakMap<
+    LocalSpacePlugin,
+    Promise<void>
+  >();
 
   private readonly destroyed = new WeakSet<LocalSpacePlugin>();
 
