@@ -127,6 +127,16 @@ describe('serializer round-trip behaviour', () => {
       expect(Array.from(decoded as Float64Array)).toEqual(Array.from(view));
     });
 
+    it('preserves view slices (byteOffset/byteLength)', async () => {
+      const backing = new Uint8Array([9, 9, 1, 2, 3, 4, 9, 9]);
+      const view = new Uint8Array(backing.buffer, 2, 4); // [1,2,3,4], not the whole buffer
+      const encoded = await serializer.serialize(view);
+      const decoded = serializer.deserialize(encoded);
+
+      expect(decoded).toBeInstanceOf(Uint8Array);
+      expect(Array.from(decoded as Uint8Array)).toEqual(Array.from(view));
+    });
+
     (typeof BigInt64Array === 'function' ? it : it.skip)(
       'handles BigInt64Array',
       async () => {

@@ -135,11 +135,15 @@ async function serialize(value: unknown): Promise<string> {
         { valueType }
       );
     }
+
+    const offset = value.byteOffset;
+    const length = value.byteLength;
     const sourceBuffer = value.buffer;
     const normalizedBuffer =
       sourceBuffer instanceof ArrayBuffer
-        ? sourceBuffer
-        : new Uint8Array(sourceBuffer).slice().buffer;
+        ? sourceBuffer.slice(offset, offset + length)
+        : new Uint8Array(sourceBuffer, offset, length).slice().buffer;
+
     return SERIALIZED_MARKER + marker + bufferToString(normalizedBuffer);
   }
 
