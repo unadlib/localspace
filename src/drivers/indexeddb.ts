@@ -772,6 +772,9 @@ function drainCoalescedWrites(dbInfo: DbInfo): Promise<void> {
   if (!dbInfo.coalesceWrites) {
     return Promise.resolve();
   }
+  if (dbInfo.coalesceReadConsistency === 'eventual') {
+    return Promise.resolve();
+  }
   const dbContext = ensureDbContext(dbInfo);
   return flushCoalescedWrites(dbInfo, dbContext);
 }
@@ -1018,6 +1021,7 @@ function getItem<T>(
   const promise = new Promise<T | null>((resolve, reject) => {
     self
       .ready()
+      .then(() => drainCoalescedWrites(self._dbInfo))
       .then(() => {
         createTransaction(
           self._dbInfo,
@@ -1073,6 +1077,7 @@ function getItems<T>(
   const promise = new Promise<BatchResponse<T>>(async (resolve, reject) => {
     try {
       await self.ready();
+      await drainCoalescedWrites(self._dbInfo);
 
       if (normalizedKeys.length === 0) {
         resolve([]);
@@ -1167,6 +1172,7 @@ function iterate<T, U>(
   const promise = new Promise<U>((resolve, reject) => {
     self
       .ready()
+      .then(() => drainCoalescedWrites(self._dbInfo))
       .then(() => {
         createTransaction(
           self._dbInfo,
@@ -1233,6 +1239,7 @@ function setItems<T>(
   const promise = new Promise<BatchResponse<T>>(async (resolve, reject) => {
     try {
       await self.ready();
+      await drainCoalescedWrites(self._dbInfo);
       const dbInfo = self._dbInfo;
 
       let blobSupport: boolean | undefined;
@@ -1244,8 +1251,6 @@ function setItems<T>(
       if (needsBlobCheck) {
         blobSupport = await ensureBlobSupportForDb(dbInfo);
       }
-
-      await drainCoalescedWrites(dbInfo);
 
       const batches = chunkArray(
         normalized,
@@ -1349,6 +1354,7 @@ async function setItem<T>(
     try {
       await self.ready();
       dbInfo = self._dbInfo;
+      await drainCoalescedWrites(dbInfo);
 
       if (toString.call(value) === '[object Blob]') {
         const blobSupport = await ensureBlobSupportForDb(dbInfo);
@@ -1799,6 +1805,7 @@ function length(
   const promise = new Promise<number>((resolve, reject) => {
     self
       .ready()
+      .then(() => drainCoalescedWrites(self._dbInfo))
       .then(() => {
         createTransaction(
           self._dbInfo,
@@ -1843,6 +1850,7 @@ function key(
 
     self
       .ready()
+      .then(() => drainCoalescedWrites(self._dbInfo))
       .then(() => {
         createTransaction(
           self._dbInfo,
@@ -1900,6 +1908,7 @@ function keys(
   const promise = new Promise<string[]>((resolve, reject) => {
     self
       .ready()
+      .then(() => drainCoalescedWrites(self._dbInfo))
       .then(() => {
         createTransaction(
           self._dbInfo,

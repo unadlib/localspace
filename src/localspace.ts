@@ -90,6 +90,8 @@ const DefaultConfig: LocalSpaceConfig = {
   compatibilityMode: false,
   coalesceWrites: true,
   coalesceWindowMs: 8,
+  coalesceReadConsistency: 'strong',
+  pluginInitPolicy: 'fail',
 };
 
 type ReadyAwareInstance = {

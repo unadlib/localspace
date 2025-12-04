@@ -46,6 +46,8 @@ export class PluginManager {
 
   private readonly destroyed = new WeakSet<LocalSpacePlugin>();
 
+  private readonly disabled = new WeakSet<LocalSpacePlugin>();
+
   private orderCounter = 0;
 
   constructor(host: PluginHost, initialPlugins: LocalSpacePlugin[] = []) {
@@ -85,6 +87,9 @@ export class PluginManager {
     const plugins = this.pluginRegistry
       .map((entry) => entry.plugin)
       .filter((plugin) => {
+        if (this.disabled.has(plugin)) {
+          return false;
+        }
         const enabled = plugin.enabled;
         if (typeof enabled === 'function') {
           try {
@@ -123,6 +128,7 @@ export class PluginManager {
       const initPromise = (async () => {
         try {
           await plugin.onInit!(context);
+          this.initialized.add(plugin);
         } catch (error) {
           await this.dispatchPluginError(
             plugin,
@@ -132,8 +138,13 @@ export class PluginManager {
             undefined,
             context
           );
+          const policy = this.host._config.pluginInitPolicy ?? 'fail';
+          if (policy === 'disable-and-continue') {
+            this.disabled.add(plugin);
+            return;
+          }
+          throw error;
         } finally {
-          this.initialized.add(plugin);
           this.initPromises.delete(plugin);
         }
       })();
@@ -386,7 +397,7 @@ export class PluginManager {
       .slice()
       .reverse();
     for (const plugin of plugins) {
-      if (this.destroyed.has(plugin)) {
+      if (this.destroyed.has(plugin) || this.disabled.has(plugin)) {
         continue;
       }
       if (typeof plugin.onDestroy !== 'function') {

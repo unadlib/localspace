@@ -307,7 +307,7 @@ const store = localspace.createInstance({
 - **Lifecycle events** – `onInit(context)` is invoked after `ready()`, and `onDestroy` lets you tear down timers or channels. Call `await instance.destroy()` when disposing of an instance to run every `onDestroy` hook (executed in reverse priority order). Context exposes the active driver, db info, config, and a shared `metadata` bag for cross-plugin coordination.
 - **Interceptors** – hook into `beforeSet/afterSet`, `beforeGet/afterGet`, `beforeRemove/afterRemove`, plus batch-specific methods such as `beforeSetItems` or `beforeGetItems`. Hooks run sequentially: `before*` hooks execute from highest to lowest priority, while `after*` hooks unwind in reverse order so layered transformations (compression → encryption → TTL) remain invertible. Returning a value passes it to the next plugin, while throwing a `LocalSpaceError` aborts the operation.
 - **Per-call state** – plugins can stash data on `context.operationState` (e.g., capture the original value in `beforeSet` and reuse it in `afterSet`). For batch operations, `context.operationState.isBatch` is `true` and `context.operationState.batchSize` provides the total count.
-- **Error handling** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (quota violations, failed decryptions, etc.).
+- **Error handling & init policy** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (quota violations, failed decryptions, etc.). If a plugin `onInit` throws, the default policy is fail-fast (propagate and abort init). Set `pluginInitPolicy: 'disable-and-continue'` in config to log and skip the failing plugin instead (use with care for critical plugins like encryption).
 
 ### Plugin execution order
 
@@ -401,6 +401,7 @@ localspace.setItem('key', 'value', (err, value) => {
 
 ## Performance notes
 - **Automatic write coalescing (enabled by default):** localspace automatically merges rapid single writes (`setItem`/`removeItem`) within an 8ms window into one transaction, giving you 3-10x performance improvement with zero code changes. This is enabled by default for IndexedDB. Set `coalesceWrites: false` if you need strict per-operation durability.
+- **Read-your-writes consistency with coalescing:** Pending coalesced writes are flushed before reads (`getItem`, `getItems`, `iterate`, `keys`, `length`, `key`) and destructive ops (`clear`, `dropInstance`), so immediate reads always observe the latest value. If you need eventual reads for speed, you can switch `coalesceReadConsistency` to `'eventual'`.
 - **Batch APIs outperform loops:** Playwright benchmark (`test/playwright/benchmark.spec.ts`) on 500 items x 256B showed `setItems()` ~6x faster and `getItems()` ~7.7x faster than per-item loops, with `removeItems()` ~2.8x faster (Chromium, relaxed durability).
 - **Transaction helpers:** `runTransaction()` lets you co-locate reads/writes in a single transaction for atomic migrations and to shorten lock time.
 - **Batch sizing:** Use `maxBatchSize` to split very large batch operations (`setItems`/`removeItems`/`getItems`) and keep transaction size in check. This works independently from `coalesceWrites`, which optimizes single-item operations.

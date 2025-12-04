@@ -1027,6 +1027,30 @@ describe('IndexedDB driver tests', () => {
 
       await coalesceInstance.dropInstance();
     });
+
+    it('should read latest values immediately after coalesced writes', async () => {
+      const coalesceInstance = localspace.createInstance({
+        name: `coalesce-read-${Math.random().toString(36).slice(2)}`,
+        storeName: 'coalesceReadStore',
+        coalesceWrites: true,
+        coalesceWindowMs: 50,
+      });
+
+      await coalesceInstance.setDriver([coalesceInstance.INDEXEDDB]);
+      await coalesceInstance.ready();
+      await coalesceInstance.clear();
+
+      await coalesceInstance.setItem('k', 'v1');
+      const firstRead = await coalesceInstance.getItem('k');
+      expect(firstRead).toBe('v1');
+
+      await coalesceInstance.setItem('k', 'v2');
+      await coalesceInstance.setItem('k', 'v3');
+      const latest = await coalesceInstance.getItem('k');
+      expect(latest).toBe('v3');
+
+      await coalesceInstance.dropInstance();
+    });
   });
 
   describe('dropInstance edge cases', () => {

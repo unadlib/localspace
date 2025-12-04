@@ -299,6 +299,73 @@ describe('Plugin system', () => {
     expect(errorHandler.mock.calls[0][0].message).toBe('intentional');
   });
 
+  it('propagates plugin init errors by default (fail policy)', async () => {
+    const failingInitPlugin: LocalSpacePlugin = {
+      name: 'failing-init',
+      onInit: () => {
+        throw new Error('init failed');
+      },
+    };
+
+    const store = localspace.createInstance({
+      name: 'init-fail-db',
+      storeName: 'init-fail-store',
+      plugins: [failingInitPlugin],
+    });
+
+    await store.ready();
+    // Plugin init is lazy - triggered on first storage operation
+    await expect(store.setItem('key', 'value')).rejects.toThrow('init failed');
+  });
+
+  it('disables plugin and continues when pluginInitPolicy is disable-and-continue', async () => {
+    const initCalls: string[] = [];
+    const setCalls: string[] = [];
+
+    const failingInitPlugin: LocalSpacePlugin = {
+      name: 'failing-init',
+      onInit: () => {
+        initCalls.push('failing');
+        throw new Error('init failed');
+      },
+      beforeSet: (_key, value) => {
+        setCalls.push('failing');
+        return value;
+      },
+    };
+
+    const workingPlugin: LocalSpacePlugin = {
+      name: 'working',
+      onInit: () => {
+        initCalls.push('working');
+      },
+      beforeSet: (_key, value) => {
+        setCalls.push('working');
+        return value;
+      },
+    };
+
+    const store = localspace.createInstance({
+      name: 'init-disable-db',
+      storeName: 'init-disable-store',
+      plugins: [failingInitPlugin, workingPlugin],
+      pluginInitPolicy: 'disable-and-continue',
+    });
+
+    await store.ready();
+
+    // First storage operation triggers plugin init
+    await store.setItem('key', 'value');
+
+    // Both plugins attempted init
+    expect(initCalls).toContain('failing');
+    expect(initCalls).toContain('working');
+
+    // Only working plugin should run hooks (failing one is disabled)
+    expect(setCalls).not.toContain('failing');
+    expect(setCalls).toContain('working');
+  });
+
   it('provides batch context to plugins', async () => {
     const contexts: Array<{ isBatch?: boolean; batchSize?: number }> = [];
     const observerPlugin: LocalSpacePlugin = {

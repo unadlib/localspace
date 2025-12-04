@@ -70,6 +70,13 @@ export interface LocalSpaceConfig {
   coalesceWindowMs?: number;
 
   /**
+   * Read consistency when coalesceWrites is enabled.
+   * - 'strong': drain pending writes before reads (default)
+   * - 'eventual': skip drain for faster reads at the cost of staleness
+   */
+  coalesceReadConsistency?: 'strong' | 'eventual';
+
+  /**
    * Driver(s) to use (string or array of strings)
    */
   driver?: string | string[];
@@ -98,6 +105,13 @@ export interface LocalSpaceConfig {
    * Enable legacy callback compatibility mode
    */
   compatibilityMode?: boolean;
+
+  /**
+   * Plugin initialization failure policy.
+   * - 'fail' (default): propagate errors and abort initialization
+   * - 'disable-and-continue': log and skip the failing plugin
+   */
+  pluginInitPolicy?: 'fail' | 'disable-and-continue';
 }
 
 /**
