@@ -417,6 +417,8 @@ When `compatibilityMode` is off, driver setup methods also use Node-style callba
 - **Read structured errors:** Rejections surface as `LocalSpaceError` with a `code`, contextual `details` (driver, operation, key, attemptedDrivers), and the original `cause`. Branch on `error.code` instead of parsing strings.
 - **Handle quota errors:** Check for `error.code === 'QUOTA_EXCEEDED'` (or inspect `error.cause`) from `setItem` to inform users about storage limits.
 - **Run unit tests:** The project ships with Vitest and Playwright suites covering API behavior; run `yarn test` to verify changes.
+- **Collect Playwright coverage:** Run `yarn test:e2e:coverage` to re-build the bundle, execute the Playwright suite with Chromium V8 coverage enabled, and emit both text + HTML reports via `nyc` (open `coverage/index.html` after the run; raw JSON sits in `.nyc_output`).
+- **Collect combined Vitest + Playwright coverage:** Run `yarn coverage:full` to clean previous artifacts, run `vitest --coverage`, stash its Istanbul JSON into `.nyc_output`, then execute the coverage-enabled Playwright suite and emit merged `nyc` reports.
 
 ## License
 [MIT](./LICENSE)

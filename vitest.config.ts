@@ -9,7 +9,7 @@ export default defineConfig({
     exclude: ['test/playwright/**'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'lcov'],
+      reporter: ['text', 'lcov', 'json'],
       reportsDirectory: './coverage',
       include: ['src/**/*.{ts,tsx}'],
       exclude: ['src/**/*.d.ts'],

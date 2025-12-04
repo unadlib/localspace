@@ -35,8 +35,11 @@
   ],
   "scripts": {
     "test": "vitest run && yarn build && playwright test",
+    "test:coverage": "vitest run --coverage",
     "test:unit": "vitest run",
     "test:e2e": "yarn build && playwright test",
+    "test:e2e:coverage": "rimraf .nyc_output && yarn build && PLAYWRIGHT_COVERAGE=1 playwright test && nyc report --reporter=text-summary --reporter=html",
+    "coverage:full": "rimraf coverage .nyc_output && vitest run --coverage && node -e \"const fs=require('fs');const path=require('path');const src=path.join('coverage','coverage-final.json');if(!fs.existsSync(src)){console.error('Vitest coverage JSON not found:',src);process.exit(1);}fs.mkdirSync('.nyc_output',{recursive:true});fs.copyFileSync(src,path.join('.nyc_output','vitest.json'));\" && yarn build && PLAYWRIGHT_COVERAGE=1 playwright test && nyc report --reporter=text-summary --reporter=html",
     "clean": "rimraf dist",
     "check:type": "tsc --skipLibCheck --noEmit",
     "build": "yarn clean && tsc --skipLibCheck && yarn build:prod",
@@ -69,6 +72,7 @@
     "eslint-plugin-prettier": "^5.1.3",
     "fake-indexeddb": "^6.2.4",
     "jsdom": "^27.0.0",
+    "nyc": "^17.1.0",
     "prettier": "^3.2.5",
     "rimraf": "^6.0.1",
     "rollup": "^4.52.3",
@@ -76,6 +80,7 @@
     "typedoc": "^0.28.13",
     "typedoc-plugin-markdown": "^4.2.10",
     "typescript": "^5.9.2",
+    "v8-to-istanbul": "^9.3.0",
     "vitest": "^3.2.4"
   },
   "config": {
