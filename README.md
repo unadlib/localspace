@@ -58,9 +58,7 @@ localspace is built on a foundation designed for growth. Here's what's planned:
 
 ### TODO
 - [x] **Plugin system** - Middleware architecture for cross-cutting concerns
-- [ ] **Cache API driver** - Native browser caching with automatic HTTP semantics
 - [ ] **OPFS driver** - Origin Private File System for high-performance file storage
-- [ ] **Memory driver** - In-memory storage for testing and SSR
 - [ ] **Custom driver templates** - Documentation and examples for third-party drivers
 - [ ] **Node.js** - File system and SQLite adapters
 - [ ] **React Native** - AsyncStorage and SQLite drivers
