@@ -511,7 +511,11 @@ test.describe('localspace vs localforage benchmarks', () => {
         },
         {
           label: 'coalesce-eventual',
-          options: { coalesceWrites: true, coalesceReadConsistency: 'eventual' as const },
+          options: {
+            coalesceWrites: true,
+            coalesceReadConsistency: 'eventual' as const,
+            coalesceFireAndForget: false,
+          },
         },
       ];
 
