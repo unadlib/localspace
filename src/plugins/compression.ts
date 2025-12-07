@@ -1,4 +1,5 @@
 import type { LocalSpacePlugin } from '../types';
+import { createLocalSpaceError, toLocalSpaceError } from '../errors';
 import serializer from '../utils/serializer';
 import { compressToUint8Array, decompressFromUint8Array } from 'lz-string';
 
@@ -69,7 +70,17 @@ export const compressionPlugin = (
         return value;
       }
 
-      const compressed = toUint8Array(await codec.compress(serialized));
+      let compressed: Uint8Array;
+      try {
+        compressed = toUint8Array(await codec.compress(serialized));
+      } catch (error) {
+        throw toLocalSpaceError(
+          error,
+          'OPERATION_FAILED',
+          'Failed to compress payload'
+        );
+      }
+
       const payload: CompressionPayload = {
         __ls_compressed: true,
         algorithm,
