@@ -77,17 +77,13 @@ const cleanupExpired = async (
   }
   metadata.running = true;
   try {
-    const expired: Array<{ key: string; data: unknown }> = [];
-    await context.instance.iterate<unknown, void>((value, key) => {
-      if (isTtlPayload(value) && value.expiresAt <= Date.now()) {
-        expired.push({ key, data: value.data });
-      }
-    });
-
-    for (const entry of expired) {
-      await context.instance.removeItem(entry.key).catch(() => undefined);
-      if (options.onExpire) {
-        await options.onExpire(entry.key, entry.data);
+    const keys = await context.instance.keys();
+    for (const key of keys) {
+      try {
+        // Use plugin-aware getItem so TTL + encryption/compression are respected.
+        await context.instance.getItem(key);
+      } catch {
+        // Ignore individual key failures during cleanup.
       }
     }
   } finally {

@@ -1627,7 +1627,7 @@ function runTransaction<T>(
     try {
       await self.ready();
       const dbInfo = self._dbInfo;
-      await drainCoalescedWrites(dbInfo);
+      await drainCoalescedWrites(dbInfo, { force: true });
       // Compute blob support once up front so we don't pause an empty transaction later.
       let precomputedBlobSupport: boolean | undefined;
       try {
