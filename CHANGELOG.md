@@ -8,6 +8,7 @@
 - **Destructive Operations**: Fixed `dropInstance`, `clear`, and `removeItems` to correctly flush pending coalesced writes before execution.
 - **TTL Plugin**: Fixed cleanup logic to be compatible with encryption and compression plugins.
 - **Transaction Consistency**: `runTransaction` now forces a flush of pending coalesced writes before starting, ensuring consistency even in `eventual` mode.
+- **Compression Plugin**: Fixed error handling to correctly propagate `LocalSpaceError` when compression fails.
 
 ## [0.3.0] - 2025-12-04
 
