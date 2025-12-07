@@ -70,11 +70,25 @@ export interface LocalSpaceConfig {
   coalesceWindowMs?: number;
 
   /**
+   * Optional maximum number of operations to coalesce per flush. When exceeded,
+   * the queue is flushed immediately and split into multiple transactions to
+   * avoid oversized batches.
+   */
+  coalesceMaxBatchSize?: number;
+
+  /**
    * Read consistency when coalesceWrites is enabled.
    * - 'strong': drain pending writes before reads (default)
    * - 'eventual': skip drain for faster reads at the cost of staleness
    */
   coalesceReadConsistency?: 'strong' | 'eventual';
+
+  /**
+   * When true and coalesceReadConsistency is 'eventual', set/remove resolves
+   * immediately and flush happens in the background. Errors are logged but not
+   * surfaced to callers. Use with care.
+   */
+  coalesceFireAndForget?: boolean;
 
   /**
    * Driver(s) to use (string or array of strings)

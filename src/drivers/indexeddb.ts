@@ -621,7 +621,8 @@ function enqueueCoalescedWrite(
   dbInfo: DbInfo,
   opData:
     | { type: 'set'; key: string; value: unknown }
-    | { type: 'remove'; key: string }
+    | { type: 'remove'; key: string },
+  options?: { resolveImmediately?: boolean }
 ): Promise<unknown> {
   const dbContext = ensureDbContext(dbInfo);
   const op: QueuedWrite =
@@ -644,18 +645,40 @@ function enqueueCoalescedWrite(
   dbContext.stats.totalWrites++;
 
   const windowMs = dbInfo.coalesceWindowMs ?? 8;
+  const maxBatch = dbInfo.coalesceMaxBatchSize;
+  const exceedsBatch =
+    typeof maxBatch === 'number' && Number.isFinite(maxBatch) && maxBatch > 0
+      ? dbContext.coalesceQueue.length >= maxBatch
+      : false;
 
-  if (!dbContext.coalesceTimer) {
+  if (exceedsBatch) {
+    // Flush immediately to keep batches bounded.
+    void flushCoalescedWrites(dbInfo, dbContext);
+  } else if (!dbContext.coalesceTimer) {
     dbContext.coalesceTimer = setTimeout(() => {
       dbContext.coalesceTimer = null;
       void flushCoalescedWrites(dbInfo, dbContext);
     }, windowMs);
   }
 
-  return new Promise((resolve, reject) => {
+  const flushPromise = new Promise((resolve, reject) => {
     op.resolve = resolve as (value: unknown) => void;
     op.reject = reject;
   });
+
+  if (options?.resolveImmediately) {
+    // Resolve to caller right away; let flush happen in the background.
+    // Errors are surfaced as console warnings to avoid unhandled rejections.
+    flushPromise.catch((error) =>
+      console.warn('[localspace] coalesced write failed (eventual mode)', error)
+    );
+    if (opData.type === 'set') {
+      return Promise.resolve(opData.value);
+    }
+    return Promise.resolve();
+  }
+
+  return flushPromise;
 }
 
 function flushCoalescedWrites(
@@ -676,6 +699,12 @@ function flushCoalescedWrites(
     return Promise.resolve();
   }
 
+  const maxBatch = dbInfo.coalesceMaxBatchSize;
+  const batches =
+    typeof maxBatch === 'number' && Number.isFinite(maxBatch) && maxBatch > 0
+      ? chunkArray(batch, maxBatch)
+      : [batch];
+
   dbContext.coalescing = true;
 
   const operation = new Promise<void>((resolve, reject) => {
@@ -686,66 +715,74 @@ function flushCoalescedWrites(
       reject(error);
     };
 
-    createTransaction(
-      dbInfo,
-      READ_WRITE,
-      (err: Error | null, transaction?: IDBTransaction) => {
-        if (err || !transaction) {
-          rejectAll(err || new Error('Failed to create transaction'));
-          dbContext.coalescing = false;
-          return;
-        }
+    const processBatch = (ops: QueuedWrite[]): Promise<void> =>
+      new Promise<void>((batchResolve, batchReject) => {
+        createTransaction(
+          dbInfo,
+          READ_WRITE,
+          (err: Error | null, transaction?: IDBTransaction) => {
+            if (err || !transaction) {
+              batchReject(err || new Error('Failed to create transaction'));
+              return;
+            }
 
-        try {
-          const storeName = requireStoreName(dbInfo);
-          const store = transaction.objectStore(storeName);
-          let requestError: Error | null = null;
+            try {
+              const storeName = requireStoreName(dbInfo);
+              const store = transaction.objectStore(storeName);
+              let requestError: Error | null = null;
 
-          for (const op of batch) {
-            if (op.type === 'set') {
-              const req = store.put(op.value, op.key);
-              req.onerror = () => {
-                requestError =
-                  req.error || new Error(`Failed to set "${String(op.key)}"`);
+              for (const op of ops) {
+                if (op.type === 'set') {
+                  const req = store.put(op.value, op.key);
+                  req.onerror = () => {
+                    requestError =
+                      req.error || new Error(`Failed to set "${String(op.key)}"`);
+                  };
+                } else {
+                  const req = store.delete(op.key);
+                  req.onerror = () => {
+                    requestError =
+                      req.error || new Error(`Failed to remove "${String(op.key)}"`);
+                  };
+                }
+              }
+
+              transaction.oncomplete = () => {
+                for (const op of ops) {
+                  if (op.type === 'set') {
+                    op.resolve(op.value);
+                  } else {
+                    op.resolve();
+                  }
+                }
+                if (ops.length > 1) {
+                  dbContext.stats.coalescedWrites += ops.length;
+                  dbContext.stats.transactionsSaved += ops.length - 1;
+                }
+                batchResolve();
               };
-            } else {
-              const req = store.delete(op.key);
-              req.onerror = () => {
-                requestError =
-                  req.error ||
-                  new Error(`Failed to remove "${String(op.key)}"`);
+
+              transaction.onabort = transaction.onerror = () => {
+                batchReject(
+                  requestError ||
+                    transaction.error ||
+                    new Error('Failed to apply coalesced writes')
+                );
               };
+            } catch (error) {
+              batchReject(error as Error);
             }
           }
+        );
+      });
 
-          transaction.oncomplete = () => {
-            for (const op of batch) {
-              if (op.type === 'set') {
-                op.resolve(op.value);
-              } else {
-                op.resolve();
-              }
-            }
-            // Update statistics: batch.length operations merged into 1 transaction
-            if (batch.length > 1) {
-              dbContext.stats.coalescedWrites += batch.length;
-              dbContext.stats.transactionsSaved += batch.length - 1;
-            }
-            resolve();
-          };
-
-          transaction.onabort = transaction.onerror = () => {
-            rejectAll(
-              requestError ||
-                transaction.error ||
-                new Error('Failed to apply coalesced writes')
-            );
-          };
-        } catch (error) {
-          rejectAll(error as Error);
-        }
+    (async () => {
+      for (const ops of batches) {
+        await processBatch(ops);
       }
-    );
+    })()
+      .then(() => resolve())
+      .catch(rejectAll);
   });
 
   dbContext.coalesceDrainPromise = operation
@@ -769,11 +806,14 @@ function flushCoalescedWrites(
   return dbContext.coalesceDrainPromise;
 }
 
-function drainCoalescedWrites(dbInfo: DbInfo): Promise<void> {
+function drainCoalescedWrites(
+  dbInfo: DbInfo,
+  options?: { force?: boolean }
+): Promise<void> {
   if (!dbInfo.coalesceWrites) {
     return Promise.resolve();
   }
-  if (dbInfo.coalesceReadConsistency === 'eventual') {
+  if (!options?.force && dbInfo.coalesceReadConsistency === 'eventual') {
     return Promise.resolve();
   }
   const dbContext = ensureDbContext(dbInfo);
@@ -993,7 +1033,6 @@ function fullyReady(
   callback?: Callback<void>
 ): Promise<void> {
   const self = this;
-
   const initReady = (self._initReady ?? self.ready).bind(self);
   const promise = withIdbErrorContext(
     initReady().then(() => {
@@ -1353,9 +1392,15 @@ async function setItem<T>(
   const promise = new Promise<T | null | undefined>(async (resolve, reject) => {
     let dbInfo: DbInfo;
     try {
-      await self.ready();
       dbInfo = self._dbInfo;
-      await drainCoalescedWrites(dbInfo);
+      if (!dbInfo || !dbInfo.db) {
+        await self.ready();
+        dbInfo = self._dbInfo;
+      }
+      const coalesceEnabled = !!dbInfo.coalesceWrites;
+      if (coalesceEnabled && dbInfo.coalesceReadConsistency !== 'eventual') {
+        await drainCoalescedWrites(dbInfo);
+      }
 
       if (toString.call(value) === '[object Blob]') {
         const blobSupport = await ensureBlobSupportForDb(dbInfo);
@@ -1366,15 +1411,26 @@ async function setItem<T>(
 
       const normalizedValue = (value === undefined ? null : value) as T;
       const coalesce = !!dbInfo.coalesceWrites;
+      const eventual = dbInfo.coalesceReadConsistency === 'eventual';
+      const fireAndForget = coalesce && eventual && !!dbInfo.coalesceFireAndForget;
 
       if (coalesce) {
-        enqueueCoalescedWrite(dbInfo, {
-          type: 'set',
-          key,
-          value: normalizedValue,
-        })
-          .then((result) => resolve(result as T))
-          .catch(reject);
+        const pending = enqueueCoalescedWrite(
+          dbInfo,
+          {
+            type: 'set',
+            key,
+            value: normalizedValue,
+          },
+          { resolveImmediately: fireAndForget }
+        );
+
+        if (fireAndForget) {
+          resolve(normalizedValue);
+          return;
+        }
+
+        pending.then((result) => resolve(result as T)).catch(reject);
         return;
       }
 
@@ -1424,43 +1480,56 @@ function removeItem(
   key = normalizeKey(key);
 
   const promise = new Promise<void>((resolve, reject) => {
-    self
-      .ready()
-      .then(() => {
-        const dbInfo = self._dbInfo;
-        const coalesce = !!dbInfo.coalesceWrites;
+    (async () => {
+      let dbInfo = self._dbInfo;
+      if (!dbInfo || !dbInfo.db) {
+        await self.ready();
+        dbInfo = self._dbInfo;
+      }
 
-        if (coalesce) {
-          enqueueCoalescedWrite(dbInfo, { type: 'remove', key })
-            .then(() => resolve())
-            .catch(reject);
+      const coalesce = !!dbInfo.coalesceWrites;
+      const eventual = dbInfo.coalesceReadConsistency === 'eventual';
+      const fireAndForget = coalesce && eventual && !!dbInfo.coalesceFireAndForget;
+
+      if (coalesce) {
+        const pending = enqueueCoalescedWrite(
+          dbInfo,
+          { type: 'remove', key },
+          { resolveImmediately: fireAndForget }
+        );
+
+        if (fireAndForget) {
+          resolve();
           return;
         }
 
-        createTransaction(
-          dbInfo,
-          READ_WRITE,
-          (err: Error | null, transaction?: IDBTransaction) => {
-            if (err) return reject(err);
+        pending.then(() => resolve()).catch(reject);
+        return;
+      }
 
-            try {
-              const storeName = requireStoreName(dbInfo);
-              const store = transaction!.objectStore(storeName);
-              const req = store.delete(key);
+      createTransaction(
+        dbInfo,
+        READ_WRITE,
+        (err: Error | null, transaction?: IDBTransaction) => {
+          if (err) return reject(err);
 
-              transaction!.oncomplete = () => resolve();
-              transaction!.onerror = () => reject(req.error);
-              transaction!.onabort = () => {
-                const err = req.error || transaction!.error;
-                reject(err);
-              };
-            } catch (e) {
-              reject(e);
-            }
+          try {
+            const storeName = requireStoreName(dbInfo);
+            const store = transaction!.objectStore(storeName);
+            const req = store.delete(key);
+
+            transaction!.oncomplete = () => resolve();
+            transaction!.onerror = () => reject(req.error);
+            transaction!.onabort = () => {
+              const err = req.error || transaction!.error;
+              reject(err);
+            };
+          } catch (e) {
+            reject(e);
           }
-        );
-      })
-      .catch(reject);
+        }
+      );
+    })().catch(reject);
   });
 
   const wrappedPromise = withIdbErrorContext(promise, 'removeItem', { key });
@@ -1488,7 +1557,7 @@ function removeItems(
       const dbInfo = self._dbInfo;
       const batchSize = dbInfo.maxBatchSize ?? normalizedKeys.length;
 
-      await drainCoalescedWrites(dbInfo);
+      await drainCoalescedWrites(dbInfo, { force: true });
 
       const processBatch = (batchKeys: string[]) =>
         new Promise<void>((batchResolve, batchReject) => {
@@ -1764,7 +1833,7 @@ function clear(
   const promise = new Promise<void>((resolve, reject) => {
     self
       .ready()
-      .then(() => drainCoalescedWrites(self._dbInfo))
+      .then(() => drainCoalescedWrites(self._dbInfo, { force: true }))
       .then(() => {
         createTransaction(
           self._dbInfo,
@@ -2021,7 +2090,7 @@ function dropInstance(
   // Case 1: Drop entire database (no storeName specified)
   if (!effectiveOptions.storeName) {
     promise = dbPromise.then(async (db) => {
-      await drainCoalescedWrites(dropDbInfo);
+      await drainCoalescedWrites(dropDbInfo, { force: true });
       deferReadiness(dropDbInfo);
 
       const dbContext = dbContexts[contextKey];
@@ -2083,7 +2152,7 @@ function dropInstance(
   } else {
     // Case 2: Drop specific object store
     promise = dbPromise.then(async (db) => {
-      await drainCoalescedWrites(dropDbInfo);
+      await drainCoalescedWrites(dropDbInfo, { force: true });
       if (!db.objectStoreNames.contains(effectiveOptions.storeName!)) {
         // Store doesn't exist, nothing to do
         return;

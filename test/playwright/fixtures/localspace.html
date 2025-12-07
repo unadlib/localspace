@@ -3,6 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <title>localspace test fixture</title>
+    <script
+      src="../../../node_modules/localforage/dist/localforage.js"
+      onload="window.__localforageLoaded = true;"
+      onerror="window.__localforageError = 'failed to load localforage UMD bundle';"
+    ></script>
     <script src="../../../dist/index.umd.js" onerror="window.__localspaceUmdError = 'failed to load UMD bundle';"></script>
     <script type="module">
       async function bootstrapLocalspace() {
