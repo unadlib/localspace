@@ -810,7 +810,8 @@ function drainCoalescedWrites(
   dbInfo: DbInfo,
   options?: { force?: boolean }
 ): Promise<void> {
-  if (!dbInfo.coalesceWrites) {
+  // Skip flush when coalescing is disabled unless force is explicitly requested.
+  if (!options?.force && !dbInfo.coalesceWrites) {
     return Promise.resolve();
   }
   if (!options?.force && dbInfo.coalesceReadConsistency === 'eventual') {
@@ -2054,9 +2055,16 @@ function dropInstance(
     return wrappedInvalid;
   }
 
+  const currentDbInfo = self._dbInfo as DbInfo | undefined;
+
   const dropDbInfo: DbInfo = {
     ...(effectiveOptions as DbInfo),
-    idbFactory: self._dbInfo?.idbFactory ?? undefined,
+    idbFactory: currentDbInfo?.idbFactory ?? undefined,
+    coalesceWrites: currentDbInfo?.coalesceWrites,
+    coalesceWindowMs: currentDbInfo?.coalesceWindowMs,
+    coalesceReadConsistency: currentDbInfo?.coalesceReadConsistency,
+    coalesceMaxBatchSize: currentDbInfo?.coalesceMaxBatchSize,
+    coalesceFireAndForget: currentDbInfo?.coalesceFireAndForget,
   };
   if (!dropDbInfo.bucket && currentConfig.bucket) {
     dropDbInfo.bucket = currentConfig.bucket;

@@ -35,6 +35,7 @@ Starting fresh let us eliminate technical debt while maintaining API compatibili
   - [Configure isolated stores for clear data boundaries](#configure-isolated-stores-for-clear-data-boundaries)
   - [Choose drivers with predictable fallbacks](#choose-drivers-with-predictable-fallbacks)
   - [Handle binary data across browsers](#handle-binary-data-across-browsers)
+  - [Advanced: Coalesced Writes (IndexedDB only)](#advanced-coalesced-writes-indexeddb-only)
 - [Migration Guide](#migration-guide)
   - [Note differences from localForage before upgrading](#note-differences-from-localforage-before-upgrading)
   - [Enable compatibility mode for legacy callbacks](#enable-compatibility-mode-for-legacy-callbacks)
@@ -52,7 +53,7 @@ localspace is built on a foundation designed for growth. Here's what's planned:
 - [x] Comprehensive test coverage
 - [x] Modern build pipeline (ES modules, CommonJS, UMD)
 - [x] Batch operations (`setItems()`, `getItems()`, `removeItems()`) for higher throughput
-- [x] Automatic write coalescing (3-10x faster rapid writes, enabled by default)
+- [x] Automatic write coalescing (3-10x faster rapid writes, opt-in for IndexedDB)
 - [x] Connection pooling, transaction batching, and warmup
 - [x] **Improved error handling** - Structured error types with detailed context
 
@@ -122,8 +123,8 @@ localspace.getItem('user', (error, value) => {
 });
 ```
 
-### 🚀 Get automatic performance optimization (enabled by default)
-localspace automatically merges rapid single writes into batched transactions, giving you **3-10x performance improvement** without changing your code. This feature is enabled by default and works transparently in the background.
+### 🚀 Opt into automatic performance optimization (coalesced writes)
+localspace can merge rapid single writes into batched transactions for IndexedDB, giving you **3-10x performance improvement** under write-heavy bursts. This is opt-in so default behavior stays predictable; enable it when you know you have high write pressure.
 
 ```ts
 // Your existing code - unchanged
@@ -137,20 +138,17 @@ await Promise.all([
 // ✅ Zero code changes required
 ```
 
-**How it works**: When using IndexedDB, rapid writes within an 8ms window are automatically merged into a single transaction commit. This is transparent to your application and has no impact on single writes.
+**How it works**: When using IndexedDB, rapid writes within an 8ms window are merged into a single transaction commit. This is transparent to your application and has no impact on single writes.
 
-**Want to customize or disable it?**
+**Turn it on or tune it**
 ```ts
 const instance = localspace.createInstance({
-  coalesceWrites: true,      // enabled by default
+  coalesceWrites: true,      // opt-in (default is false)
   coalesceWindowMs: 8,       // 8ms window (default)
 });
-
-// Or disable if you need strict per-operation durability
-const strict = localspace.createInstance({
-  coalesceWrites: false,
-});
 ```
+
+For consistency modes, batch limits, and failure semantics, see **Advanced: Coalesced Writes** below.
 
 **When is this useful?**
 - Form auto-save that writes multiple fields rapidly
@@ -281,6 +279,132 @@ await localspace.setItem('file', file);
 const restored = await localspace.getItem<Blob>('file');
 ```
 
+## Advanced: Coalesced Writes (IndexedDB only)
+
+localspace offers an opt-in, configurable coalesced write path to cut IndexedDB transaction count and improve throughput under heavy write bursts.
+
+> `coalesceWrites` defaults to `false` so behavior stays predictable. Turn it on when you expect high-frequency writes.
+
+### Why coalesce writes?
+
+Each IndexedDB write opens a readwrite transaction. At high frequency, transaction startup overhead becomes a bottleneck. With coalescing enabled, `setItem` and `removeItem` calls that land within a short window (default 8 ms) are merged into fewer transactions:
+- Multiple writes can share one transaction.
+- `coalesceMaxBatchSize` caps how many ops each flush processes.
+- `coalesceReadConsistency` controls when writes resolve and when reads see them.
+
+### Configuration
+
+Relevant `LocalSpaceConfig` fields:
+
+```ts
+interface LocalSpaceConfig {
+  /**
+   * Enable coalesced writes (IndexedDB only).
+   * Default: false
+   */
+  coalesceWrites?: boolean;
+
+  /**
+   * Time window (ms) for merging writes into the same batch.
+   * Default: 8
+   */
+  coalesceWindowMs?: number;
+
+  /**
+   * Maximum operations per flush batch. Beyond this, flush immediately
+   * and split into multiple transactions.
+   * Default: undefined (no limit)
+   */
+  coalesceMaxBatchSize?: number;
+
+  /**
+   * When coalesceWrites is on:
+   * - 'strong' (default): drain pending writes before reads
+   * - 'eventual': reads skip draining; writes only guarantee queueing
+   */
+  coalesceReadConsistency?: 'strong' | 'eventual';
+}
+```
+
+### Consistency modes
+
+#### `coalesceReadConsistency: 'strong'` (default)
+- Writes (`setItem` / `removeItem`): Promises resolve after the data is persisted; flush errors reject.
+- Reads (`getItem`, `iterate`, batch reads): call `drainCoalescedWrites` first so you read what you just wrote.
+
+Use this for user settings, drafts, and any flow where you need read-your-writes.
+
+#### `coalesceReadConsistency: 'eventual'`
+- Writes: queued and resolve immediately once enqueued; flush happens in the background. Errors log `console.warn('[localspace] coalesced write failed (eventual mode)', error)` but do not reject the earlier Promise.
+- Reads: do not flush pending writes, so you may briefly see stale values.
+- Destructive operations still force a flush to avoid dropping queued writes: `removeItems`, `clear`, `dropInstance`.
+
+Use this for logs/analytics or workloads that can tolerate short windows of staleness in exchange for the lightest write path.
+
+### Bounding batch size
+
+```ts
+const store = localspace.createInstance({
+  name: 'logs',
+  storeName: 'events',
+  coalesceWrites: true,
+  coalesceWindowMs: 8,
+  coalesceMaxBatchSize: 64,
+  coalesceReadConsistency: 'eventual',
+});
+```
+
+- When the queue reaches `coalesceMaxBatchSize`, it flushes immediately.
+- Flush splits work into batches of up to 64 ops, each in its own transaction.
+- `getPerformanceStats()` reports `totalWrites`, `coalescedWrites`, and `transactionsSaved` so you can see the gains.
+
+### Recommended recipes
+
+1) Default: coalescing off
+```ts
+const store = localspace.createInstance({
+  name: 'app',
+  storeName: 'keyvaluepairs',
+  // coalesceWrites is false by default
+});
+```
+
+2) High-frequency writes with eventual consistency
+```ts
+const logStore = localspace.createInstance({
+  name: 'analytics',
+  storeName: 'events',
+  coalesceWrites: true,
+  coalesceWindowMs: 8,
+  coalesceMaxBatchSize: 64,
+  coalesceReadConsistency: 'eventual',
+});
+```
+- `setItem` resolves almost immediately.
+- Short windows of stale reads are acceptable.
+- `clear` and `dropInstance` force-flush so queued writes are not lost.
+
+3) Strong consistency with bounded batches
+```ts
+const userStore = localspace.createInstance({
+  name: 'user-data',
+  storeName: 'kv',
+  coalesceWrites: true,
+  coalesceWindowMs: 8,
+  coalesceMaxBatchSize: 32,
+  coalesceReadConsistency: 'strong',
+});
+```
+- Writes resolve after persistence.
+- Reads flush pending writes first.
+- Batching still reduces transaction count.
+
+### Caveats
+
+- Coalesced writes apply to the IndexedDB driver only; localStorage always writes per operation.
+- In `eventual` mode, writes can be lost if the page closes before flush completes, and errors surface only via `console.warn`.
+- For critical durability (orders, payments, irreversible state), avoid `eventual` and consider leaving `coalesceWrites` off entirely.
+
 ## Plugin System
 
 localspace now ships with a first-class plugin engine. Attach middleware when creating an instance or call `use()` later; plugins can mutate payloads, observe driver context, and run async interceptors around every storage call.
@@ -398,7 +522,7 @@ localspace.setItem('key', 'value', (err, value) => {
 ```
 
 ## Performance notes
-- **Automatic write coalescing (enabled by default):** localspace automatically merges rapid single writes (`setItem`/`removeItem`) within an 8ms window into one transaction, giving you 3-10x performance improvement with zero code changes. This is enabled by default for IndexedDB. Set `coalesceWrites: false` if you need strict per-operation durability.
+- **Automatic write coalescing (opt-in):** localspace can merge rapid single writes (`setItem`/`removeItem`) within an 8ms window into one transaction for IndexedDB, delivering 3-10x speedups under bursty writes. Enable with `coalesceWrites: true` and see **Advanced: Coalesced Writes** for consistency modes.
 - **Read-your-writes consistency with coalescing:** Pending coalesced writes are flushed before reads (`getItem`, `getItems`, `iterate`, `keys`, `length`, `key`) and destructive ops (`clear`, `dropInstance`), so immediate reads always observe the latest value. If you need eventual reads for speed, you can switch `coalesceReadConsistency` to `'eventual'`.
 - **Batch APIs outperform loops:** Playwright benchmark (`test/playwright/benchmark.spec.ts`) on 500 items x 256B showed `setItems()` ~6x faster and `getItems()` ~7.7x faster than per-item loops, with `removeItems()` ~2.8x faster (Chromium, relaxed durability).
 - **Transaction helpers:** `runTransaction()` lets you co-locate reads/writes in a single transaction for atomic migrations and to shorten lock time.
@@ -406,7 +530,7 @@ localspace.setItem('key', 'value', (err, value) => {
 - **IndexedDB durability defaults:** Chrome 121+ uses relaxed durability by default; keep it for speed or set `durability: 'strict'` in `config` for migration-style writes.
 - **Storage Buckets (Chromium 122+):** supply a `bucket` option to isolate critical data and hint durability/persistence per bucket.
 - **Connection warmup:** IndexedDB instances pre-warm a transaction after init to reduce first-op latency (`prewarmTransactions` enabled by default; set to `false` to skip).
-- **Recommended defaults:** keep `coalesceWrites` enabled (default), `durability` relaxed, and `prewarmTransactions` on. Set `connectionIdleMs` only if you want idle connections to auto-close, and `maxBatchSize` only for very large bulk writes. Prefer IndexedDB for atomic/bulk writes since localStorage batches are non-atomic. Use `maxConcurrentTransactions` to throttle heavy parallel workloads when needed.
+- **Recommended defaults:** leave `coalesceWrites` off unless you know you need higher write throughput; if you enable it, prefer the default `strong` consistency. Keep `durability` relaxed and `prewarmTransactions` on. Set `connectionIdleMs` only if you want idle connections to auto-close, and `maxBatchSize` only for very large bulk writes. Prefer IndexedDB for atomic/bulk writes since localStorage batches are non-atomic. Use `maxConcurrentTransactions` to throttle heavy parallel workloads when needed.
 - **localStorage batch atomicity:** When using localStorage driver, batch operations (`setItems()`, `removeItems()`) are **not atomic**. If an error occurs mid-operation, some items may be written or removed while others are not. In contrast, IndexedDB batch operations use transactions and guarantee atomicity (all-or-nothing). If atomicity is critical for your use case, prefer IndexedDB driver or implement application-level rollback logic.
 
 When `compatibilityMode` is off, driver setup methods also use Node-style callbacks. Promises are recommended for all new code.
