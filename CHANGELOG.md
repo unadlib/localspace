@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.1] - 2025-12-07
+
+### Fixed
+
+- **Coalesced Writes Consistency**: Changed default behavior to prioritize strong consistency. Coalescing performance modes are now opt-in.
+- **Destructive Operations**: Fixed `dropInstance`, `clear`, and `removeItems` to correctly flush pending coalesced writes before execution.
+- **TTL Plugin**: Fixed cleanup logic to be compatible with encryption and compression plugins.
+- **Transaction Consistency**: `runTransaction` now forces a flush of pending coalesced writes before starting, ensuring consistency even in `eventual` mode.
+
 ## [0.3.0] - 2025-12-04
 
 ### Added
