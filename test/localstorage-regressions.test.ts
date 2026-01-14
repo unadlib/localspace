@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import localspace from '../src/index';
 import type { LocalSpaceInstance } from '../src/types';
+import { LocalSpaceError } from '../src/errors';
 
 async function createLocalStorageInstance(
   name: string,
@@ -70,5 +71,32 @@ describe('localStorage driver regressions', () => {
     expect(await freshA.length()).toBe(0);
     expect(await freshB.length()).toBe(1);
     expect(await freshB.getItem('bar')).toBe('beta');
+  });
+
+  it('maps setItems quota errors to QUOTA_EXCEEDED', async () => {
+    const name = `quota-${Math.random().toString(36).slice(2)}`;
+    const store = await createLocalStorageInstance(name, 'store');
+
+    const quotaError = new Error('quota hit');
+    (quotaError as any).name = 'QuotaExceededError';
+
+    const spy = vi
+      .spyOn(window.localStorage.__proto__, 'setItem')
+      .mockImplementationOnce(() => {
+        throw quotaError;
+      });
+
+    await expect(async () => {
+      await store.setItems([
+        { key: 'k1', value: 'v1' },
+        { key: 'k2', value: 'v2' },
+      ]);
+    }).rejects.toMatchObject({ code: 'QUOTA_EXCEEDED' } as LocalSpaceError);
+
+    await expect(
+      store.setItems([{ key: 'k3', value: 'v3' }])
+    ).resolves.toBeDefined();
+
+    spy.mockRestore();
   });
 });

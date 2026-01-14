@@ -398,8 +398,29 @@ function setItems<T>(
           const serializedValue =
             await dbInfo.serializer.serialize(normalizedValue);
 
-          localStorage.setItem(dbInfo.keyPrefix + entry.key, serializedValue);
-          stored.push({ key: entry.key, value: normalizedValue });
+          try {
+            localStorage.setItem(dbInfo.keyPrefix + entry.key, serializedValue);
+            stored.push({ key: entry.key, value: normalizedValue });
+          } catch (error: unknown) {
+            if (
+              error instanceof Error &&
+              (error.name === 'QuotaExceededError' ||
+                error.name === 'NS_ERROR_DOM_QUOTA_REACHED')
+            ) {
+              throw toLocalSpaceError(
+                error,
+                'QUOTA_EXCEEDED',
+                error.message || 'Storage quota exceeded',
+                { driver: DRIVER_NAME, operation: 'setItems', key: entry.key }
+              );
+            }
+            throw toLocalSpaceError(
+              error,
+              'OPERATION_FAILED',
+              'Failed to set items in localStorage',
+              { driver: DRIVER_NAME, operation: 'setItems', key: entry.key }
+            );
+          }
         }
       }
 
