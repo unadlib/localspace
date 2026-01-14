@@ -23,6 +23,7 @@ We stay 100% compatible with localForage on the surface, but rebuild the interna
 Starting fresh let us eliminate technical debt while maintaining API compatibility. The codebase is written in modern TypeScript, uses contemporary patterns, and has a clear structure that makes it straightforward to add new capabilities. Teams can migrate from localForage without changing application code, then unlock better developer experience and future extensibility.
 
 ## Table of Contents
+
 - [Motivation](#motivation)
   - [What needed to change](#what-needed-to-change)
   - [How localspace responds](#how-localspace-responds)
@@ -47,6 +48,7 @@ Starting fresh let us eliminate technical debt while maintaining API compatibili
 localspace is built on a foundation designed for growth. Here's what's planned:
 
 ### Core Compatibility (Complete)
+
 - [x] IndexedDB and localStorage drivers
 - [x] Full localForage API parity
 - [x] TypeScript-first implementation
@@ -58,6 +60,7 @@ localspace is built on a foundation designed for growth. Here's what's planned:
 - [x] **Improved error handling** - Structured error types with detailed context
 
 ### TODO
+
 - [x] **Plugin system** - Middleware architecture for cross-cutting concerns
 - [ ] **OPFS driver** - Origin Private File System for high-performance file storage
 - [ ] **Custom driver templates** - Documentation and examples for third-party drivers
@@ -80,6 +83,7 @@ We prioritize features based on community feedback. If you need a specific capab
 3. **Contribute** - We welcome PRs for new drivers, plugins, or improvements
 
 **Want to help?** The most impactful contributions right now:
+
 - Testing in diverse environments (browsers, frameworks, edge cases)
 - Documentation improvements and usage examples
 - Performance benchmarks and optimization suggestions
@@ -88,6 +92,7 @@ We prioritize features based on community feedback. If you need a specific capab
 ## Installation and Usage
 
 ### localspace delivers modern storage compatibility
+
 localspace targets developers who need localForage's API surface without its historical baggage. **You get the same method names, configuration options, and driver constants, all implemented with modern JavaScript and TypeScript types.**
 
 - Promise-first API with optional callbacks
@@ -96,6 +101,7 @@ localspace targets developers who need localForage's API surface without its his
 - Drop-in TypeScript generics for value typing
 
 ### Install and import localspace
+
 Install the package with your preferred package manager and import it once at the entry point where you manage storage.
 
 ```bash
@@ -111,6 +117,7 @@ import localspace from 'localspace';
 ```
 
 ### Store data with async flows or callbacks
+
 Use async/await for the clearest flow. **Callbacks remain supported for parity with existing localForage codebases.**
 
 ```ts
@@ -124,6 +131,7 @@ localspace.getItem('user', (error, value) => {
 ```
 
 ### 🚀 Opt into automatic performance optimization (coalesced writes)
+
 localspace can merge rapid single writes into batched transactions for IndexedDB, giving you **3-10x performance improvement** under write-heavy bursts. This is opt-in so default behavior stays predictable; enable it when you know you have high write pressure.
 
 ```ts
@@ -141,16 +149,18 @@ await Promise.all([
 **How it works**: When using IndexedDB, rapid writes within an 8ms window are merged into a single transaction commit. This is transparent to your application and has no impact on single writes.
 
 **Turn it on or tune it**
+
 ```ts
 const instance = localspace.createInstance({
-  coalesceWrites: true,      // opt-in (default is false)
-  coalesceWindowMs: 8,       // 8ms window (default)
+  coalesceWrites: true, // opt-in (default is false)
+  coalesceWindowMs: 8, // 8ms window (default)
 });
 ```
 
 For consistency modes, batch limits, and failure semantics, see **Advanced: Coalesced Writes** below.
 
 **When is this useful?**
+
 - Form auto-save that writes multiple fields rapidly
 - Bulk state synchronization loops
 - Real-time collaborative editing
@@ -159,6 +169,7 @@ For consistency modes, batch limits, and failure semantics, see **Advanced: Coal
 **Performance impact**: Single infrequent writes are unaffected. Rapid sequential writes get 3-10x faster automatically.
 
 **Want to see the actual performance gains?**
+
 ```ts
 // Get statistics to see how much coalescing helped (IndexedDB only)
 const stats = localspace.getPerformanceStats?.();
@@ -172,6 +183,7 @@ console.log(stats);
 ```
 
 ### Boost throughput with batch operations
+
 Use the batch APIs to group writes and reads into single transactions for IndexedDB and localStorage. This reduces commit overhead and benefits from Chrome’s relaxed durability defaults (see below).
 
 ```ts
@@ -208,18 +220,21 @@ await Promise.all([
 
 // These features work independently and can be combined
 const optimized = localspace.createInstance({
-  coalesceWrites: true,    // optimizes single-item writes (setItem/removeItem)
+  coalesceWrites: true, // optimizes single-item writes (setItem/removeItem)
   coalesceWindowMs: 8,
-  maxBatchSize: 200,       // limits batch API chunk size (setItems/removeItems)
+  maxBatchSize: 200, // limits batch API chunk size (setItems/removeItems)
 });
 await optimized.setDriver([optimized.INDEXEDDB]);
 
 // Note: localStorage batches attempt best-effort rollback on failure and map
-// quota errors to QUOTA_EXCEEDED, but they still serialize per-item; for
-// critical atomicity prefer IndexedDB.
+// quota errors to QUOTA_EXCEEDED, but they still serialize per-item and are
+// not truly atomic. For strict atomicity or durability, prefer IndexedDB or
+// add your own compensating logic. If you need per-item success/failure, call
+// setItems in smaller chunks or handle errors explicitly.
 ```
 
 ### Run your own transaction
+
 When you need atomic multi-step work (migrations, dependent writes), wrap operations in a single transaction. On IndexedDB this uses one `IDBTransaction`; on localStorage it executes sequentially.
 
 ```ts
@@ -233,6 +248,7 @@ await localspace.runTransaction('readwrite', async (tx) => {
 ```
 
 ### Configure isolated stores for clear data boundaries
+
 Create independent instances when you want to separate cache layers or product features. Each instance can override defaults like `name`, `storeName`, and driver order.
 
 ```ts
@@ -245,6 +261,7 @@ await sessionCache.setItem('token', 'abc123');
 ```
 
 ### Choose drivers with predictable fallbacks
+
 By default, localspace prefers IndexedDB (`INDEXEDDB`) and falls back to localStorage (`LOCALSTORAGE`). Configure alternative sequences as needed.
 
 ```ts
@@ -272,6 +289,7 @@ await bucketed.setDriver([bucketed.INDEXEDDB]);
 **Tip:** Use `defineDriver()` and `getDriver()` to register custom drivers that match the localForage interface.
 
 ### Handle binary data across browsers
+
 localspace serializes complex values transparently. It stores `Blob`, `ArrayBuffer`, and typed arrays in IndexedDB natively and in localStorage via Base64 encoding when necessary. You write the same code regardless of the driver.
 
 ```ts
@@ -289,6 +307,7 @@ localspace offers an opt-in, configurable coalesced write path to cut IndexedDB 
 ### Why coalesce writes?
 
 Each IndexedDB write opens a readwrite transaction. At high frequency, transaction startup overhead becomes a bottleneck. With coalescing enabled, `setItem` and `removeItem` calls that land within a short window (default 8 ms) are merged into fewer transactions:
+
 - Multiple writes can share one transaction.
 - `coalesceMaxBatchSize` caps how many ops each flush processes.
 - `coalesceReadConsistency` controls when writes resolve and when reads see them.
@@ -330,12 +349,14 @@ interface LocalSpaceConfig {
 ### Consistency modes
 
 #### `coalesceReadConsistency: 'strong'` (default)
+
 - Writes (`setItem` / `removeItem`): Promises resolve after the data is persisted; flush errors reject.
 - Reads (`getItem`, `iterate`, batch reads): call `drainCoalescedWrites` first so you read what you just wrote.
 
 Use this for user settings, drafts, and any flow where you need read-your-writes.
 
 #### `coalesceReadConsistency: 'eventual'`
+
 - Writes: queued and resolve immediately once enqueued; flush happens in the background. Errors log `console.warn('[localspace] coalesced write failed (eventual mode)', error)` but do not reject the earlier Promise.
 - Reads: do not flush pending writes, so you may briefly see stale values.
 - Destructive operations still force a flush to avoid dropping queued writes: `removeItems`, `clear`, `dropInstance`.
@@ -361,7 +382,8 @@ const store = localspace.createInstance({
 
 ### Recommended recipes
 
-1) Default: coalescing off
+1. Default: coalescing off
+
 ```ts
 const store = localspace.createInstance({
   name: 'app',
@@ -370,7 +392,8 @@ const store = localspace.createInstance({
 });
 ```
 
-2) High-frequency writes with eventual consistency
+2. High-frequency writes with eventual consistency
+
 ```ts
 const logStore = localspace.createInstance({
   name: 'analytics',
@@ -381,11 +404,13 @@ const logStore = localspace.createInstance({
   coalesceReadConsistency: 'eventual',
 });
 ```
+
 - `setItem` resolves almost immediately.
 - Short windows of stale reads are acceptable.
 - `clear` and `dropInstance` force-flush so queued writes are not lost.
 
-3) Strong consistency with bounded batches
+3. Strong consistency with bounded batches
+
 ```ts
 const userStore = localspace.createInstance({
   name: 'user-data',
@@ -396,6 +421,7 @@ const userStore = localspace.createInstance({
   coalesceReadConsistency: 'strong',
 });
 ```
+
 - Writes resolve after persistence.
 - Reads flush pending writes first.
 - Batching still reduces transaction count.
@@ -430,25 +456,26 @@ const store = localspace.createInstance({
 - **Lifecycle events** – `onInit(context)` is invoked after `ready()`, and `onDestroy` lets you tear down timers or channels. Call `await instance.destroy()` when disposing of an instance to run every `onDestroy` hook (executed in reverse priority order). Context exposes the active driver, db info, config, and a shared `metadata` bag for cross-plugin coordination.
 - **Interceptors** – hook into `beforeSet/afterSet`, `beforeGet/afterGet`, `beforeRemove/afterRemove`, plus batch-specific methods such as `beforeSetItems` or `beforeGetItems`. Hooks run sequentially: `before*` hooks execute from highest to lowest priority, while `after*` hooks unwind in reverse order so layered transformations (TTL → compression → encryption) remain invertible. Returning a value passes it to the next plugin, while throwing a `LocalSpaceError` aborts the operation.
 - **Per-call state** – plugins can stash data on `context.operationState` (e.g., capture the original value in `beforeSet` and reuse it in `afterSet`). For batch operations, `context.operationState.isBatch` is `true` and `context.operationState.batchSize` provides the total count.
-- **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (quota violations, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'strict'` propagates all plugin errors; set `pluginErrorPolicy: 'lenient'` only if你希望插件错误被吞掉后继续（不建议用于加解密/压缩类插件）。
+- **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (quota violations, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'strict'` propagates all plugin errors; only use `lenient` if you explicitly accept swallowed errors, and avoid lenient for encryption/compression/ttl or any correctness-critical plugin.
 
 ### Plugin execution order
 
 Plugins are sorted by `priority` (higher runs first in `before*`, last in `after*`). Default priorities:
 
-| Plugin | Priority | Notes |
-|--------|----------|-------|
-| sync | -100 | Runs last in `afterSet` to broadcast original (untransformed) values |
-| quota | -10 | Runs late so it measures final payload sizes |
-| encryption | 0 | Encrypts after compression so decrypt runs first in `after*` |
-| compression | 5 | Runs before encryption so payload is compressible |
-| ttl | 10 | Runs outermost so TTL wrapper is transformed by other plugins |
+| Plugin      | Priority | Notes                                                                |
+| ----------- | -------- | -------------------------------------------------------------------- |
+| sync        | -100     | Runs last in `afterSet` to broadcast original (untransformed) values |
+| quota       | -10      | Runs late so it measures final payload sizes                         |
+| encryption  | 0        | Encrypts after compression so decrypt runs first in `after*`         |
+| compression | 5        | Runs before encryption so payload is compressible                    |
+| ttl         | 10       | Runs outermost so TTL wrapper is transformed by other plugins        |
 
 **Recommended order**: `[ttlPlugin, compressionPlugin, encryptionPlugin, syncPlugin, quotaPlugin]`
 
 ### Built-in plugins
 
 #### TTL plugin
+
 Wraps values as `{ data, expiresAt }`, invalidates stale reads, and optionally runs background cleanup. Options:
 
 - `defaultTTL` (ms) and `keyTTL` overrides
@@ -456,6 +483,7 @@ Wraps values as `{ data, expiresAt }`, invalidates stale reads, and optionally r
 - `onExpire(key, value)` callback before removal
 
 #### Encryption plugin
+
 Encrypts serialized payloads using the Web Crypto API (AES-GCM by default) and decrypts transparently on reads.
 
 - Provide a `key` (CryptoKey/ArrayBuffer/string) or `keyDerivation` block (PBKDF2)
@@ -463,12 +491,14 @@ Encrypts serialized payloads using the Web Crypto API (AES-GCM by default) and d
 - Works in browsers and modern Node runtimes (pass your own `subtle` when needed)
 
 #### Compression plugin
+
 Runs LZ-string compression (or a custom codec) when payloads exceed a `threshold` and restores them on read.
 
 - `threshold` (bytes) controls when compression kicks in
 - Supply a custom `{ compress, decompress }` codec if you prefer pako/Brotli
 
 #### Sync plugin
+
 Keeps multiple tabs/processes in sync via `BroadcastChannel` (with `storage`-event fallback).
 
 - `channelName` separates logical buses
@@ -476,6 +506,7 @@ Keeps multiple tabs/processes in sync via `BroadcastChannel` (with `storage`-eve
 - `conflictStrategy` defaults to `last-write-wins`; provide `onConflict` (return `false` to drop remote writes) for merge logic
 
 #### Quota plugin
+
 Tracks approximate storage usage after every mutation and enforces limits.
 
 - `maxSize` (bytes) and optional `useNavigatorEstimate` to read the browser’s quota
@@ -484,15 +515,34 @@ Tracks approximate storage usage after every mutation and enforces limits.
 
 > Tip: place quota plugins last so they see the final payload size after other transformations (TTL, encryption, compression, etc.).
 
+## Compatibility & environments
+
+- Browsers: modern Chromium/Edge, Firefox, Safari (desktop & iOS). IndexedDB is required for the primary driver; localStorage is available as a fallback.
+- Known differences: Safari private mode / low-quota environments may throw quota; IndexedDB durability hints may be ignored outside Chromium 121+. If you need strict durability, prefer explicit flush/transaction patterns.
+- Node/SSR: browser storage APIs are not available by default; supply a custom driver or guard usage in non-browser contexts.
+
+## Testing & CI
+
+- Recommended pipeline: `yarn lint` (if configured) → `yarn vitest run` → `yarn build` → `playwright test`.
+- Regression coverage includes: coalesced writes + pending queue + maxConcurrentTransactions + idle close, plugin error policies (strict/lenient) including batch hooks, compression/encryption/ttl ordering, sync version persistence, localStorage quota handling with rollback.
+
+## Security & performance guidance
+
+- Plugin order for correctness/performance: `ttl → compression → encryption → sync → quota`.
+- The encryption plugin provides basic crypto; key management/rotation is your responsibility, and you should not swallow encryption/compression errors via a lenient policy.
+- Run compression before encryption for effectiveness; place quota last to see final sizes; keep sync last in `after*` to broadcast original values.
+
 ## Migration Guide
 
 ### Note differences from localForage before upgrading
+
 - `dropInstance()` throws a real `Error` when arguments are invalid. Examine `error.message` instead of comparing string literals.
 - Blob capability checks run on each request instead of being cached. Cache the result in your application if repeated blob writes dominate your workload.
 - **WebSQL is intentionally unsupported.** Migrate any WebSQL-only code to IndexedDB or localStorage before switching.
 
 ### Enable compatibility mode for driver setup methods
-If you maintain older code that expects separate *success* and *error* callbacks for driver setup methods (`setDriver`, `defineDriver`), enable `compatibilityMode` when creating an instance. **Use this mode only for migrations; prefer native Promises going forward.**
+
+If you maintain older code that expects separate _success_ and _error_ callbacks for driver setup methods (`setDriver`, `defineDriver`), enable `compatibilityMode` when creating an instance. **Use this mode only for migrations; prefer native Promises going forward.**
 
 ```ts
 const legacy = localspace.createInstance({
@@ -508,7 +558,7 @@ legacy.setDriver(
   },
   (error) => {
     // Error callback receives the Error object only.
-  },
+  }
 );
 ```
 
@@ -525,6 +575,7 @@ localspace.setItem('key', 'value', (err, value) => {
 ```
 
 ## Performance notes
+
 - **Automatic write coalescing (opt-in):** localspace can merge rapid single writes (`setItem`/`removeItem`) within an 8ms window into one transaction for IndexedDB, delivering 3-10x speedups under bursty writes. Enable with `coalesceWrites: true` and see **Advanced: Coalesced Writes** for consistency modes.
 - **Read-your-writes consistency with coalescing:** Pending coalesced writes are flushed before reads (`getItem`, `getItems`, `iterate`, `keys`, `length`, `key`) and destructive ops (`clear`, `dropInstance`), so immediate reads always observe the latest value. If you need eventual reads for speed, you can switch `coalesceReadConsistency` to `'eventual'`.
 - **Batch APIs outperform loops:** Playwright benchmark (`test/playwright/benchmark.spec.ts`) on 500 items x 256B showed `setItems()` ~6x faster and `getItems()` ~7.7x faster than per-item loops, with `removeItems()` ~2.8x faster (Chromium, relaxed durability).
@@ -539,6 +590,7 @@ localspace.setItem('key', 'value', (err, value) => {
 When `compatibilityMode` is off, driver setup methods also use Node-style callbacks. Promises are recommended for all new code.
 
 ## Troubleshooting
+
 - **Wait for readiness:** Call `await localspace.ready()` before the first operation when you need to confirm driver selection.
 - **Inspect drivers:** Use `localspace.driver()` to confirm which driver is active in different environments.
 - **Read structured errors:** Rejections surface as `LocalSpaceError` with a `code`, contextual `details` (driver, operation, key, attemptedDrivers), and the original `cause`. Branch on `error.code` instead of parsing strings.
@@ -548,4 +600,5 @@ When `compatibilityMode` is off, driver setup methods also use Node-style callba
 - **Collect combined Vitest + Playwright coverage:** Run `yarn coverage:full` to clean previous artifacts, run `vitest --coverage`, stash its Istanbul JSON into `.nyc_output`, then execute the coverage-enabled Playwright suite and emit merged `nyc` reports.
 
 ## License
+
 [MIT](./LICENSE)
