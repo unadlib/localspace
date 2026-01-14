@@ -1,11 +1,8 @@
 import { test, expect } from './coverage-test';
 import type { Page } from '@playwright/test';
-import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
-const fixturePath = path.resolve(currentDir, 'fixtures', 'localspace.html');
-const fixtureUrl = pathToFileURL(fixturePath).href;
+// Use HTTP URL served by Playwright webServer (file:// URLs block ES module imports)
+const fixtureUrl = '/test/playwright/fixtures/localspace.html';
 
 const randomStoreName = (label: string) =>
   `${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;

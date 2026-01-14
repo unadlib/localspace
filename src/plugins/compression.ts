@@ -98,9 +98,17 @@ export const compressionPlugin = (
       if (!isCompressionPayload(value)) {
         return value;
       }
-      const buffer = serializer.stringToBuffer(value.data);
-      const decompressed = await codec.decompress(new Uint8Array(buffer));
-      return serializer.deserialize(decompressed) as T;
+      try {
+        const buffer = serializer.stringToBuffer(value.data);
+        const decompressed = await codec.decompress(new Uint8Array(buffer));
+        return serializer.deserialize(decompressed) as T;
+      } catch (error) {
+        throw toLocalSpaceError(
+          error,
+          'DESERIALIZATION_FAILED',
+          'Failed to decompress payload'
+        );
+      }
     },
   };
 };

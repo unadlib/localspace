@@ -41,6 +41,7 @@ export default {
     commonjs(),
     replace({
       __DEV__: 'false',
+      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
       preventAssignment: true,
     }),
     terser(),

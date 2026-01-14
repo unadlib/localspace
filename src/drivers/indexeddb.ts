@@ -885,7 +885,12 @@ function createTransaction(
 
         dbContext.activeTransactions += 1;
 
+        let finalized = false;
         const finalize = () => {
+          if (finalized) {
+            return;
+          }
+          finalized = true;
           dbContext.activeTransactions = Math.max(
             0,
             dbContext.activeTransactions - 1
@@ -2292,5 +2297,13 @@ const asyncStorage: Driver = {
   dropInstance,
   getPerformanceStats,
 };
+
+// Expose limited internals for testing without altering public API surface
+if (process.env.NODE_ENV === 'test') {
+  (asyncStorage as any).__test__ = {
+    createTransaction,
+    getDbContext,
+  };
+}
 
 export default asyncStorage;

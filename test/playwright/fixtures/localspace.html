@@ -8,17 +8,23 @@
       onload="window.__localforageLoaded = true;"
       onerror="window.__localforageError = 'failed to load localforage UMD bundle';"
     ></script>
-    <script src="../../../dist/index.umd.js" onerror="window.__localspaceUmdError = 'failed to load UMD bundle';"></script>
+    <script
+      src="../../../dist/index.umd.js"
+      onload="window.__localspaceUmdLoaded = true;"
+      onerror="window.__localspaceUmdError = 'failed to load UMD bundle';"
+    ></script>
     <script type="module">
       async function bootstrapLocalspace() {
+        // Check if UMD loaded successfully and exposed the global
         if (window.Localspace && window.Localspace.default) {
           window.localspace = window.Localspace.default;
           window.__localspaceLoaded = true;
           return;
         }
 
+        // Fallback to bundled ESM (not index.js which has bare imports)
         try {
-          const module = await import('../../../dist/index.js');
+          const module = await import('../../../dist/index.esm.js');
           window.localspace = module.default ?? module;
           window.__localspaceLoaded = true;
         } catch (error) {
