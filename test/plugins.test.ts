@@ -363,6 +363,7 @@ describe('Plugin system', () => {
       name: 'error-db',
       storeName: 'error-store',
       plugins: [failingPlugin],
+      pluginErrorPolicy: 'lenient',
     });
 
     await store.setItem('key', 'value');

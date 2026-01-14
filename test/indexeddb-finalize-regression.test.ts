@@ -62,4 +62,52 @@ describe('IndexedDB createTransaction finalize', () => {
     expect(dbContext.pendingTransactions).toHaveLength(1);
     expect(dbContext.activeTransactions).toBe(0);
   });
+
+  it('respects maxConcurrentTransactions and drains pending', () => {
+    vi.useFakeTimers();
+    const testHooks = (indexeddbDriver as any).__test__;
+    expect(testHooks?.createTransaction).toBeDefined();
+
+    const tx1 = new FakeTransaction();
+    const tx2 = new FakeTransaction();
+    const fakeDb = {
+      transaction: vi
+        .fn()
+        .mockImplementationOnce(() => tx1)
+        .mockImplementationOnce(() => tx2),
+    } as any;
+
+    const dbInfo: any = {
+      name: 'pending-test',
+      storeName: 'store',
+      db: fakeDb,
+      maxConcurrentTransactions: 1,
+    };
+
+    const callbacks: Array<IDBTransaction | undefined> = [];
+
+    testHooks.createTransaction(
+      dbInfo,
+      'readwrite',
+      (_err: Error | null, tx?: IDBTransaction) => callbacks.push(tx)
+    );
+    testHooks.createTransaction(
+      dbInfo,
+      'readwrite',
+      (_err: Error | null, tx?: IDBTransaction) => callbacks.push(tx)
+    );
+
+    const dbContext = testHooks.getDbContext(dbInfo);
+    expect(dbContext.activeTransactions).toBe(1);
+    expect(dbContext.pendingTransactions).toHaveLength(1);
+    expect(callbacks).toHaveLength(1);
+
+    tx1.trigger('complete');
+    vi.runAllTimers();
+
+    expect(dbContext.activeTransactions).toBe(1);
+    expect(dbContext.pendingTransactions).toHaveLength(0);
+    expect(callbacks).toHaveLength(2);
+    expect(callbacks[1]).toBe(tx2);
+  });
 });

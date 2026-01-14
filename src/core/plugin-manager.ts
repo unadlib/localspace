@@ -485,7 +485,7 @@ export class PluginManager {
       const result = await executor();
       return (typeof result === 'undefined' ? fallback : result) as T;
     } catch (error) {
-      const policy = this.host._config.pluginErrorPolicy ?? 'lenient';
+      const policy = this.host._config.pluginErrorPolicy ?? 'strict';
       if (this.shouldPropagate(error, policy)) {
         throw error;
       }
@@ -512,7 +512,7 @@ export class PluginManager {
     try {
       await executor();
     } catch (error) {
-      const policy = this.host._config.pluginErrorPolicy ?? 'lenient';
+      const policy = this.host._config.pluginErrorPolicy ?? 'strict';
       if (this.shouldPropagate(error, policy)) {
         throw error;
       }

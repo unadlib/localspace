@@ -214,8 +214,9 @@ const optimized = localspace.createInstance({
 });
 await optimized.setDriver([optimized.INDEXEDDB]);
 
-// Note: localStorage batches are not atomic—writes are applied one by one.
-// For critical flows, prefer IndexedDB or handle your own compensating logic.
+// Note: localStorage batches attempt best-effort rollback on failure and map
+// quota errors to QUOTA_EXCEEDED, but they still serialize per-item; for
+// critical atomicity prefer IndexedDB.
 ```
 
 ### Run your own transaction
@@ -429,7 +430,7 @@ const store = localspace.createInstance({
 - **Lifecycle events** – `onInit(context)` is invoked after `ready()`, and `onDestroy` lets you tear down timers or channels. Call `await instance.destroy()` when disposing of an instance to run every `onDestroy` hook (executed in reverse priority order). Context exposes the active driver, db info, config, and a shared `metadata` bag for cross-plugin coordination.
 - **Interceptors** – hook into `beforeSet/afterSet`, `beforeGet/afterGet`, `beforeRemove/afterRemove`, plus batch-specific methods such as `beforeSetItems` or `beforeGetItems`. Hooks run sequentially: `before*` hooks execute from highest to lowest priority, while `after*` hooks unwind in reverse order so layered transformations (TTL → compression → encryption) remain invertible. Returning a value passes it to the next plugin, while throwing a `LocalSpaceError` aborts the operation.
 - **Per-call state** – plugins can stash data on `context.operationState` (e.g., capture the original value in `beforeSet` and reuse it in `afterSet`). For batch operations, `context.operationState.isBatch` is `true` and `context.operationState.batchSize` provides the total count.
-- **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (quota violations, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'lenient'` swallows non-LocalSpaceError/PluginAbortError after logging; set `pluginErrorPolicy: 'strict'` to propagate all plugin errors.
+- **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (quota violations, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'strict'` propagates all plugin errors; set `pluginErrorPolicy: 'lenient'` only if你希望插件错误被吞掉后继续（不建议用于加解密/压缩类插件）。
 
 ### Plugin execution order
 

@@ -80,23 +80,37 @@ describe('localStorage driver regressions', () => {
     const quotaError = new Error('quota hit');
     (quotaError as any).name = 'QuotaExceededError';
 
-    const spy = vi
+    // Pre-existing data that must survive a failed batch
+    await store.setItem('existing', 'keep-me');
+
+    const setSpy = vi
       .spyOn(window.localStorage.__proto__, 'setItem')
       .mockImplementationOnce(() => {
         throw quotaError;
       });
 
-    await expect(async () => {
+    let caught: any;
+    try {
       await store.setItems([
         { key: 'k1', value: 'v1' },
         { key: 'k2', value: 'v2' },
       ]);
-    }).rejects.toMatchObject({ code: 'QUOTA_EXCEEDED' } as LocalSpaceError);
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(LocalSpaceError);
+    expect((caught as LocalSpaceError).code).toBe('QUOTA_EXCEEDED');
+
+    // No partial writes
+    expect(await store.getItem('k1')).toBe(null);
+    expect(await store.getItem('k2')).toBe(null);
+    expect(await store.getItem('existing')).toBe('keep-me');
 
     await expect(
       store.setItems([{ key: 'k3', value: 'v3' }])
     ).resolves.toBeDefined();
 
-    spy.mockRestore();
+    setSpy.mockRestore();
   });
 });

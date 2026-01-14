@@ -237,6 +237,40 @@ describe('IndexedDB driver tests', () => {
     });
   });
 
+  describe('Coalesce + concurrency + idle close', () => {
+    it('handles bursts without stalling and reopens after idle close', async () => {
+      const burstCount = 40;
+      const coalesced = localspace.createInstance({
+        name: `coalesce-burst-${Math.random().toString(36).slice(2)}`,
+        storeName: 'coalesce-store',
+        coalesceWrites: true,
+        coalesceWindowMs: 5,
+        maxConcurrentTransactions: 1,
+        connectionIdleMs: 5,
+      });
+
+      await coalesced.setDriver([coalesced.INDEXEDDB]);
+      await coalesced.ready();
+
+      await Promise.all(
+        Array.from({ length: burstCount }, (_, i) =>
+          coalesced.setItem(`k-${i}`, `v-${i}`)
+        )
+      );
+
+      expect(await coalesced.length()).toBe(burstCount);
+
+      // Allow idle close to trigger
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      // Should reopen and continue to work
+      await coalesced.setItem('after-idle', 'ok');
+      expect(await coalesced.getItem('after-idle')).toBe('ok');
+
+      await coalesced.dropInstance();
+    });
+  });
+
   describe('Callback support', () => {
     it('should support callbacks for setItem', async () => {
       await new Promise<void>((resolve) => {

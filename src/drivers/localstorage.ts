@@ -389,6 +389,7 @@ function setItems<T>(
       const dbInfo = this._dbInfo;
       const stored: BatchResponse<T> = [];
       const batchSize = dbInfo.maxBatchSize ?? normalized.length;
+      const originals = new Map<string, string | null>();
 
       for (const batch of chunkArray(normalized, batchSize)) {
         for (const entry of batch) {
@@ -398,10 +399,27 @@ function setItems<T>(
           const serializedValue =
             await dbInfo.serializer.serialize(normalizedValue);
 
+          if (!originals.has(entry.key)) {
+            originals.set(
+              entry.key,
+              localStorage.getItem(dbInfo.keyPrefix + entry.key)
+            );
+          }
+
           try {
             localStorage.setItem(dbInfo.keyPrefix + entry.key, serializedValue);
             stored.push({ key: entry.key, value: normalizedValue });
           } catch (error: unknown) {
+            // Roll back keys written in this invocation
+            for (const [key, prev] of originals.entries()) {
+              const fullKey = dbInfo.keyPrefix + key;
+              if (prev === null) {
+                localStorage.removeItem(fullKey);
+              } else {
+                localStorage.setItem(fullKey, prev);
+              }
+            }
+
             if (
               error instanceof Error &&
               (error.name === 'QuotaExceededError' ||
