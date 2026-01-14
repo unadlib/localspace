@@ -415,8 +415,8 @@ const store = localspace.createInstance({
   storeName: 'primary',
   plugins: [
     ttlPlugin({ defaultTTL: 60_000 }),
-    encryptionPlugin({ key: '0123456789abcdef0123456789abcdef' }),
     compressionPlugin({ threshold: 1024 }),
+    encryptionPlugin({ key: '0123456789abcdef0123456789abcdef' }),
     syncPlugin({ channelName: 'localspace-sync' }),
     quotaPlugin({ maxSize: 5 * 1024 * 1024, evictionPolicy: 'lru' }),
   ],
@@ -427,9 +427,9 @@ const store = localspace.createInstance({
 
 - **Registration** – supply `plugins` when calling `createInstance()` or chain `instance.use(plugin)` later. Each plugin can also expose `enabled` (boolean or function) and `priority` to control execution order.
 - **Lifecycle events** – `onInit(context)` is invoked after `ready()`, and `onDestroy` lets you tear down timers or channels. Call `await instance.destroy()` when disposing of an instance to run every `onDestroy` hook (executed in reverse priority order). Context exposes the active driver, db info, config, and a shared `metadata` bag for cross-plugin coordination.
-- **Interceptors** – hook into `beforeSet/afterSet`, `beforeGet/afterGet`, `beforeRemove/afterRemove`, plus batch-specific methods such as `beforeSetItems` or `beforeGetItems`. Hooks run sequentially: `before*` hooks execute from highest to lowest priority, while `after*` hooks unwind in reverse order so layered transformations (compression → encryption → TTL) remain invertible. Returning a value passes it to the next plugin, while throwing a `LocalSpaceError` aborts the operation.
+- **Interceptors** – hook into `beforeSet/afterSet`, `beforeGet/afterGet`, `beforeRemove/afterRemove`, plus batch-specific methods such as `beforeSetItems` or `beforeGetItems`. Hooks run sequentially: `before*` hooks execute from highest to lowest priority, while `after*` hooks unwind in reverse order so layered transformations (TTL → compression → encryption) remain invertible. Returning a value passes it to the next plugin, while throwing a `LocalSpaceError` aborts the operation.
 - **Per-call state** – plugins can stash data on `context.operationState` (e.g., capture the original value in `beforeSet` and reuse it in `afterSet`). For batch operations, `context.operationState.isBatch` is `true` and `context.operationState.batchSize` provides the total count.
-- **Error handling & init policy** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (quota violations, failed decryptions, etc.). If a plugin `onInit` throws, the default policy is fail-fast (propagate and abort init). Set `pluginInitPolicy: 'disable-and-continue'` in config to log and skip the failing plugin instead (use with care for critical plugins like encryption).
+- **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (quota violations, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'lenient'` swallows non-LocalSpaceError/PluginAbortError after logging; set `pluginErrorPolicy: 'strict'` to propagate all plugin errors.
 
 ### Plugin execution order
 
@@ -439,9 +439,11 @@ Plugins are sorted by `priority` (higher runs first in `before*`, last in `after
 |--------|----------|-------|
 | sync | -100 | Runs last in `afterSet` to broadcast original (untransformed) values |
 | quota | -10 | Runs late so it measures final payload sizes |
-| ttl, encryption, compression | 0 | Default; chain in registration order |
+| encryption | 0 | Encrypts after compression so decrypt runs first in `after*` |
+| compression | 5 | Runs before encryption so payload is compressible |
+| ttl | 10 | Runs outermost so TTL wrapper is transformed by other plugins |
 
-**Recommended order**: `[ttlPlugin, encryptionPlugin, compressionPlugin, syncPlugin, quotaPlugin]`
+**Recommended order**: `[ttlPlugin, compressionPlugin, encryptionPlugin, syncPlugin, quotaPlugin]`
 
 ### Built-in plugins
 

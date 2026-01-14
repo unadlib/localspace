@@ -429,9 +429,14 @@ export class PluginManager {
     return normalizeBatchEntries(items);
   }
 
-  private shouldPropagate(error: unknown): boolean {
+  private shouldPropagate(
+    error: unknown,
+    policy: 'strict' | 'lenient'
+  ): boolean {
     return (
-      error instanceof LocalSpaceError || error instanceof PluginAbortError
+      policy === 'strict' ||
+      error instanceof LocalSpaceError ||
+      error instanceof PluginAbortError
     );
   }
 
@@ -480,7 +485,8 @@ export class PluginManager {
       const result = await executor();
       return (typeof result === 'undefined' ? fallback : result) as T;
     } catch (error) {
-      if (this.shouldPropagate(error)) {
+      const policy = this.host._config.pluginErrorPolicy ?? 'lenient';
+      if (this.shouldPropagate(error, policy)) {
         throw error;
       }
       await this.dispatchPluginError(
@@ -506,7 +512,8 @@ export class PluginManager {
     try {
       await executor();
     } catch (error) {
-      if (this.shouldPropagate(error)) {
+      const policy = this.host._config.pluginErrorPolicy ?? 'lenient';
+      if (this.shouldPropagate(error, policy)) {
         throw error;
       }
       await this.dispatchPluginError(

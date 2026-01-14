@@ -58,7 +58,7 @@ export const compressionPlugin = (
 
   return {
     name: 'compression',
-    priority: 0,
+    priority: 5,
     beforeSet: async <T>(_key: string, value: T): Promise<T> => {
       if (value == null) {
         return value;

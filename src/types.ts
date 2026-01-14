@@ -126,6 +126,13 @@ export interface LocalSpaceConfig {
    * - 'disable-and-continue': log and skip the failing plugin
    */
   pluginInitPolicy?: 'fail' | 'disable-and-continue';
+
+  /**
+   * Plugin runtime error policy.
+   * - 'lenient' (default): swallow unexpected plugin errors (except LocalSpaceError/PluginAbortError) after reporting via onError
+   * - 'strict': propagate all plugin errors to the caller
+   */
+  pluginErrorPolicy?: 'strict' | 'lenient';
 }
 
 /**

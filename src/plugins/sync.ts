@@ -39,6 +39,7 @@ type SyncMetadata = {
 
 const SYNC_METADATA_KEY = '__localspace_sync_metadata';
 const STORAGE_PREFIX = '__localspace_sync__';
+const VERSION_STORAGE_PREFIX = '__localspace_sync_versions__';
 
 const randomId = () =>
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -58,6 +59,57 @@ const getMetadata = (context: PluginContext): SyncMetadata => {
   };
   context.metadata[SYNC_METADATA_KEY] = created;
   return created;
+};
+
+const getVersionStorageKey = (context: PluginContext, channelName: string) => {
+  const name = context.config.name ?? 'default';
+  const storeName = context.config.storeName ?? 'keyvaluepairs';
+  return `${VERSION_STORAGE_PREFIX}:${channelName}:${name}:${storeName}`;
+};
+
+const loadPersistedVersions = (
+  context: PluginContext,
+  channelName: string,
+  metadata: SyncMetadata
+) => {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return;
+  }
+  const key = getVersionStorageKey(context, channelName);
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) {
+      return;
+    }
+    const parsed = JSON.parse(raw) as Record<string, number>;
+    for (const [k, v] of Object.entries(parsed)) {
+      const ts = typeof v === 'number' ? v : Number(v);
+      if (!Number.isFinite(ts)) continue;
+      metadata.versions.set(k, ts);
+    }
+  } catch (error) {
+    console.warn('localspace sync: failed to load version map', error);
+  }
+};
+
+const persistVersions = (
+  context: PluginContext,
+  channelName: string,
+  metadata: SyncMetadata
+) => {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return;
+  }
+  const key = getVersionStorageKey(context, channelName);
+  try {
+    const obj: Record<string, number> = {};
+    for (const [k, v] of metadata.versions.entries()) {
+      obj[k] = v;
+    }
+    window.localStorage.setItem(key, JSON.stringify(obj));
+  } catch (error) {
+    console.warn('localspace sync: failed to persist version map', error);
+  }
 };
 
 const createBroadcastChannel = (
@@ -141,6 +193,7 @@ const broadcast = (
   }
   metadata.channel.postMessage(message);
   metadata.versions.set(message.key, message.timestamp);
+  persistVersions(context, name, metadata);
 };
 
 const handleIncoming = async (
@@ -190,6 +243,7 @@ const handleIncoming = async (
       await context.instance.removeItem(message.key);
     }
     metadata.versions.set(message.key, message.timestamp);
+    persistVersions(context, options.channelName ?? 'localspace-sync', metadata);
   } finally {
     metadata.suppress = false;
   }
@@ -206,6 +260,7 @@ export const syncPlugin = (
     priority: -100,
     onInit: async (context) => {
       const metadata = getMetadata(context);
+      loadPersistedVersions(context, channelName, metadata);
       if (!metadata.channel) {
         metadata.channel = createBroadcastChannel(
           channelName,
@@ -263,5 +318,15 @@ export const syncPlugin = (
     },
   };
 };
+
+// Test hooks
+if (process.env.NODE_ENV === 'test') {
+  (syncPlugin as any).__test__ = {
+    VERSION_STORAGE_PREFIX,
+    getVersionStorageKey,
+    loadPersistedVersions,
+    persistVersions,
+  };
+}
 
 export default syncPlugin;

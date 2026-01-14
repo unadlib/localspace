@@ -95,7 +95,7 @@ export const ttlPlugin = (
   options: TTLPluginOptions = {}
 ): LocalSpacePlugin => ({
   name: 'ttl',
-  priority: 0,
+  priority: 10,
   onInit: async (context) => {
     const metadata = getMetadata(context);
     scheduleCleanup(context, options, metadata);

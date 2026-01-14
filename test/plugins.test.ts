@@ -336,13 +336,13 @@ describe('Plugin system', () => {
     const payload = { message: 'x'.repeat(100) };
     await store.setItem('combo', payload);
 
-    // Raw reader sees compressed payload (compression runs last)
+    // Raw reader sees encrypted payload (encryption wraps compressed+ttl payload)
     const rawReader = localspace.createInstance({
       name: 'combo-db',
       storeName: 'combo-store',
     });
     const raw = await rawReader.getItem('combo');
-    expect(raw).toMatchObject({ __ls_compressed: true });
+    expect(raw).toMatchObject({ __ls_encrypted: true });
 
     // Same store can decompress, decrypt, and unwrap TTL
     const restored = await store.getItem<{ message: string }>('combo');
