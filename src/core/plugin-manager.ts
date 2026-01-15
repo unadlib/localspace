@@ -67,10 +67,15 @@ const PLUGIN_WARNINGS = {
       // to run after compression in beforeSet
       const encPriority = plugins[encIdx]?.priority ?? 0;
       const compPriority = plugins[compIdx]?.priority ?? 0;
-      return encPriority > compPriority;
+      // Also check registration order when priorities are equal
+      // (plugins with same priority are sorted by registration order, earlier = higher precedence)
+      return (
+        encPriority > compPriority ||
+        (encPriority === compPriority && encIdx < compIdx)
+      );
     },
     message:
-      '[localspace] Warning: Encryption plugin has higher priority than compression. This means data will be encrypted before compression, which reduces compression effectiveness. Consider adjusting priorities (compression should have higher priority than encryption).',
+      '[localspace] Warning: Encryption plugin runs before compression (either due to higher priority or earlier registration order). This means data will be encrypted before compression, which reduces compression effectiveness. Consider adjusting priorities (compression should have higher priority than encryption) or registration order.',
   },
   QUOTA_NOT_LAST: {
     condition: (plugins: LocalSpacePlugin[]): boolean => {

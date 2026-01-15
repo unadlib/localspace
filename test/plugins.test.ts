@@ -691,6 +691,30 @@ describe('Plugin batch operations', () => {
     expect(result).toBe('d'.repeat(200));
   });
 
+  it('quota plugin deduplicates same key in batch to calculate correct delta', async () => {
+    // This test verifies that when the same key appears multiple times in a batch,
+    // the quota calculation only considers the final value, not accumulating deltas
+    const store = localspace.createInstance({
+      name: 'quota-dedupe-db',
+      storeName: 'quota-dedupe-store',
+      plugins: [quotaPlugin({ maxSize: 200, evictionPolicy: 'error' })],
+    });
+
+    // Original value: ~50 bytes
+    await store.setItem('key1', 'x'.repeat(50));
+
+    // Batch with same key multiple times: should only count final value (70 bytes)
+    // Correct delta: 70 - 50 = 20 bytes
+    // Bug case: would calculate (60-50) + (70-50) = 30 bytes, potentially exceeding quota
+    await store.setItems([
+      { key: 'key1', value: 'y'.repeat(60) },
+      { key: 'key1', value: 'z'.repeat(70) },
+    ]);
+
+    const result = await store.getItem('key1');
+    expect(result).toBe('z'.repeat(70)); // Should be the last value
+  });
+
   it('sync plugin works with batch operations through shared DB', async () => {
     // Note: Sync plugin does not broadcast batch operations because original
     // values are transformed before reaching afterSetItems. However, instances

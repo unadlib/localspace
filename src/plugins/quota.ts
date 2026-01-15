@@ -276,11 +276,19 @@ export const quotaPlugin = (
         return entries;
       }
 
-      // Calculate total delta for the batch
+      // Deduplicate by key, keeping the last value for each key
+      // This ensures correct delta calculation when the same key appears multiple times
+      const keyToEntry = new Map<string, { key: string; value: T }>();
+      for (const entry of normalized) {
+        keyToEntry.set(entry.key, entry);
+      }
+      const deduplicated = [...keyToEntry.values()];
+
+      // Calculate total delta for the batch using deduplicated entries
       let totalDelta = 0;
       const itemSizes: Array<{ key: string; size: number; delta: number }> = [];
 
-      for (const { key, value } of normalized) {
+      for (const { key, value } of deduplicated) {
         const size = await measureValueSize(value);
         const previousSize = metadata.keySizes.get(key) ?? 0;
         const delta = size - previousSize;
