@@ -280,6 +280,10 @@ export const syncPlugin = (
       }
     },
     afterSet: async (key, value, context) => {
+      // Skip if already processed by batch hook
+      if (context.operationState.isBatch) {
+        return;
+      }
       if (!shouldSyncKey(key, options)) {
         return;
       }
@@ -301,6 +305,10 @@ export const syncPlugin = (
       broadcast(message, metadata, channelName, context, options);
     },
     afterRemove: async (key, context) => {
+      // Skip if already processed by batch hook
+      if (context.operationState.isBatch) {
+        return;
+      }
       if (!shouldSyncKey(key, options)) {
         return;
       }
@@ -316,6 +324,11 @@ export const syncPlugin = (
       };
       broadcast(message, metadata, channelName, context, options);
     },
+    // Note: Batch operations (setItems/removeItems) are not synced via broadcast
+    // because the original values are transformed before reaching afterSetItems.
+    // Instances sharing the same database will still work correctly since they
+    // read from the shared IndexedDB. For cross-tab sync with batch operations,
+    // consider using single-item operations or implement custom sync logic.
   };
 };
 

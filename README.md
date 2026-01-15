@@ -479,8 +479,37 @@ Plugins are sorted by `priority` (higher runs first in `before*`, last in `after
 Wraps values as `{ data, expiresAt }`, invalidates stale reads, and optionally runs background cleanup. Options:
 
 - `defaultTTL` (ms) and `keyTTL` overrides
-- `cleanupInterval` to periodically scan `iterate()` output
+- `cleanupInterval` to periodically scan expired entries
+- `cleanupBatchSize` (default: 100) for efficient batch cleanup
 - `onExpire(key, value)` callback before removal
+
+```ts
+// Cache API responses for 5 minutes
+const cacheStore = localspace.createInstance({
+  name: 'api-cache',
+  plugins: [
+    ttlPlugin({
+      defaultTTL: 5 * 60 * 1000, // 5 minutes
+      keyTTL: {
+        'user-profile': 30 * 60 * 1000, // 30 minutes for user data
+        'session-token': 60 * 60 * 1000, // 1 hour for session
+      },
+      cleanupInterval: 60 * 1000, // Cleanup every minute
+      cleanupBatchSize: 50, // Process 50 keys at a time
+      onExpire: (key, value) => {
+        console.log(`Cache expired: ${key}`);
+      },
+    }),
+  ],
+});
+
+// Single item and batch operations both respect TTL
+await cacheStore.setItem('user-profile', userData);
+await cacheStore.setItems([
+  { key: 'post-1', value: post1 },
+  { key: 'post-2', value: post2 },
+]);
+```
 
 #### Encryption plugin
 
@@ -490,12 +519,75 @@ Encrypts serialized payloads using the Web Crypto API (AES-GCM by default) and d
 - Customize `algorithm`, `ivLength`, `ivGenerator`, or `randomSource`
 - Works in browsers and modern Node runtimes (pass your own `subtle` when needed)
 
+```ts
+// Using a direct key
+const secureStore = localspace.createInstance({
+  name: 'secure-store',
+  plugins: [
+    encryptionPlugin({
+      key: '0123456789abcdef0123456789abcdef', // 32 bytes for AES-256
+    }),
+  ],
+});
+
+// Using PBKDF2 key derivation (recommended for password-based encryption)
+const passwordStore = localspace.createInstance({
+  name: 'password-store',
+  plugins: [
+    encryptionPlugin({
+      keyDerivation: {
+        passphrase: userPassword,
+        salt: 'unique-per-user-salt',
+        iterations: 150000, // Higher = more secure but slower
+        hash: 'SHA-256',
+        length: 256,
+      },
+    }),
+  ],
+});
+
+// Batch operations are also encrypted
+await secureStore.setItems([
+  { key: 'card-number', value: '4111-1111-1111-1111' },
+  { key: 'cvv', value: '123' },
+]);
+```
+
 #### Compression plugin
 
 Runs LZ-string compression (or a custom codec) when payloads exceed a `threshold` and restores them on read.
 
 - `threshold` (bytes) controls when compression kicks in
 - Supply a custom `{ compress, decompress }` codec if you prefer pako/Brotli
+
+```ts
+const compressedStore = localspace.createInstance({
+  name: 'compressed-store',
+  plugins: [
+    compressionPlugin({
+      threshold: 1024, // Only compress if > 1KB
+      algorithm: 'lz-string', // Label stored in metadata
+    }),
+  ],
+});
+
+// Custom codec example (using pako)
+import pako from 'pako';
+
+const pakoStore = localspace.createInstance({
+  name: 'pako-store',
+  plugins: [
+    compressionPlugin({
+      threshold: 512,
+      algorithm: 'gzip',
+      codec: {
+        compress: (data) => pako.gzip(data),
+        decompress: (data) => pako.ungzip(data, { to: 'string' }),
+      },
+    }),
+  ],
+});
+```
 
 #### Sync plugin
 
@@ -505,15 +597,106 @@ Keeps multiple tabs/processes in sync via `BroadcastChannel` (with `storage`-eve
 - `syncKeys` lets you scope which keys broadcast
 - `conflictStrategy` defaults to `last-write-wins`; provide `onConflict` (return `false` to drop remote writes) for merge logic
 
+```ts
+const syncedStore = localspace.createInstance({
+  name: 'synced-store',
+  plugins: [
+    syncPlugin({
+      channelName: 'my-app-sync',
+      syncKeys: ['cart', 'preferences', 'theme'], // Only sync these keys
+      conflictStrategy: 'last-write-wins',
+      onConflict: ({ key, localTimestamp, incomingTimestamp, value }) => {
+        console.log(`Conflict on ${key}: local=${localTimestamp}, incoming=${incomingTimestamp}`);
+        // Return false to reject the incoming change
+        return localTimestamp < incomingTimestamp;
+      },
+    }),
+  ],
+});
+
+// Changes sync across tabs automatically
+await syncedStore.setItem('cart', { items: [...] });
+await syncedStore.setItems([
+  { key: 'preferences', value: { darkMode: true } },
+  { key: 'theme', value: 'blue' },
+]);
+```
+
 #### Quota plugin
 
 Tracks approximate storage usage after every mutation and enforces limits.
 
-- `maxSize` (bytes) and optional `useNavigatorEstimate` to read the browser’s quota
+- `maxSize` (bytes) and optional `useNavigatorEstimate` to read the browser's quota
 - `evictionPolicy: 'error' | 'lru'` (LRU removes least-recently-used keys automatically)
 - `onQuotaExceeded(info)` fires before throwing so you can log/alert users
 
+```ts
+const quotaStore = localspace.createInstance({
+  name: 'quota-store',
+  plugins: [
+    quotaPlugin({
+      maxSize: 5 * 1024 * 1024, // 5 MB
+      evictionPolicy: 'lru', // Automatically evict least-recently-used items
+      useNavigatorEstimate: true, // Also respect browser quota
+      onQuotaExceeded: ({ key, attemptedSize, maxSize, currentUsage }) => {
+        console.warn(`Quota exceeded: tried to write ${attemptedSize} bytes`);
+        console.warn(`Current usage: ${currentUsage}/${maxSize} bytes`);
+      },
+    }),
+  ],
+});
+
+// Batch operations are also quota-checked
+await quotaStore.setItems([
+  { key: 'large-1', value: largeData1 },
+  { key: 'large-2', value: largeData2 },
+]); // Throws QUOTA_EXCEEDED if total exceeds limit
+```
+
 > Tip: place quota plugins last so they see the final payload size after other transformations (TTL, encryption, compression, etc.).
+
+### Plugin combination best practices
+
+1. **Recommended plugin order** (from highest to lowest priority):
+   ```ts
+   plugins: [
+     ttlPlugin({ ... }),         // priority: 10
+     compressionPlugin({ ... }), // priority: 5
+     encryptionPlugin({ ... }),  // priority: 0
+     quotaPlugin({ ... }),       // priority: -10
+     syncPlugin({ ... }),        // priority: -100
+   ]
+   ```
+
+2. **Always compress before encrypting**: Encrypted data has high entropy and compresses poorly. The default priorities handle this automatically.
+
+3. **Use strict error policy with security-critical plugins**:
+   ```ts
+   // DON'T do this - encryption failures will be silently swallowed
+   const bad = localspace.createInstance({
+     plugins: [encryptionPlugin({ key })],
+     pluginErrorPolicy: 'lenient', // Dangerous!
+   });
+
+   // DO this - encryption failures will propagate
+   const good = localspace.createInstance({
+     plugins: [encryptionPlugin({ key })],
+     pluginErrorPolicy: 'strict', // Safe (default)
+   });
+   ```
+
+4. **Batch operations work with all plugins**: All built-in plugins support `setItems`, `getItems`, and `removeItems`.
+
+### Plugin troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| TTL items not expiring | Ensure `cleanupInterval` is set, or read items to trigger expiration |
+| Encryption fails silently | Check `pluginErrorPolicy` is not 'lenient' |
+| Compression not working | Verify payload exceeds `threshold` |
+| Sync not updating other tabs | Check `channelName` matches and `syncKeys` includes your key |
+| Quota errors on small writes | Other plugins (TTL, encryption) add overhead; account for wrapper size |
+| Plugin order seems wrong | Check `priority` values; higher = runs first in `before*` hooks |
 
 ## Compatibility & environments
 

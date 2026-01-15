@@ -1,4 +1,10 @@
-import type { LocalSpacePlugin, PluginContext } from '../types';
+import type {
+  LocalSpacePlugin,
+  PluginContext,
+  BatchItems,
+  BatchResponse,
+} from '../types';
+import { normalizeBatchEntries } from '../utils/helpers';
 import { createLocalSpaceError } from '../errors';
 import serializer from '../utils/serializer';
 
@@ -155,6 +161,10 @@ export const quotaPlugin = (
     name: 'quota',
     priority: -10,
     beforeSet: async (key, value, context) => {
+      // Skip if already processed by batch hook
+      if (context.operationState.isBatch) {
+        return value;
+      }
       const metadata = getMetadata(context);
       if (!metadata.initialized) {
         await rebuildUsage(context, metadata);
@@ -210,6 +220,10 @@ export const quotaPlugin = (
       return value;
     },
     afterSet: async (key, _value, context) => {
+      // Skip if already processed by batch hook
+      if (context.operationState.isBatch) {
+        return;
+      }
       const metadata = getMetadata(context);
       const quotaState = context.operationState.quota as
         | { key: string; size: number; delta: number }
@@ -223,6 +237,10 @@ export const quotaPlugin = (
       delete context.operationState.quota;
     },
     afterGet: async (key, value, context) => {
+      // Skip if already processed by batch hook
+      if (context.operationState.isBatch) {
+        return value;
+      }
       const metadata = getMetadata(context);
       if (metadata.access.has(key)) {
         metadata.access.set(key, ++metadata.accessCounter);
@@ -230,6 +248,10 @@ export const quotaPlugin = (
       return value;
     },
     afterRemove: async (key, context) => {
+      // Skip if already processed by batch hook
+      if (context.operationState.isBatch) {
+        return;
+      }
       const metadata = getMetadata(context);
       const size = metadata.keySizes.get(key) ?? 0;
       if (size > 0) {
@@ -237,6 +259,121 @@ export const quotaPlugin = (
       }
       metadata.keySizes.delete(key);
       metadata.access.delete(key);
+    },
+    beforeSetItems: async <T>(
+      entries: BatchItems<T>,
+      context: PluginContext
+    ): Promise<BatchItems<T>> => {
+      const metadata = getMetadata(context);
+      if (!metadata.initialized) {
+        await rebuildUsage(context, metadata);
+      }
+
+      const normalized = normalizeBatchEntries(entries);
+      const capacity = await resolveCapacity(context, metadata, options);
+
+      if (!Number.isFinite(capacity)) {
+        return entries;
+      }
+
+      // Calculate total delta for the batch
+      let totalDelta = 0;
+      const itemSizes: Array<{ key: string; size: number; delta: number }> = [];
+
+      for (const { key, value } of normalized) {
+        const size = await measureValueSize(value);
+        const previousSize = metadata.keySizes.get(key) ?? 0;
+        const delta = size - previousSize;
+        totalDelta += delta;
+        itemSizes.push({ key, size, delta });
+      }
+
+      // Check if batch would exceed quota
+      if (metadata.usage + totalDelta > capacity) {
+        if (evictionPolicy === 'lru') {
+          const success = await evictEntries(
+            totalDelta,
+            capacity,
+            metadata,
+            context,
+            options
+          );
+          if (!success) {
+            await options.onQuotaExceeded?.({
+              key: normalized[0]?.key ?? '',
+              attemptedSize: totalDelta,
+              delta: totalDelta,
+              maxSize: capacity,
+              currentUsage: metadata.usage,
+            });
+            throw createLocalSpaceError(
+              'QUOTA_EXCEEDED',
+              'Storage quota exceeded for batch operation.'
+            );
+          }
+        } else {
+          await options.onQuotaExceeded?.({
+            key: normalized[0]?.key ?? '',
+            attemptedSize: totalDelta,
+            delta: totalDelta,
+            maxSize: capacity,
+            currentUsage: metadata.usage,
+          });
+          throw createLocalSpaceError(
+            'QUOTA_EXCEEDED',
+            'Storage quota exceeded for batch operation.'
+          );
+        }
+      }
+
+      // Store sizes in operation state for afterSetItems
+      context.operationState.quotaBatch = itemSizes;
+      return entries;
+    },
+    afterSetItems: async <T>(
+      entries: BatchResponse<T>,
+      context: PluginContext
+    ): Promise<BatchResponse<T>> => {
+      const metadata = getMetadata(context);
+      const quotaBatch = context.operationState.quotaBatch as
+        | Array<{ key: string; size: number; delta: number }>
+        | undefined;
+
+      if (!quotaBatch) {
+        return entries;
+      }
+
+      for (const { key, size, delta } of quotaBatch) {
+        metadata.keySizes.set(key, size);
+        metadata.access.set(key, ++metadata.accessCounter);
+        metadata.usage += delta;
+      }
+
+      delete context.operationState.quotaBatch;
+      return entries;
+    },
+    afterGetItems: async <T>(
+      entries: BatchResponse<T>,
+      context: PluginContext
+    ): Promise<BatchResponse<T>> => {
+      const metadata = getMetadata(context);
+      for (const { key } of entries) {
+        if (metadata.access.has(key)) {
+          metadata.access.set(key, ++metadata.accessCounter);
+        }
+      }
+      return entries;
+    },
+    afterRemoveItems: async (keys: string[], context: PluginContext) => {
+      const metadata = getMetadata(context);
+      for (const key of keys) {
+        const size = metadata.keySizes.get(key) ?? 0;
+        if (size > 0) {
+          metadata.usage = Math.max(0, metadata.usage - size);
+        }
+        metadata.keySizes.delete(key);
+        metadata.access.delete(key);
+      }
     },
   };
 };

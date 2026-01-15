@@ -32,6 +32,66 @@ type RegisteredPlugin = {
 
 const sharedMetadataFor = (): Record<string, unknown> => Object.create(null);
 
+/**
+ * Plugin combination warnings to help users avoid problematic configurations.
+ */
+const PLUGIN_WARNINGS = {
+  LENIENT_WITH_ENCRYPTION: {
+    condition: (
+      plugins: LocalSpacePlugin[],
+      config: PluginHost['_config']
+    ): boolean => {
+      const hasEncryption = plugins.some((p) => p.name === 'encryption');
+      return hasEncryption && config.pluginErrorPolicy === 'lenient';
+    },
+    message:
+      '[localspace] Warning: Using lenient error policy with encryption plugin may silently fail decryption. Consider using strict policy for security-critical plugins.',
+  },
+  LENIENT_WITH_COMPRESSION: {
+    condition: (
+      plugins: LocalSpacePlugin[],
+      config: PluginHost['_config']
+    ): boolean => {
+      const hasCompression = plugins.some((p) => p.name === 'compression');
+      return hasCompression && config.pluginErrorPolicy === 'lenient';
+    },
+    message:
+      '[localspace] Warning: Using lenient error policy with compression plugin may cause data corruption if decompression fails.',
+  },
+  ENCRYPTION_BEFORE_COMPRESSION: {
+    condition: (plugins: LocalSpacePlugin[]): boolean => {
+      const encIdx = plugins.findIndex((p) => p.name === 'encryption');
+      const compIdx = plugins.findIndex((p) => p.name === 'compression');
+      if (encIdx === -1 || compIdx === -1) return false;
+      // Check priority - encryption should have lower priority than compression
+      // to run after compression in beforeSet
+      const encPriority = plugins[encIdx]?.priority ?? 0;
+      const compPriority = plugins[compIdx]?.priority ?? 0;
+      return encPriority > compPriority;
+    },
+    message:
+      '[localspace] Warning: Encryption plugin has higher priority than compression. This means data will be encrypted before compression, which reduces compression effectiveness. Consider adjusting priorities (compression should have higher priority than encryption).',
+  },
+  QUOTA_NOT_LAST: {
+    condition: (plugins: LocalSpacePlugin[]): boolean => {
+      const quotaPlugin = plugins.find((p) => p.name === 'quota');
+      if (!quotaPlugin) return false;
+      const quotaPriority = quotaPlugin.priority ?? 0;
+      // Quota should have one of the lowest priorities to measure final size
+      // Only sync should be lower
+      const hasHigherPriorityAfter = plugins.some(
+        (p) =>
+          p.name !== 'quota' &&
+          p.name !== 'sync' &&
+          (p.priority ?? 0) < quotaPriority
+      );
+      return hasHigherPriorityAfter;
+    },
+    message:
+      '[localspace] Warning: Quota plugin may not measure final payload sizes correctly. Consider giving it a lower priority than transformation plugins (TTL, compression, encryption).',
+  },
+} as const;
+
 export class PluginManager {
   private readonly host: PluginHost;
 
@@ -53,10 +113,28 @@ export class PluginManager {
 
   private orderCounter = 0;
 
+  private warningsEmitted = new Set<string>();
+
   constructor(host: PluginHost, initialPlugins: LocalSpacePlugin[] = []) {
     this.host = host;
     if (initialPlugins.length) {
       this.registerPlugins(initialPlugins);
+    }
+  }
+
+  /**
+   * Validate plugin combinations and emit warnings for potential issues.
+   */
+  private validatePluginCombinations(): void {
+    const plugins = this.pluginRegistry.map((r) => r.plugin);
+    const config = this.host._config;
+
+    for (const [key, warning] of Object.entries(PLUGIN_WARNINGS)) {
+      if (this.warningsEmitted.has(key)) continue;
+      if (warning.condition(plugins, config)) {
+        console.warn(warning.message);
+        this.warningsEmitted.add(key);
+      }
     }
   }
 
@@ -70,6 +148,7 @@ export class PluginManager {
       this.pluginRegistry.push({ plugin, order: this.orderCounter++ });
     }
     this.sortPlugins();
+    this.validatePluginCombinations();
   }
 
   private sortPlugins(): void {

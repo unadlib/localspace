@@ -1,5 +1,11 @@
-import type { LocalSpacePlugin } from '../types';
-import { createLocalSpaceError, toLocalSpaceError } from '../errors';
+import type {
+  LocalSpacePlugin,
+  PluginContext,
+  BatchItems,
+  BatchResponse,
+} from '../types';
+import { normalizeBatchEntries } from '../utils/helpers';
+import { toLocalSpaceError } from '../errors';
 import serializer from '../utils/serializer';
 import { compressToUint8Array, decompressFromUint8Array } from 'lz-string';
 
@@ -23,8 +29,6 @@ type CompressionPayload = {
   data: string;
   originalSize: number;
 };
-
-const COMPRESSED_MARKER = '__ls_compressed';
 
 const isCompressionPayload = (value: unknown): value is CompressionPayload =>
   !!value &&
@@ -59,7 +63,15 @@ export const compressionPlugin = (
   return {
     name: 'compression',
     priority: 5,
-    beforeSet: async <T>(_key: string, value: T): Promise<T> => {
+    beforeSet: async <T>(
+      _key: string,
+      value: T,
+      context: PluginContext
+    ): Promise<T> => {
+      // Skip if already processed by batch hook
+      if (context.operationState.isBatch) {
+        return value;
+      }
       if (value == null) {
         return value;
       }
@@ -94,7 +106,15 @@ export const compressionPlugin = (
       };
       return payload as unknown as T;
     },
-    afterGet: async <T>(_key: string, value: T | null): Promise<T | null> => {
+    afterGet: async <T>(
+      _key: string,
+      value: T | null,
+      context: PluginContext
+    ): Promise<T | null> => {
+      // Skip if already processed by batch hook
+      if (context.operationState.isBatch) {
+        return value;
+      }
       if (!isCompressionPayload(value)) {
         return value;
       }
@@ -109,6 +129,82 @@ export const compressionPlugin = (
           'Failed to decompress payload'
         );
       }
+    },
+    beforeSetItems: async <T>(
+      entries: BatchItems<T>,
+      _context: PluginContext
+    ): Promise<BatchItems<T>> => {
+      const normalized = normalizeBatchEntries(entries);
+
+      const compressed = await Promise.all(
+        normalized.map(async ({ key, value }) => {
+          if (value == null) {
+            return { key, value };
+          }
+
+          const serialized = await serializer.serialize(value);
+          const encoded = new TextEncoder().encode(serialized);
+          if (encoded.byteLength < threshold) {
+            return { key, value };
+          }
+
+          let compressedData: Uint8Array;
+          try {
+            compressedData = toUint8Array(await codec.compress(serialized));
+          } catch (error) {
+            throw toLocalSpaceError(
+              error,
+              'OPERATION_FAILED',
+              `Failed to compress payload for key "${key}"`
+            );
+          }
+
+          const payload: CompressionPayload = {
+            __ls_compressed: true,
+            algorithm,
+            originalSize: encoded.byteLength,
+            data: serializer.bufferToString(
+              compressedData.buffer.slice(
+                compressedData.byteOffset,
+                compressedData.byteOffset + compressedData.byteLength
+              ) as ArrayBuffer
+            ),
+          };
+          return { key, value: payload as unknown as T };
+        })
+      );
+
+      return compressed;
+    },
+    afterGetItems: async <T>(
+      entries: BatchResponse<T>,
+      _context: PluginContext
+    ): Promise<BatchResponse<T>> => {
+      const decompressed = await Promise.all(
+        entries.map(async ({ key, value }) => {
+          if (!isCompressionPayload(value)) {
+            return { key, value };
+          }
+          try {
+            const buffer = serializer.stringToBuffer(value.data);
+            const decompressedData = await codec.decompress(
+              new Uint8Array(buffer)
+            );
+            return {
+              key,
+              value: serializer.deserialize(decompressedData) as T,
+            };
+          } catch (error) {
+            throw toLocalSpaceError(
+              error,
+              'DESERIALIZATION_FAILED',
+              `Failed to decompress payload for key "${key}"`
+            );
+          }
+        })
+      );
+
+      return decompressed;
     },
   };
 };

@@ -1,4 +1,10 @@
-import type { LocalSpacePlugin, PluginContext } from '../types';
+import type {
+  LocalSpacePlugin,
+  PluginContext,
+  BatchItems,
+  BatchResponse,
+} from '../types';
+import { normalizeBatchEntries } from '../utils/helpers';
 
 export interface TTLPluginOptions {
   /** Default TTL in milliseconds applied when key-specific TTL is not defined */
@@ -7,6 +13,11 @@ export interface TTLPluginOptions {
   keyTTL?: Record<string, number>;
   /** Optional cleanup interval in milliseconds */
   cleanupInterval?: number;
+  /**
+   * Batch size for cleanup operations (default: 100).
+   * Larger batches are more efficient but may cause longer pauses.
+   */
+  cleanupBatchSize?: number;
   /** Callback invoked when a key expires */
   onExpire?: (key: string, value: unknown) => Promise<void> | void;
 }
@@ -67,6 +78,18 @@ const scheduleCleanup = (
   }, options.cleanupInterval);
 };
 
+/**
+ * Chunk an array into batches of a given size.
+ */
+const chunkArray = <T>(arr: T[], size: number): T[][] => {
+  if (size <= 0 || arr.length === 0) return [arr];
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+};
+
 const cleanupExpired = async (
   context: PluginContext,
   options: TTLPluginOptions,
@@ -76,14 +99,26 @@ const cleanupExpired = async (
     return;
   }
   metadata.running = true;
+  const batchSize = options.cleanupBatchSize ?? 100;
+
   try {
     const keys = await context.instance.keys();
-    for (const key of keys) {
+    const batches = chunkArray(keys, batchSize);
+
+    for (const batch of batches) {
       try {
-        // Use plugin-aware getItem so TTL + encryption/compression are respected.
-        await context.instance.getItem(key);
+        // Use batch getItems for efficient cleanup.
+        // The TTL afterGetItems hook will handle expiration and removal.
+        await context.instance.getItems(batch);
       } catch {
-        // Ignore individual key failures during cleanup.
+        // If batch fails, fall back to individual gets
+        for (const key of batch) {
+          try {
+            await context.instance.getItem(key);
+          } catch {
+            // Ignore individual key failures during cleanup.
+          }
+        }
       }
     }
   } finally {
@@ -107,7 +142,15 @@ export const ttlPlugin = (
       metadata.timer = null;
     }
   },
-  beforeSet: async <T>(key: string, value: T): Promise<T> => {
+  beforeSet: async <T>(
+    key: string,
+    value: T,
+    context: PluginContext
+  ): Promise<T> => {
+    // Skip if already processed by batch hook
+    if (context.operationState.isBatch) {
+      return value;
+    }
     const ttlMs = resolveTtl(key, options);
     if (!ttlMs || ttlMs <= 0) {
       return value;
@@ -123,6 +166,10 @@ export const ttlPlugin = (
     value: T | null,
     context: PluginContext
   ): Promise<T | null> => {
+    // Skip if already processed by batch hook
+    if (context.operationState.isBatch) {
+      return value;
+    }
     if (!isTtlPayload(value)) {
       return value;
     }
@@ -136,6 +183,61 @@ export const ttlPlugin = (
     }
 
     return value.data as T;
+  },
+  beforeSetItems: async <T>(
+    entries: BatchItems<T>,
+    _context: PluginContext
+  ): Promise<BatchItems<T>> => {
+    const normalized = normalizeBatchEntries(entries);
+    const now = Date.now();
+    const wrapped = normalized.map(({ key, value }) => {
+      const ttlMs = resolveTtl(key, options);
+      if (!ttlMs || ttlMs <= 0) {
+        return { key, value };
+      }
+      return {
+        key,
+        value: {
+          __ls_ttl: true,
+          data: value,
+          expiresAt: now + ttlMs,
+        } as unknown as T,
+      };
+    });
+    return wrapped;
+  },
+  afterGetItems: async <T>(
+    entries: BatchResponse<T>,
+    context: PluginContext
+  ): Promise<BatchResponse<T>> => {
+    const now = Date.now();
+    const expiredKeys: string[] = [];
+    const expiredEntries: Array<{ key: string; value: unknown }> = [];
+
+    const result = entries.map(({ key, value }) => {
+      if (!isTtlPayload(value)) {
+        return { key, value };
+      }
+      if (value.expiresAt <= now) {
+        expiredKeys.push(key);
+        expiredEntries.push({ key, value: value.data });
+        return { key, value: null };
+      }
+      return { key, value: value.data as T };
+    });
+
+    // Remove expired keys in batch
+    if (expiredKeys.length > 0) {
+      await context.instance.removeItems(expiredKeys).catch(() => undefined);
+      // Call onExpire for each expired entry
+      if (options.onExpire) {
+        for (const entry of expiredEntries) {
+          await options.onExpire(entry.key, entry.value);
+        }
+      }
+    }
+
+    return result;
   },
 });
 
