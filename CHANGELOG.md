@@ -1,5 +1,59 @@
 # Changelog
 
+## [1.0.0] - 2026-01-15
+
+### 🎉 First Stable Release
+
+localspace reaches v1.0.0, marking a stable API ready for production use. This release represents a complete, modern reimplementation of the localForage API with TypeScript-first design, native async/await support, and zero legacy baggage.
+
+### Highlights
+
+- **100% localForage API Compatibility**: Drop-in replacement for existing localForage codebases
+- **TypeScript-First**: Full type definitions with generics for value typing
+- **Modern JavaScript**: Native Promises, async/await, ES modules
+- **High Performance**: Batch operations 6-10x faster than single-item loops
+- **Plugin Architecture**: Extensible system with 5 built-in plugins
+
+### Core Features
+
+- **Storage Drivers**: IndexedDB (primary) and localStorage (fallback)
+- **Batch Operations**: `setItems()`, `getItems()`, `removeItems()` for bulk operations
+- **Transaction API**: `runTransaction()` for atomic multi-operation workflows
+- **Coalesced Writes**: Automatic write batching for 3-10x performance improvement (opt-in)
+- **Storage Buckets**: Chrome 122+ isolated storage support
+- **Connection Pooling**: Transaction concurrency control and idle timeout
+
+### Plugin System
+
+- **TTL Plugin**: Time-to-live expiration with automatic cleanup
+- **Encryption Plugin**: AES-GCM encryption via Web Crypto API
+- **Compression Plugin**: LZ-string compression for large values
+- **Sync Plugin**: Multi-tab synchronization via BroadcastChannel
+- **Quota Plugin**: Automatic quota management with LRU eviction
+
+### Error Handling
+
+- **Structured Errors**: `LocalSpaceError` class with 16 distinct error codes
+- **Full Context**: Contextual details including driver, operation, and key
+- **Error Chain**: Original errors preserved in `cause` property
+
+### Performance
+
+Based on Playwright benchmarks (500 items × 256B):
+
+| Operation        | Improvement vs Loops |
+| ---------------- | -------------------- |
+| `setItems`       | ~6x faster           |
+| `getItems`       | ~7.7x faster         |
+| `removeItems`    | ~2.8x faster         |
+| Coalesced writes | 3-10x faster         |
+
+### Breaking Changes
+
+None — v1.0.0 maintains full backward compatibility with v0.x releases.
+
+---
+
 ## [0.3.1] - 2025-12-07
 
 ### Fixed
