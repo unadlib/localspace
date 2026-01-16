@@ -89,7 +89,17 @@ function checkIfLocalStorageThrows(): boolean {
 }
 
 function isLocalStorageUsable(): boolean {
-  return !checkIfLocalStorageThrows() || localStorage.length > 0;
+  if (!checkIfLocalStorageThrows()) {
+    return true;
+  }
+  // localStorage.setItem threw, but there may still be existing data
+  // (e.g., quota exceeded). Wrap the length check since it can also throw
+  // in privacy modes.
+  try {
+    return localStorage.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 async function _initStorage(

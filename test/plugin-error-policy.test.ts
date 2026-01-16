@@ -20,6 +20,20 @@ const batchThrowingPlugin = {
 };
 
 describe('pluginErrorPolicy', () => {
+  it('defaults to lenient policy when not specified', async () => {
+    const store = localspace.createInstance({
+      name: 'policy-default',
+      storeName: 'store',
+      plugins: [throwingPlugin],
+    });
+
+    await store.setDriver([store.LOCALSTORAGE]);
+    await store.ready();
+    await store.setItem('k', 'v');
+
+    await expect(store.getItem('k')).resolves.toBe('v');
+  });
+
   it('lenient policy swallows non-LocalSpaceError plugin failures', async () => {
     const store = localspace.createInstance({
       name: 'policy-lenient',

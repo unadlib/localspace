@@ -94,6 +94,7 @@ const DefaultConfig: LocalSpaceConfig = {
   coalesceFireAndForget: false,
   coalesceMaxBatchSize: undefined,
   pluginInitPolicy: 'fail',
+  pluginErrorPolicy: 'lenient',
 };
 
 type ReadyAwareInstance = {
@@ -231,6 +232,23 @@ export class LocalSpace implements LocalSpaceInstance {
       }
 
       const suppliedOptions = optionsOrKey as Partial<LocalSpaceConfig>;
+
+      // Validate all options before applying any changes
+      for (const key of Object.keys(suppliedOptions) as Array<
+        keyof LocalSpaceConfig
+      >) {
+        const value = suppliedOptions[key];
+
+        if (key === 'version' && typeof value !== 'number') {
+          return createLocalSpaceError(
+            'INVALID_CONFIG',
+            'Database version must be a number.',
+            { configKey: 'version', providedType: typeof value }
+          );
+        }
+      }
+
+      // All validations passed, now apply changes
       const configRecord = this._config as LocalSpaceConfig &
         Record<string, unknown>;
 
@@ -242,14 +260,6 @@ export class LocalSpace implements LocalSpaceInstance {
         if (key === 'storeName' && typeof value === 'string') {
           configRecord.storeName = value.replace(/\W/g, '_');
           continue;
-        }
-
-        if (key === 'version' && typeof value !== 'number') {
-          return createLocalSpaceError(
-            'INVALID_CONFIG',
-            'Database version must be a number.',
-            { configKey: 'version', providedType: typeof value }
-          );
         }
 
         configRecord[key as string] = value as unknown;

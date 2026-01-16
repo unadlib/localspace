@@ -24,6 +24,16 @@ describe('LocalSpace class tests', () => {
       expect((result as Error).message).toContain('Database version must be a number');
     });
 
+    it('should not apply partial config when validation fails', () => {
+      const instance = new LocalSpace({ storeName: 'original-store' });
+      const result = instance.config({
+        storeName: 'new-store',
+        version: 'invalid' as any,
+      });
+      expect(result).toBeInstanceOf(Error);
+      expect(instance.config('storeName')).toBe('original-store');
+    });
+
     it('should get specific config value', () => {
       const instance = new LocalSpace({ name: 'test-db', storeName: 'test-store' });
       expect(instance.config('name')).toBe('test-db');

@@ -456,7 +456,7 @@ const store = localspace.createInstance({
 - **Lifecycle events** – `onInit(context)` is invoked after `ready()`, and `onDestroy` lets you tear down timers or channels. Call `await instance.destroy()` when disposing of an instance to run every `onDestroy` hook (executed in reverse priority order). Context exposes the active driver, db info, config, and a shared `metadata` bag for cross-plugin coordination.
 - **Interceptors** – hook into `beforeSet/afterSet`, `beforeGet/afterGet`, `beforeRemove/afterRemove`, plus batch-specific methods such as `beforeSetItems` or `beforeGetItems`. Hooks run sequentially: `before*` hooks execute from highest to lowest priority, while `after*` hooks unwind in reverse order so layered transformations (TTL → compression → encryption) remain invertible. Returning a value passes it to the next plugin, while throwing a `LocalSpaceError` aborts the operation.
 - **Per-call state** – plugins can stash data on `context.operationState` (e.g., capture the original value in `beforeSet` and reuse it in `afterSet`). For batch operations, `context.operationState.isBatch` is `true` and `context.operationState.batchSize` provides the total count.
-- **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (quota violations, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'strict'` propagates all plugin errors; only use `lenient` if you explicitly accept swallowed errors, and avoid lenient for encryption/compression/ttl or any correctness-critical plugin.
+- **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (quota violations, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'lenient'` reports and continues; use `strict` for encryption/compression/ttl or any correctness-critical plugin.
 
 ### Plugin execution order
 
@@ -658,6 +658,7 @@ await quotaStore.setItems([
 ### Plugin combination best practices
 
 1. **Recommended plugin order** (from highest to lowest priority):
+
    ```ts
    plugins: [
      ttlPlugin({ ... }),         // priority: 10
@@ -670,7 +671,8 @@ await quotaStore.setItems([
 
 2. **Always compress before encrypting**: Encrypted data has high entropy and compresses poorly. The default priorities handle this automatically.
 
-3. **Use strict error policy with security-critical plugins**:
+3. **Use strict error policy with security-critical plugins** (default is lenient):
+
    ```ts
    // DON'T do this - encryption failures will be silently swallowed
    const bad = localspace.createInstance({
@@ -681,7 +683,7 @@ await quotaStore.setItems([
    // DO this - encryption failures will propagate
    const good = localspace.createInstance({
      plugins: [encryptionPlugin({ key })],
-     pluginErrorPolicy: 'strict', // Safe (default)
+     pluginErrorPolicy: 'strict', // Safe (recommended)
    });
    ```
 
@@ -689,14 +691,14 @@ await quotaStore.setItems([
 
 ### Plugin troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| TTL items not expiring | Ensure `cleanupInterval` is set, or read items to trigger expiration |
-| Encryption fails silently | Check `pluginErrorPolicy` is not 'lenient' |
-| Compression not working | Verify payload exceeds `threshold` |
-| Sync not updating other tabs | Check `channelName` matches and `syncKeys` includes your key |
+| Issue                        | Solution                                                               |
+| ---------------------------- | ---------------------------------------------------------------------- |
+| TTL items not expiring       | Ensure `cleanupInterval` is set, or read items to trigger expiration   |
+| Encryption fails silently    | Set `pluginErrorPolicy: 'strict'` for encryption/compression/ttl       |
+| Compression not working      | Verify payload exceeds `threshold`                                     |
+| Sync not updating other tabs | Check `channelName` matches and `syncKeys` includes your key           |
 | Quota errors on small writes | Other plugins (TTL, encryption) add overhead; account for wrapper size |
-| Plugin order seems wrong | Check `priority` values; higher = runs first in `before*` hooks |
+| Plugin order seems wrong     | Check `priority` values; higher = runs first in `before*` hooks        |
 
 ## Compatibility & environments
 

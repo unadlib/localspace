@@ -73,6 +73,47 @@ describe('localStorage driver regressions', () => {
     expect(await freshB.getItem('bar')).toBe('beta');
   });
 
+  it('handles privacy mode where localStorage.length throws', async () => {
+    await localspace.ready().catch(() => undefined);
+    const name = `privacy-${Math.random().toString(36).slice(2)}`;
+    const storageProto = Object.getPrototypeOf(localStorage);
+    const setItemSpy = vi
+      .spyOn(storageProto, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('blocked');
+      });
+    const lengthSpy = vi
+      .spyOn(storageProto, 'length', 'get')
+      .mockImplementation(() => {
+        throw new Error('length blocked');
+      });
+
+    try {
+      const instance = localspace.createInstance({ name, storeName: 'store' });
+      await instance.setDriver([instance.LOCALSTORAGE]);
+      await expect(instance.ready()).rejects.toMatchObject({
+        code: 'DRIVER_UNAVAILABLE',
+      });
+      const pendingInit = (instance as any)._pendingDriverInitialization as
+        | Promise<void>
+        | null
+        | undefined;
+      if (pendingInit) {
+        await pendingInit.catch(() => undefined);
+      }
+      const driverSet = (instance as any)._driverSet as
+        | Promise<void>
+        | null
+        | undefined;
+      if (driverSet) {
+        await driverSet.catch(() => undefined);
+      }
+    } finally {
+      setItemSpy.mockRestore();
+      lengthSpy.mockRestore();
+    }
+  });
+
   it('maps setItems quota errors to QUOTA_EXCEEDED', async () => {
     const name = `quota-${Math.random().toString(36).slice(2)}`;
     const store = await createLocalStorageInstance(name, 'store');
