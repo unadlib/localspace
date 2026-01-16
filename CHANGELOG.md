@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.1] - 2026-01-16
+
+### Fixed
+
+- **localStorage `length()` errors**: Fixed `length()` and `key()` methods to correctly count only namespaced keys, preventing incorrect results when other data exists in localStorage.
+- **`pluginErrorPolicy` default**: Changed default `pluginErrorPolicy` from `'throw'` to `'warn'` for better fault tolerance in production environments.
+- **Config atomicity**: Improved configuration handling to ensure atomic updates and prevent race conditions during concurrent configuration changes.
+
+### Tests
+
+- Added regression tests for localStorage key enumeration edge cases.
+- Added tests for `pluginErrorPolicy` default behavior.
+
+---
+
 ## [1.0.0] - 2026-01-15
 
 ### 🎉 First Stable Release
