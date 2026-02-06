@@ -14,6 +14,20 @@ export type CompatibilitySuccessCallback<T = unknown> = (value: T) => void;
 export type CompatibilityErrorCallback = (error: Error) => void;
 
 /**
+ * React Native AsyncStorage-compatible adapter interface
+ */
+export interface ReactNativeAsyncStorage {
+  getItem(key: string): Promise<string | null>;
+  setItem(key: string, value: string): Promise<void>;
+  removeItem(key: string): Promise<void>;
+  clear?(): Promise<void>;
+  getAllKeys?(): Promise<string[]>;
+  multiGet?(keys: string[]): Promise<Array<[string, string | null]>>;
+  multiSet?(keyValuePairs: Array<[string, string]>): Promise<void>;
+  multiRemove?(keys: string[]): Promise<void>;
+}
+
+/**
  * Configuration options for localspace
  */
 export interface LocalSpaceConfig {
@@ -94,6 +108,13 @@ export interface LocalSpaceConfig {
    * Driver(s) to use (string or array of strings)
    */
   driver?: string | string[];
+
+  /**
+   * Optional React Native AsyncStorage adapter.
+   * When provided, the React Native AsyncStorage driver can be used even when
+   * automatic runtime detection is unavailable.
+   */
+  reactNativeAsyncStorage?: ReactNativeAsyncStorage;
 
   /**
    * Database name
@@ -296,6 +317,7 @@ export interface LocalSpaceInstance {
    */
   readonly INDEXEDDB: string;
   readonly LOCALSTORAGE: string;
+  readonly REACTNATIVEASYNCSTORAGE: string;
 
   /**
    * Configure localspace

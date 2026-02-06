@@ -21,7 +21,9 @@ describe('LocalSpace class tests', () => {
       const instance = new LocalSpace();
       const result = instance.config({ version: 'invalid' as any });
       expect(result).toBeInstanceOf(Error);
-      expect((result as Error).message).toContain('Database version must be a number');
+      expect((result as Error).message).toContain(
+        'Database version must be a number'
+      );
     });
 
     it('should not apply partial config when validation fails', () => {
@@ -35,7 +37,10 @@ describe('LocalSpace class tests', () => {
     });
 
     it('should get specific config value', () => {
-      const instance = new LocalSpace({ name: 'test-db', storeName: 'test-store' });
+      const instance = new LocalSpace({
+        name: 'test-db',
+        storeName: 'test-store',
+      });
       expect(instance.config('name')).toBe('test-db');
       expect(instance.config('storeName')).toBe('test-store');
     });
@@ -99,6 +104,16 @@ describe('LocalSpace class tests', () => {
       });
     });
 
+    it('does not register react-native driver by default', async () => {
+      const instance = new LocalSpace();
+      await expect(
+        instance.getDriver(instance.REACTNATIVEASYNCSTORAGE)
+      ).rejects.toMatchObject({
+        code: 'DRIVER_NOT_FOUND',
+        details: { driver: instance.REACTNATIVEASYNCSTORAGE },
+      });
+    });
+
     it('should get serializer', async () => {
       const instance = new LocalSpace();
       const serializer = await instance.getSerializer();
@@ -125,15 +140,47 @@ describe('LocalSpace class tests', () => {
       const originalSupports = instance.supports.bind(instance);
       instance.supports = vi.fn().mockReturnValue(false);
 
-      const attemptedDrivers = [instance.INDEXEDDB, instance.LOCALSTORAGE];
-      await expect(
-        instance.setDriver(attemptedDrivers)
-      ).rejects.toMatchObject({
+      const attemptedDrivers = [
+        instance.INDEXEDDB,
+        instance.LOCALSTORAGE,
+      ];
+      await expect(instance.setDriver(attemptedDrivers)).rejects.toMatchObject({
         code: 'DRIVER_UNAVAILABLE',
         details: { attemptedDrivers },
       });
 
       instance.supports = originalSupports;
+    });
+
+    it('should allow manual setDriver after pending initialization failure', async () => {
+      const instance = new LocalSpace();
+
+      const simulatedInitFailure = Promise.reject(
+        new Error('simulated driver init failure')
+      );
+      // Prevent unhandled rejection noise in test output.
+      simulatedInitFailure.catch(() => {});
+      (instance as unknown as { _pendingDriverInitialization: Promise<void> })
+        ._pendingDriverInitialization = simulatedInitFailure as Promise<void>;
+
+      const customDriver = {
+        _driver: 'recoverableDriver',
+        _initStorage: vi.fn().mockResolvedValue(undefined),
+        _support: true,
+        iterate: vi.fn().mockResolvedValue(undefined),
+        getItem: vi.fn().mockResolvedValue(null),
+        setItem: vi.fn().mockImplementation(async (_key, value) => value),
+        removeItem: vi.fn().mockResolvedValue(undefined),
+        clear: vi.fn().mockResolvedValue(undefined),
+        length: vi.fn().mockResolvedValue(0),
+        key: vi.fn().mockResolvedValue(null),
+        keys: vi.fn().mockResolvedValue([]),
+      };
+
+      await instance.defineDriver(customDriver);
+      await expect(instance.setDriver('recoverableDriver')).resolves.toBe(
+        undefined
+      );
     });
   });
 
@@ -190,7 +237,9 @@ describe('LocalSpace class tests', () => {
       } as any;
 
       const instance = new LocalSpace();
-      await expect(instance.defineDriver(invalidDriver)).rejects.toThrow('Custom driver not compliant');
+      await expect(instance.defineDriver(invalidDriver)).rejects.toThrow(
+        'Custom driver not compliant'
+      );
     });
 
     it('should reject driver without _driver property', async () => {
@@ -200,7 +249,9 @@ describe('LocalSpace class tests', () => {
       } as any;
 
       const instance = new LocalSpace();
-      await expect(instance.defineDriver(invalidDriver)).rejects.toThrow('Custom driver not compliant');
+      await expect(instance.defineDriver(invalidDriver)).rejects.toThrow(
+        'Custom driver not compliant'
+      );
     });
 
     it('should handle async _support check', async () => {
@@ -225,7 +276,9 @@ describe('LocalSpace class tests', () => {
     });
 
     it('should warn when redefining driver', async () => {
-      const consoleInfoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+      const consoleInfoSpy = vi
+        .spyOn(console, 'info')
+        .mockImplementation(() => {});
 
       const customDriver = {
         _driver: 'redefineDriver',

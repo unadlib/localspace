@@ -4,10 +4,21 @@ import replace from '@rollup/plugin-replace';
 import terser from '@rollup/plugin-terser';
 import pkg from './package.json';
 
-const input = './dist/index.js';
+const basePlugins = [
+  resolve(),
+  commonjs(),
+  replace({
+    __DEV__: 'false',
+    'process.env.NODE_ENV': JSON.stringify(
+      process.env.NODE_ENV || 'production'
+    ),
+    preventAssignment: true,
+  }),
+  terser(),
+];
 
-export default {
-  input,
+const indexBundle = {
+  input: './dist/index.js',
   output: [
     {
       format: 'cjs',
@@ -36,15 +47,27 @@ export default {
       exports: 'named',
     },
   ],
-  plugins: [
-    resolve(),
-    commonjs(),
-    replace({
-      __DEV__: 'false',
-      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
-      preventAssignment: true,
-    }),
-    terser(),
-  ],
+  plugins: basePlugins,
   external: [],
 };
+
+const reactNativeBundle = {
+  input: './dist/react-native.js',
+  output: [
+    {
+      format: 'cjs',
+      exports: 'named',
+      file: 'dist/react-native.cjs.js',
+      sourcemap: true,
+    },
+    {
+      format: 'es',
+      file: 'dist/react-native.esm.js',
+      sourcemap: true,
+    },
+  ],
+  plugins: basePlugins,
+  external: [],
+};
+
+export default [indexBundle, reactNativeBundle];

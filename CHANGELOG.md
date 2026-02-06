@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.0.2] - 2026-02-06
+
+### Added
+
+- **React Native AsyncStorage driver** with full LocalSpace API support:
+  - Single ops: `getItem`, `setItem`, `removeItem`, `clear`
+  - Batch ops: `setItems`, `getItems`, `removeItems` (uses `multiSet`/`multiGet`/`multiRemove` when available)
+  - Iteration/query ops: `iterate`, `keys`, `key`, `length`, `dropInstance`
+  - Transaction helper parity via sequential `runTransaction`
+- **New driver constant**: `REACTNATIVEASYNCSTORAGE` (`'reactNativeAsyncStorageWrapper'`)
+- **New config option**: `reactNativeAsyncStorage` for explicit adapter injection (recommended in React Native apps)
+- **Runtime detection** for `@react-native-async-storage/async-storage` (with legacy `react-native` AsyncStorage fallback)
+- **New opt-in subpath export**: `localspace/react-native` for installing/exporting the React Native driver.
+- **New one-step helper**: `createReactNativeInstance(baseInstance, options)` to create ready RN instances without manual driver wiring.
+
+### Changed
+
+- React Native AsyncStorage driver is no longer bundled in the default `localspace` entry.
+- Web-only consumers now receive smaller bundles unless they explicitly import `localspace/react-native`.
+- `installReactNativeAsyncStorageDriver()` is now idempotent and no longer redefines an already-registered RN driver.
+- `setDriver()` can now recover after a failed default driver initialization, enabling manual fallback to custom/RN drivers.
+
+### Tests
+
+- Added comprehensive unit tests for the React Native AsyncStorage driver path, including namespacing and batch behavior.
+
+---
+
 ## [1.0.1] - 2026-01-16
 
 ### Fixed

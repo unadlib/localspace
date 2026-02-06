@@ -140,6 +140,7 @@ function callWhenReady(
 export class LocalSpace implements LocalSpaceInstance {
   readonly INDEXEDDB = 'asyncStorage';
   readonly LOCALSTORAGE = 'localStorageWrapper';
+  readonly REACTNATIVEASYNCSTORAGE = 'reactNativeAsyncStorageWrapper';
 
   _defaultConfig: LocalSpaceConfig;
   _config: LocalSpaceConfig;
@@ -474,7 +475,7 @@ export class LocalSpace implements LocalSpaceInstance {
       this._pendingDriverInitialization &&
       !this._isRunningDefaultDriverSelection
     ) {
-      await this._pendingDriverInitialization;
+      await this._pendingDriverInitialization.catch(() => undefined);
     }
 
     if (!this._isRunningDefaultDriverSelection) {
@@ -617,7 +618,10 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   supports(driverName: string): boolean {
-    return !!DriverSupport[driverName];
+    return (
+      !!DriverSupport[driverName] ||
+      this._isDriverForcedByInstanceConfig(driverName)
+    );
   }
 
   _extend(libraryMethodsAndProperties: Partial<Driver>): void {
@@ -936,11 +940,21 @@ export class LocalSpace implements LocalSpaceInstance {
   _getSupportedDrivers(drivers: string[]): string[] {
     const supportedDrivers: string[] = [];
     for (const driverName of drivers) {
-      if (this.supports(driverName)) {
+      if (
+        this.supports(driverName) ||
+        this._isDriverForcedByInstanceConfig(driverName)
+      ) {
         supportedDrivers.push(driverName);
       }
     }
     return supportedDrivers;
+  }
+
+  private _isDriverForcedByInstanceConfig(driverName: string): boolean {
+    return (
+      driverName === this.REACTNATIVEASYNCSTORAGE &&
+      !!this._config.reactNativeAsyncStorage
+    );
   }
 
   private async _resolveSupportedDrivers(drivers: string[]): Promise<string[]> {
@@ -960,7 +974,10 @@ export class LocalSpace implements LocalSpaceInstance {
         }
       }
 
-      if (this.supports(driverName)) {
+      if (
+        this.supports(driverName) ||
+        this._isDriverForcedByInstanceConfig(driverName)
+      ) {
         supportedDrivers.push(driverName);
       }
     }

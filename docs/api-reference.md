@@ -264,7 +264,7 @@ Returns the current driver name.
 
 ```ts
 const driverName = localspace.driver();
-// 'asyncStorage' (IndexedDB) or 'localStorageWrapper'
+// 'asyncStorage' | 'localStorageWrapper'
 ```
 
 ### `setDriver(drivers: string | string[], callback?, errorCallback?): Promise<void>`
@@ -287,6 +287,30 @@ Checks if a driver is supported.
 if (localspace.supports(localspace.INDEXEDDB)) {
   console.log('IndexedDB is available');
 }
+```
+
+React Native AsyncStorage is opt-in from a separate entry:
+
+```ts
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import localspace from 'localspace';
+import { createReactNativeInstance } from 'localspace/react-native';
+
+const store = await createReactNativeInstance(localspace, {
+  name: 'myapp',
+  storeName: 'kv',
+  reactNativeAsyncStorage: AsyncStorage,
+});
+```
+
+For existing instances, use:
+
+```ts
+import localspace from 'localspace';
+import { installReactNativeAsyncStorageDriver } from 'localspace/react-native';
+
+await installReactNativeAsyncStorageDriver(localspace);
+await localspace.setDriver(localspace.REACTNATIVEASYNCSTORAGE);
 ```
 
 ### `defineDriver(driver: Driver, callback?, errorCallback?): Promise<void>`
@@ -413,6 +437,7 @@ interface LocalSpaceConfig {
 
   // Driver configuration
   driver?: string | string[]; // Driver(s) to use
+  reactNativeAsyncStorage?: ReactNativeAsyncStorage; // Optional adapter used by the react-native driver
 
   // IndexedDB specific
   durability?: 'relaxed' | 'strict'; // Transaction durability hint

@@ -26,6 +26,16 @@
         "types": "./dist/index.d.ts",
         "default": "./dist/index.esm.js"
       }
+    },
+    "./react-native": {
+      "require": {
+        "types": "./dist/react-native.d.ts",
+        "default": "./dist/react-native.cjs.js"
+      },
+      "default": {
+        "types": "./dist/react-native.d.ts",
+        "default": "./dist/react-native.esm.js"
+      }
     }
   },
   "sideEffects": false,

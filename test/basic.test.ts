@@ -6,9 +6,12 @@ describe('localspace basic API', () => {
     await localspace.clear();
   });
 
-  it('should export INDEXEDDB and LOCALSTORAGE constants', () => {
+  it('should export driver constants', () => {
     expect(localspace.INDEXEDDB).toBe('asyncStorage');
     expect(localspace.LOCALSTORAGE).toBe('localStorageWrapper');
+    expect(localspace.REACTNATIVEASYNCSTORAGE).toBe(
+      'reactNativeAsyncStorageWrapper'
+    );
   });
 
   it('should set and get a string value', async () => {
@@ -131,7 +134,7 @@ describe('localspace basic API', () => {
   it('should create new instance', async () => {
     const instance = localspace.createInstance({
       name: 'testDB',
-      storeName: 'testStore'
+      storeName: 'testStore',
     });
 
     await instance.setItem('instanceKey', 'instanceValue');

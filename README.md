@@ -150,11 +150,38 @@ localspace.getItem('user', (error, value) => {
 ### Driver Selection
 
 ```ts
-// Prefer IndexedDB with localStorage fallback
+// Web fallback order (default bundled drivers)
 await localspace.setDriver([localspace.INDEXEDDB, localspace.LOCALSTORAGE]);
 
 // Check current driver
-console.log(localspace.driver()); // 'asyncStorage' or 'localStorageWrapper'
+console.log(localspace.driver());
+// 'asyncStorage' | 'localStorageWrapper'
+```
+
+### React Native AsyncStorage
+
+```ts
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import localspace from 'localspace';
+import { createReactNativeInstance } from 'localspace/react-native';
+
+const mobileStore = await createReactNativeInstance(localspace, {
+  name: 'myapp',
+  storeName: 'kv',
+  reactNativeAsyncStorage: AsyncStorage,
+});
+```
+
+The default `localspace` entry does not bundle the React Native driver; it is included only when importing `localspace/react-native`. Explicit `reactNativeAsyncStorage` injection is recommended.
+
+Advanced usage is still available:
+
+```ts
+import localspace from 'localspace';
+import { installReactNativeAsyncStorageDriver } from 'localspace/react-native';
+
+await installReactNativeAsyncStorageDriver(localspace);
+await localspace.setDriver(localspace.REACTNATIVEASYNCSTORAGE);
 ```
 
 📖 **Full API Reference:** [docs/api-reference.md](./docs/api-reference.md)
@@ -292,6 +319,18 @@ const store = localspace.createInstance({
 });
 ```
 
+```ts
+// React Native one-step instance
+import localspace from 'localspace';
+import { createReactNativeInstance } from 'localspace/react-native';
+
+const mobileStore = await createReactNativeInstance(localspace, {
+  name: 'myapp',
+  storeName: 'data',
+  reactNativeAsyncStorage: AsyncStorage,
+});
+```
+
 📖 **Full Configuration Options:** [docs/api-reference.md#configuration-options](./docs/api-reference.md#configuration-options)
 
 ---
@@ -322,7 +361,8 @@ const store = localspace.createInstance({
 ## Compatibility
 
 - **Browsers:** Modern Chromium/Edge, Firefox, Safari
-- **Drivers:** IndexedDB (primary), localStorage (fallback)
+- **Drivers:** IndexedDB (primary), localStorage
+- **React Native:** AsyncStorage driver available via `localspace/react-native` opt-in entry
 - **WebSQL:** Not supported (migrate to IndexedDB)
 - **Node/SSR:** Custom driver required
 
@@ -344,6 +384,7 @@ const store = localspace.createInstance({
 ### Complete ✅
 
 - [x] IndexedDB and localStorage drivers
+- [x] React Native AsyncStorage driver
 - [x] Full localForage API parity
 - [x] TypeScript-first implementation
 - [x] Batch operations & write coalescing
@@ -353,7 +394,7 @@ const store = localspace.createInstance({
 
 - [ ] OPFS driver (Origin Private File System)
 - [ ] Node.js (File system, SQLite)
-- [ ] React Native (AsyncStorage, SQLite)
+- [ ] React Native SQLite driver
 - [ ] Deno (Native KV store)
 
 ---
