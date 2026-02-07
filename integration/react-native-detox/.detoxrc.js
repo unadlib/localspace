@@ -1,3 +1,5 @@
+const iosDeviceType = process.env.DETOX_IOS_DEVICE_TYPE || 'iPhone 16';
+
 /** @type {Detox.DetoxConfig} */
 module.exports = {
   testRunner: {
@@ -31,7 +33,7 @@ module.exports = {
     simulator: {
       type: 'ios.simulator',
       device: {
-        type: 'iPhone 15',
+        type: iosDeviceType,
       },
     },
     emulator: {

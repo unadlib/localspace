@@ -83,6 +83,21 @@ jobs:
           brew tap wix/brew
           brew install applesimutils
 
+      - name: Detect iOS simulator device
+        run: |
+          IOS_DEVICE_TYPE="$(
+            xcrun simctl list devicetypes \
+              | sed -n 's/^[[:space:]]*\(iPhone[^()]*\) (com\.apple\.CoreSimulator\.SimDeviceType\..*)$/\1/p' \
+              | head -n 1
+          )"
+          if [ -z "$IOS_DEVICE_TYPE" ]; then
+            echo "Unable to detect an available iPhone simulator type."
+            xcrun simctl list devicetypes
+            exit 1
+          fi
+          echo "Using iOS simulator device type: $IOS_DEVICE_TYPE"
+          echo "DETOX_IOS_DEVICE_TYPE=$IOS_DEVICE_TYPE" >> "$GITHUB_ENV"
+
       - name: Install JS dependencies
         run: yarn install --frozen-lockfile --production=false
 
