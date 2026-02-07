@@ -1,0 +1,177 @@
+name: Detox Mobile E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/detox-mobile.yml
+      - integration/react-native-detox/**
+  pull_request:
+    paths:
+      - .github/workflows/detox-mobile.yml
+      - integration/react-native-detox/**
+
+concurrency:
+  group: detox-mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DETOX_APP_DIR: integration/react-native-detox
+  NODE_VERSION: '20'
+
+jobs:
+  detect-app:
+    runs-on: ubuntu-latest
+    outputs:
+      app_exists: ${{ steps.detect.outputs.app_exists }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect Detox fixture app
+        id: detect
+        shell: bash
+        run: |
+          if [ -f "${DETOX_APP_DIR}/package.json" ]; then
+            echo "app_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "app_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Explain missing fixture
+        if: steps.detect.outputs.app_exists == 'false'
+        run: |
+          echo "Detox fixture app not found at ${DETOX_APP_DIR}/package.json."
+          echo "iOS and Android Detox jobs will be skipped."
+
+  ios-sim:
+    name: Detox iOS Simulator
+    needs: detect-app
+    if: needs.detect-app.outputs.app_exists == 'true'
+    runs-on: macos-14
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ env.DETOX_APP_DIR }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install root dependencies
+        working-directory: .
+        run: yarn install --frozen-lockfile
+
+      - name: Build localspace package
+        working-directory: .
+        run: yarn build
+
+      - name: Install applesimutils
+        run: |
+          brew tap wix/brew
+          brew install applesimutils
+
+      - name: Install JS dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Install CocoaPods (if present)
+        run: |
+          if [ -f "ios/Podfile" ]; then
+            cd ios
+            pod install --repo-update
+          fi
+
+      - name: Build iOS app for Detox
+        run: yarn detox build -c ios.sim.release
+
+      - name: Run Detox tests on iOS simulator
+        run: yarn detox test -c ios.sim.release --headless --cleanup
+
+      - name: Upload iOS artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: detox-ios-artifacts
+          path: |
+            ${{ env.DETOX_APP_DIR }}/artifacts
+            ${{ env.DETOX_APP_DIR }}/.detox
+          if-no-files-found: ignore
+
+  android-emu:
+    name: Detox Android Emulator
+    needs: detect-app
+    if: needs.detect-app.outputs.app_exists == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ env.DETOX_APP_DIR }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install root dependencies
+        working-directory: .
+        run: yarn install --frozen-lockfile
+
+      - name: Build localspace package
+        working-directory: .
+        run: yarn build
+
+      - name: Install JS dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build and run Detox on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+            -camera-back none
+          script: |
+            cd "${DETOX_APP_DIR}"
+            yarn detox build -c android.emu.release
+            yarn detox test -c android.emu.release --headless --cleanup
+
+      - name: Upload Android artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: detox-android-artifacts
+          path: |
+            ${{ env.DETOX_APP_DIR }}/artifacts
+            ${{ env.DETOX_APP_DIR }}/.detox
+          if-no-files-found: ignore
+
+  not-configured:
+    name: Detox fixture not configured
+    needs: detect-app
+    if: needs.detect-app.outputs.app_exists == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip notice
+        run: |
+          echo "Skipped Detox jobs: fixture app is missing."
+          echo "Add integration/react-native-detox and follow integration/react-native-detox/README.md."

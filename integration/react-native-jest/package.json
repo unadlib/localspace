@@ -1,0 +1,16 @@
+{
+  "name": "localspace-rn-integration",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "jest --runInBand"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "localspace": "file:../.."
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "jest": "^29.7.0"
+  }
+}

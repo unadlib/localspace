@@ -184,6 +184,20 @@ await installReactNativeAsyncStorageDriver(localspace);
 await localspace.setDriver(localspace.REACTNATIVEASYNCSTORAGE);
 ```
 
+Integration smoke (official AsyncStorage Jest mock):
+
+```bash
+yarn test:rn:integration
+```
+
+See `integration/react-native-jest/README.md` for details.
+
+GitHub Actions Detox workflow template (real simulator/emulator runtime):
+
+- Workflow: `.github/workflows/detox-mobile.yml`
+- Fixture app folder: `integration/react-native-detox/`
+- Fixture README: `integration/react-native-detox/README.md`
+
 📖 **Full API Reference:** [docs/api-reference.md](./docs/api-reference.md)
 
 ---

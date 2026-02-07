@@ -25,6 +25,10 @@
 ### Tests
 
 - Added comprehensive unit tests for the React Native AsyncStorage driver path, including namespacing and batch behavior.
+- Added runtime detection tests for global/module-based AsyncStorage discovery and unavailable-runtime fallback behavior.
+- Added isolated RN integration smoke harness at `integration/react-native-jest/` using the official AsyncStorage Jest mock.
+- Added GitHub Actions Detox workflow template (`.github/workflows/detox-mobile.yml`) with iOS simulator + Android emulator jobs and auto-skip when fixture app is not configured.
+- Added a real React Native Detox fixture app at `integration/react-native-detox/` with localspace AsyncStorage smoke e2e.
 
 ---
 

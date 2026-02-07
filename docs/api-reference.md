@@ -313,6 +313,9 @@ await installReactNativeAsyncStorageDriver(localspace);
 await localspace.setDriver(localspace.REACTNATIVEASYNCSTORAGE);
 ```
 
+Integration smoke test harness (official AsyncStorage Jest mock) lives in `integration/react-native-jest/`.
+Real device-runtime template (Detox on simulator/emulator) lives in `integration/react-native-detox/` with CI workflow `.github/workflows/detox-mobile.yml`.
+
 ### `defineDriver(driver: Driver, callback?, errorCallback?): Promise<void>`
 
 Registers a custom driver.
