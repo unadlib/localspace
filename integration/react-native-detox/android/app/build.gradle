@@ -71,6 +71,9 @@ def enableProguardInReleaseBuilds = false
  * this variant is about 6MiB larger per architecture than default.
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
+def detoxVersion = new groovy.json.JsonSlurper()
+    .parseText(file("$rootDir/../node_modules/detox/package.json").text)
+    .version
 
 android {
     ndkVersion rootProject.ext.ndkVersion
@@ -112,7 +115,7 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
-    androidTestImplementation("com.wix:detox:+")
+    androidTestImplementation("com.wix:detox:${detoxVersion}")
     // Android 12+ requires android:exported on test activities.
     // Keep androidx.test artifacts on versions that include the manifest fix.
     androidTestImplementation("androidx.test:core:1.6.1")
