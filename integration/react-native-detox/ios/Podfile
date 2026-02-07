@@ -23,9 +23,6 @@ target 'LocalspaceDetoxFixture' do
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
-  # Required by Detox at runtime in the app target.
-  pod 'Detox', :path => '../node_modules/detox', :configurations => ['Debug', 'Release']
-
   post_install do |installer|
     react_native_post_install(
       installer,

@@ -9,7 +9,6 @@
     "test:ios:detox": "detox test -c ios.sim.release --headless --cleanup",
     "build:android:detox": "detox build -c android.emu.release",
     "test:android:detox": "detox test -c android.emu.release --headless --cleanup",
-    "detox": "detox test -c ios.sim.release --headless --cleanup",
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest"

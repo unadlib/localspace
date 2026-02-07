@@ -84,7 +84,7 @@ jobs:
           brew install applesimutils
 
       - name: Install JS dependencies
-        run: yarn install --frozen-lockfile
+        run: yarn install --frozen-lockfile --production=false
 
       - name: Install CocoaPods (if present)
         run: |
@@ -94,10 +94,10 @@ jobs:
           fi
 
       - name: Build iOS app for Detox
-        run: yarn detox build -c ios.sim.release
+        run: yarn build:ios:detox
 
       - name: Run Detox tests on iOS simulator
-        run: yarn detox test -c ios.sim.release --headless --cleanup
+        run: yarn test:ios:detox
 
       - name: Upload iOS artifacts on failure
         if: failure()
@@ -143,7 +143,7 @@ jobs:
         run: yarn build
 
       - name: Install JS dependencies
-        run: yarn install --frozen-lockfile
+        run: yarn install --frozen-lockfile --production=false
 
       - name: Build and run Detox on Android emulator
         uses: reactivecircus/android-emulator-runner@v2
@@ -155,10 +155,7 @@ jobs:
           emulator-options: >-
             -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
             -camera-back none
-          script: |
-            cd "${DETOX_APP_DIR}"
-            yarn detox build -c android.emu.release
-            yarn detox test -c android.emu.release --headless --cleanup
+          script: cd "${GITHUB_WORKSPACE}/${DETOX_APP_DIR}" && yarn build:android:detox && yarn test:android:detox
 
       - name: Upload Android artifacts on failure
         if: failure()
