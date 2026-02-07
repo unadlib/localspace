@@ -50,7 +50,7 @@ jobs:
     name: Detox iOS Simulator
     needs: detect-app
     if: needs.detect-app.outputs.app_exists == 'true'
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 75
     defaults:
       run:
@@ -64,6 +64,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
       - name: Install root dependencies
         working-directory: .
