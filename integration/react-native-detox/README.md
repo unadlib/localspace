@@ -4,13 +4,14 @@ This is a real React Native fixture app used by:
 
 - `.github/workflows/detox-mobile.yml`
 
-It validates `localspace/react-native` in simulator/emulator runtime via Detox.
+It validates `localspace/react-native` in iOS simulator runtime via Detox.
 
 ## What This App Tests
 
 - `createReactNativeInstance()` with real `@react-native-async-storage/async-storage`
 - basic write/read smoke path through localspace
-- Android and iOS Detox boot + interaction flow
+- iOS Detox boot + interaction flow in CI
+- Android Detox path for local/manual verification
 
 ## Detox Configurations
 
@@ -51,5 +52,6 @@ yarn test:android:detox
 ## CI Notes
 
 - GitHub workflow uses this directory as `DETOX_APP_DIR`.
-- Android job uses `reactivecircus/android-emulator-runner`.
-- iOS job uses `macos-14` and installs `applesimutils`.
+- CI keeps iOS Detox as the blocking runtime check.
+- Android Detox can still be run locally with the commands above.
+- iOS job uses `macos-latest` and installs `applesimutils`.

@@ -1,4 +1,4 @@
-name: Detox Mobile E2E
+name: Detox iOS E2E
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ on:
       - integration/react-native-detox/**
 
 concurrency:
-  group: detox-mobile-${{ github.ref }}
+  group: detox-ios-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -44,7 +44,7 @@ jobs:
         if: steps.detect.outputs.app_exists == 'false'
         run: |
           echo "Detox fixture app not found at ${DETOX_APP_DIR}/package.json."
-          echo "iOS and Android Detox jobs will be skipped."
+          echo "iOS Detox job will be skipped."
 
   ios-sim:
     name: Detox iOS Simulator
@@ -119,64 +119,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: detox-ios-artifacts
-          path: |
-            ${{ env.DETOX_APP_DIR }}/artifacts
-            ${{ env.DETOX_APP_DIR }}/.detox
-          if-no-files-found: ignore
-
-  android-emu:
-    name: Detox Android Emulator
-    needs: detect-app
-    if: needs.detect-app.outputs.app_exists == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
-    defaults:
-      run:
-        shell: bash
-        working-directory: ${{ env.DETOX_APP_DIR }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Install root dependencies
-        working-directory: .
-        run: yarn install --frozen-lockfile
-
-      - name: Build localspace package
-        working-directory: .
-        run: yarn build
-
-      - name: Install JS dependencies
-        run: yarn install --frozen-lockfile --production=false
-
-      - name: Build and run Detox on Android emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          arch: x86_64
-          profile: pixel_6
-          disable-animations: true
-          emulator-options: >-
-            -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-            -camera-back none
-          script: cd "${GITHUB_WORKSPACE}/${DETOX_APP_DIR}" && yarn build:android:detox && yarn test:android:detox
-
-      - name: Upload Android artifacts on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: detox-android-artifacts
           path: |
             ${{ env.DETOX_APP_DIR }}/artifacts
             ${{ env.DETOX_APP_DIR }}/.detox
