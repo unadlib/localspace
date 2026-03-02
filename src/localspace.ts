@@ -44,6 +44,7 @@ const DefaultDriverOrder = [
   DefaultDrivers.INDEXEDDB._driver,
   DefaultDrivers.LOCALSTORAGE._driver,
 ];
+const PendingDefaultDriverDefinitions: Record<string, Promise<void>> = {};
 
 const OptionalDriverMethods = [
   'dropInstance',
@@ -137,6 +138,30 @@ function callWhenReady(
   } as ReadyWrappedMethod;
 }
 
+function defineDefaultDriverOnce(
+  definer: { defineDriver: (driver: Driver) => Promise<void> },
+  driver: Driver
+): Promise<void> {
+  const driverName = driver._driver;
+
+  if (DefinedDrivers[driverName]) {
+    return Promise.resolve();
+  }
+
+  const pendingDefinition = PendingDefaultDriverDefinitions[driverName];
+  if (pendingDefinition) {
+    return pendingDefinition;
+  }
+
+  const definitionPromise = definer.defineDriver(driver).finally(() => {
+    if (PendingDefaultDriverDefinitions[driverName] === definitionPromise) {
+      delete PendingDefaultDriverDefinitions[driverName];
+    }
+  });
+  PendingDefaultDriverDefinitions[driverName] = definitionPromise;
+  return definitionPromise;
+}
+
 export class LocalSpace implements LocalSpaceInstance {
   readonly INDEXEDDB = 'asyncStorage';
   readonly LOCALSTORAGE = 'localStorageWrapper';
@@ -169,16 +194,14 @@ export class LocalSpace implements LocalSpaceInstance {
         const driverName = driver._driver;
         (this as unknown as Record<string, string>)[driverTypeKey] = driverName;
 
-        if (!DefinedDrivers[driverName]) {
-          driverInitializationPromises.push(
-            this.defineDriver(driver).catch((error) => {
-              console.warn(
-                `Failed to define LocalSpace driver "${driverName}"`,
-                error
-              );
-            })
-          );
-        }
+        driverInitializationPromises.push(
+          defineDefaultDriverOnce(this, driver).catch((error) => {
+            console.warn(
+              `Failed to define LocalSpace driver "${driverName}"`,
+              error
+            );
+          })
+        );
       }
     }
 

@@ -75,4 +75,38 @@ describe('driver initialization ordering', () => {
       vi.resetModules();
     }
   });
+
+  it('does not redefine default drivers when creating instances before singleton ready', async () => {
+    vi.resetModules();
+
+    const userAgentSpy = vi
+      .spyOn(window.navigator, 'userAgent', 'get')
+      .mockReturnValue('Safari/605.1.15');
+    const consoleInfoSpy = vi
+      .spyOn(console, 'info')
+      .mockImplementation(() => {});
+
+    try {
+      const { default: localspace } = await import('../src/index');
+
+      const instances = Array.from({ length: 4 }, (_, index) =>
+        localspace.createInstance({
+          name: `singleton-race-${index}`,
+          storeName: `singleton_race_${index}`,
+        })
+      );
+
+      await Promise.all(instances.map((instance) => instance.ready()));
+
+      const redefineCalls = consoleInfoSpy.mock.calls.filter(([message]) =>
+        typeof message === 'string' &&
+        message.includes('Redefining LocalSpace driver')
+      );
+      expect(redefineCalls).toHaveLength(0);
+    } finally {
+      consoleInfoSpy.mockRestore();
+      userAgentSpy.mockRestore();
+      vi.resetModules();
+    }
+  });
 });
