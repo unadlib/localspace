@@ -269,6 +269,61 @@ describe('IndexedDB driver tests', () => {
 
       await coalesced.dropInstance();
     });
+
+    it('keeps coalesced writes isolated per store within the same database', async () => {
+      const dbName = `coalesce-multi-store-${Math.random().toString(36).slice(2)}`;
+      const storeA = localspace.createInstance({
+        name: dbName,
+        storeName: 'storeA',
+        coalesceWrites: true,
+        coalesceWindowMs: 25,
+      });
+      const storeB = localspace.createInstance({
+        name: dbName,
+        storeName: 'storeB',
+        coalesceWrites: true,
+        coalesceWindowMs: 25,
+      });
+
+      await storeA.setDriver([storeA.INDEXEDDB]);
+      await storeB.setDriver([storeB.INDEXEDDB]);
+      await Promise.all([storeA.ready(), storeB.ready()]);
+      await Promise.all([storeA.clear(), storeB.clear()]);
+
+      try {
+        await Promise.all([
+          ...Array.from({ length: 10 }, (_, i) =>
+            storeA.setItem(`entry-A-${i}`, `A${i}`)
+          ),
+          ...Array.from({ length: 10 }, (_, i) =>
+            storeB.setItem(`entry-B-${i}`, `B${i}`)
+          ),
+        ]);
+
+        expect(await storeA.length()).toBe(10);
+        expect(await storeB.length()).toBe(10);
+
+        const [keysA, keysB] = await Promise.all([storeA.keys(), storeB.keys()]);
+        expect(keysA.sort()).toEqual(
+          Array.from({ length: 10 }, (_, i) => `entry-A-${i}`)
+        );
+        expect(keysB.sort()).toEqual(
+          Array.from({ length: 10 }, (_, i) => `entry-B-${i}`)
+        );
+
+        expect(await storeA.getItem('entry-B-0')).toBe(null);
+        expect(await storeB.getItem('entry-A-0')).toBe(null);
+
+        const statsA = storeA.getPerformanceStats?.();
+        const statsB = storeB.getPerformanceStats?.();
+        expect(statsA).toBeDefined();
+        expect(statsB).toBeDefined();
+        expect(statsA!.totalWrites).toBe(10);
+        expect(statsB!.totalWrites).toBe(10);
+      } finally {
+        await storeA.dropInstance({ name: dbName });
+      }
+    });
   });
 
   describe('Callback support', () => {
