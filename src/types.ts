@@ -317,6 +317,7 @@ export interface LocalSpaceInstance {
    */
   readonly INDEXEDDB: string;
   readonly LOCALSTORAGE: string;
+  readonly MEMORY: string;
   readonly REACTNATIVEASYNCSTORAGE: string;
 
   /**

@@ -56,6 +56,22 @@ const supportsBlobs = await localspace.supports(localspace.INDEXEDDB);
 
 **WebSQL is intentionally unsupported.** Migrate any WebSQL-only code to IndexedDB or localStorage before switching.
 
+### 4. Memory Fallback Is Opt-In
+
+localspace includes a built-in memory driver for cases where browser persistent
+storage is blocked. Add it explicitly as the last fallback:
+
+```ts
+await localspace.setDriver([
+  localspace.INDEXEDDB,
+  localspace.LOCALSTORAGE,
+  localspace.MEMORY,
+]);
+```
+
+Memory data is runtime-only and is lost on page reload, so it is not enabled by
+default.
+
 ---
 
 ## Enable Compatibility Mode

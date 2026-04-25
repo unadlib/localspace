@@ -29,16 +29,19 @@ import { createLocalSpaceError, LocalSpaceError } from './errors';
 import serializer from './utils/serializer';
 import idbDriver from './drivers/indexeddb';
 import localstorageDriver from './drivers/localstorage';
+import memoryDriver from './drivers/memory';
 import { PluginManager } from './core/plugin-manager';
 
 // Shared drivers across all instances
 const DefinedDrivers: DefinedDriversMap = {};
 const DriverSupport: DriverSupportMap = {};
 
-const DefaultDrivers: Record<'INDEXEDDB' | 'LOCALSTORAGE', Driver> = {
-  INDEXEDDB: idbDriver,
-  LOCALSTORAGE: localstorageDriver,
-};
+const DefaultDrivers: Record<'INDEXEDDB' | 'LOCALSTORAGE' | 'MEMORY', Driver> =
+  {
+    INDEXEDDB: idbDriver,
+    LOCALSTORAGE: localstorageDriver,
+    MEMORY: memoryDriver,
+  };
 
 const DefaultDriverOrder = [
   DefaultDrivers.INDEXEDDB._driver,
@@ -165,6 +168,7 @@ function defineDefaultDriverOnce(
 export class LocalSpace implements LocalSpaceInstance {
   readonly INDEXEDDB = 'asyncStorage';
   readonly LOCALSTORAGE = 'localStorageWrapper';
+  readonly MEMORY = 'memoryStorageWrapper';
   readonly REACTNATIVEASYNCSTORAGE = 'reactNativeAsyncStorageWrapper';
 
   _defaultConfig: LocalSpaceConfig;
@@ -545,6 +549,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
     const extendSelfWithDriver = async (driver: Driver) => {
       this._extend(driver);
+      this._driver = driver._driver;
       setDriverToConfig();
 
       const driverInstance = this as DriverAugmentedInstance;
@@ -585,9 +590,6 @@ export class LocalSpace implements LocalSpaceInstance {
             'No available storage method found.',
             { attemptedDrivers: supportedDrivers }
           );
-          this._driverSet = Promise.resolve().then<never>(() => {
-            throw error;
-          });
           throw error;
         };
 
@@ -619,9 +621,6 @@ export class LocalSpace implements LocalSpaceInstance {
           'No available storage method found.',
           { attemptedDrivers: supportedDrivers }
         );
-        this._driverSet = Promise.resolve().then<never>(() => {
-          throw error;
-        });
         throw error;
       });
 
