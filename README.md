@@ -158,6 +158,23 @@ console.log(localspace.driver());
 // 'asyncStorage' | 'localStorageWrapper'
 ```
 
+### In-Memory Fallback
+
+When browser persistent storage is unavailable (for example, cookies/site data
+are blocked), opt in to the memory driver explicitly:
+
+```ts
+await localspace.setDriver([
+  localspace.INDEXEDDB,
+  localspace.LOCALSTORAGE,
+  localspace.MEMORY,
+]);
+```
+
+The memory driver is runtime-only: data is shared by `name`/`storeName` while the
+page is alive and is lost on reload. It is not part of the default fallback order
+so persistent-storage failures remain visible unless you opt in.
+
 ### React Native AsyncStorage
 
 ```ts
@@ -318,6 +335,7 @@ const store = localspace.createInstance({
 
   // Driver
   driver: [localspace.INDEXEDDB, localspace.LOCALSTORAGE],
+  // Add localspace.MEMORY explicitly for runtime-only fallback.
 
   // IndexedDB performance
   durability: 'relaxed', // 'relaxed' (fast) or 'strict'
@@ -365,6 +383,7 @@ const mobileStore = await createReactNativeInstance(localspace, {
 | --------------------------- | ------------------------------------------------------ |
 | Driver not ready            | Call `await localspace.ready()` before first operation |
 | Quota errors                | Check `error.code === 'QUOTA_EXCEEDED'`                |
+| Persistent storage blocked  | Add `localspace.MEMORY` as an explicit fallback        |
 | Plugin errors swallowed     | Set `pluginErrorPolicy: 'strict'`                      |
 | Stale reads with coalescing | Use `coalesceReadConsistency: 'strong'` (default)      |
 
@@ -375,7 +394,7 @@ const mobileStore = await createReactNativeInstance(localspace, {
 ## Compatibility
 
 - **Browsers:** Modern Chromium/Edge, Firefox, Safari
-- **Drivers:** IndexedDB (primary), localStorage
+- **Drivers:** IndexedDB (primary), localStorage, memory (opt-in fallback)
 - **React Native:** AsyncStorage driver available via `localspace/react-native` opt-in entry
 - **WebSQL:** Not supported (migrate to IndexedDB)
 - **Node/SSR:** Custom driver required
@@ -398,6 +417,7 @@ const mobileStore = await createReactNativeInstance(localspace, {
 ### Complete ✅
 
 - [x] IndexedDB and localStorage drivers
+- [x] Opt-in memory fallback driver
 - [x] React Native AsyncStorage driver
 - [x] Full localForage API parity
 - [x] TypeScript-first implementation

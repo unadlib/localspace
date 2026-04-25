@@ -277,7 +277,19 @@ await localspace.setDriver(localspace.INDEXEDDB);
 
 // With fallback
 await localspace.setDriver([localspace.INDEXEDDB, localspace.LOCALSTORAGE]);
+
+// Runtime-only fallback when persistent browser storage is blocked
+await localspace.setDriver([
+  localspace.INDEXEDDB,
+  localspace.LOCALSTORAGE,
+  localspace.MEMORY,
+]);
 ```
+
+`localspace.MEMORY` uses the built-in in-memory driver
+(`'memoryStorageWrapper'`). It is shared by `name`/`storeName` during the current
+page lifetime, supports the full storage API, and loses data on reload. It is
+opt-in and is not included in the default driver order.
 
 ### `supports(driverName: string): boolean`
 
@@ -365,6 +377,12 @@ Returns a registered driver by name.
 const idbDriver = await localspace.getDriver(localspace.INDEXEDDB);
 ```
 
+Built-in web driver exports are also available:
+
+```ts
+import { indexedDBDriver, localStorageDriver, memoryDriver } from 'localspace';
+```
+
 ### `dropInstance(options?: LocalSpaceConfig, callback?: Callback<void>): Promise<void>`
 
 Deletes the database or specific store.
@@ -440,6 +458,7 @@ interface LocalSpaceConfig {
 
   // Driver configuration
   driver?: string | string[]; // Driver(s) to use
+  // Built-ins: localspace.INDEXEDDB, localspace.LOCALSTORAGE, localspace.MEMORY
   reactNativeAsyncStorage?: ReactNativeAsyncStorage; // Optional adapter used by the react-native driver
 
   // IndexedDB specific

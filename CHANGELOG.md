@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Built-in opt-in memory driver (`MEMORY` / `'memoryStorageWrapper'`) for
+  runtime-only fallback when browser persistent storage is unavailable.
+
+### Fixed
+
+- Prevented failed driver initialization from creating an extra internal
+  unhandled rejection after callers already catch the public operation error.
+
+---
+
 ## [1.1.0] - 2026-02-07
 
 ### Added

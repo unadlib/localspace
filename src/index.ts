@@ -52,6 +52,7 @@ export { LocalSpace };
 // Export drivers
 export { default as indexedDBDriver } from './drivers/indexeddb';
 export { default as localStorageDriver } from './drivers/localstorage';
+export { default as memoryDriver } from './drivers/memory';
 
 // Export serializer
 export { default as serializer } from './utils/serializer';

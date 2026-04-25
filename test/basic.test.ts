@@ -9,6 +9,7 @@ describe('localspace basic API', () => {
   it('should export driver constants', () => {
     expect(localspace.INDEXEDDB).toBe('asyncStorage');
     expect(localspace.LOCALSTORAGE).toBe('localStorageWrapper');
+    expect(localspace.MEMORY).toBe('memoryStorageWrapper');
     expect(localspace.REACTNATIVEASYNCSTORAGE).toBe(
       'reactNativeAsyncStorageWrapper'
     );

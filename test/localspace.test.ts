@@ -140,10 +140,7 @@ describe('LocalSpace class tests', () => {
       const originalSupports = instance.supports.bind(instance);
       instance.supports = vi.fn().mockReturnValue(false);
 
-      const attemptedDrivers = [
-        instance.INDEXEDDB,
-        instance.LOCALSTORAGE,
-      ];
+      const attemptedDrivers = [instance.INDEXEDDB, instance.LOCALSTORAGE];
       await expect(instance.setDriver(attemptedDrivers)).rejects.toMatchObject({
         code: 'DRIVER_UNAVAILABLE',
         details: { attemptedDrivers },
@@ -160,8 +157,9 @@ describe('LocalSpace class tests', () => {
       );
       // Prevent unhandled rejection noise in test output.
       simulatedInitFailure.catch(() => {});
-      (instance as unknown as { _pendingDriverInitialization: Promise<void> })
-        ._pendingDriverInitialization = simulatedInitFailure as Promise<void>;
+      (
+        instance as unknown as { _pendingDriverInitialization: Promise<void> }
+      )._pendingDriverInitialization = simulatedInitFailure as Promise<void>;
 
       const customDriver = {
         _driver: 'recoverableDriver',
@@ -409,6 +407,47 @@ describe('LocalSpace class tests', () => {
       await expect(
         instance.setDriver(['non-existent-driver' as any])
       ).rejects.toThrow('No available storage method found');
+    });
+
+    it('does not leak an unhandled rejection when all drivers fail during ready', async () => {
+      const instance = new LocalSpace();
+      await instance.ready();
+
+      const createFailingDriver = (driverName: string) => ({
+        _driver: driverName,
+        _initStorage: vi.fn().mockRejectedValue(new Error('blocked storage')),
+        _support: true,
+        iterate: vi.fn().mockResolvedValue(undefined),
+        getItem: vi.fn().mockResolvedValue(null),
+        setItem: vi.fn().mockImplementation(async (_key, value) => value),
+        removeItem: vi.fn().mockResolvedValue(undefined),
+        clear: vi.fn().mockResolvedValue(undefined),
+        length: vi.fn().mockResolvedValue(0),
+        key: vi.fn().mockResolvedValue(null),
+        keys: vi.fn().mockResolvedValue([]),
+      });
+
+      const driverA = `failing-a-${Math.random().toString(36).slice(2)}`;
+      const driverB = `failing-b-${Math.random().toString(36).slice(2)}`;
+      await instance.defineDriver(createFailingDriver(driverA));
+      await instance.defineDriver(createFailingDriver(driverB));
+      await instance.setDriver([driverA, driverB]);
+
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => {
+        unhandled.push(reason);
+      };
+
+      process.on('unhandledRejection', onUnhandled);
+      try {
+        await expect(instance.getItem('foo')).rejects.toMatchObject({
+          code: 'DRIVER_UNAVAILABLE',
+        });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(unhandled).toHaveLength(0);
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
     });
 
     it('should handle multiple setDriver calls', async () => {
