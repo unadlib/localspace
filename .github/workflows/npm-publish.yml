@@ -17,12 +17,12 @@ jobs:
           package-manager-cache: false
       - name: Install dependencies
         run: yarn install --frozen-lockfile
-      - name: Install Playwright Browsers
-        run: yarn playwright install --with-deps chromium
-      - name: Build
-        run: yarn build
-      - name: Run tests
-        run: yarn test
+      - name: Type check
+        run: yarn check:type
+      - name: Run unit tests
+        run: yarn test:unit
+      - name: Check package exports
+        run: yarn test:exports
       - name: Check package contents
         run: npm pack --dry-run --json
       - name: Publish to npm
