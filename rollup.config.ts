@@ -23,7 +23,7 @@ const indexBundle = {
     {
       format: 'cjs',
       exports: 'named',
-      file: 'dist/index.cjs.js',
+      file: 'dist/index.cjs',
       sourcemap: true,
     },
     {
@@ -57,7 +57,7 @@ const reactNativeBundle = {
     {
       format: 'cjs',
       exports: 'named',
-      file: 'dist/react-native.cjs.js',
+      file: 'dist/react-native.cjs',
       sourcemap: true,
     },
     {

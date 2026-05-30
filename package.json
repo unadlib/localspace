@@ -12,7 +12,8 @@
     "url": "git+https://github.com/unadlib/localspace.git"
   },
   "source": "./src/index.ts",
-  "main": "./dist/index.esm.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.esm.js",
   "types": "./dist/index.d.ts",
   "unpkg": "./dist/index.umd.js",
   "exports": {
@@ -20,7 +21,7 @@
     ".": {
       "require": {
         "types": "./dist/index.d.ts",
-        "default": "./dist/index.cjs.js"
+        "default": "./dist/index.cjs"
       },
       "default": {
         "types": "./dist/index.d.ts",
@@ -30,7 +31,7 @@
     "./react-native": {
       "require": {
         "types": "./dist/react-native.d.ts",
-        "default": "./dist/react-native.cjs.js"
+        "default": "./dist/react-native.cjs"
       },
       "default": {
         "types": "./dist/react-native.d.ts",
@@ -44,12 +45,13 @@
     "dist"
   ],
   "scripts": {
-    "test": "vitest run && yarn build && playwright test",
+    "test": "vitest run && yarn build && node test/package-exports.cjs && playwright test",
     "test:coverage": "vitest run --coverage",
     "test:unit": "vitest run",
     "test:rn:integration:setup": "yarn --cwd integration/react-native-jest install --production=false",
     "test:rn:integration": "yarn test:rn:integration:setup && yarn build && yarn --cwd integration/react-native-jest test",
     "test:e2e": "yarn build && playwright test",
+    "test:exports": "yarn build && node test/package-exports.cjs",
     "test:e2e:coverage": "rimraf .nyc_output && yarn build && PLAYWRIGHT_COVERAGE=1 playwright test && nyc report --reporter=text-summary --reporter=html",
     "coverage:full": "rimraf coverage .nyc_output && vitest run --coverage && node -e \"const fs=require('fs');const path=require('path');const src=path.join('coverage','coverage-final.json');if(!fs.existsSync(src)){console.error('Vitest coverage JSON not found:',src);process.exit(1);}fs.mkdirSync('.nyc_output',{recursive:true});fs.copyFileSync(src,path.join('.nyc_output','vitest.json'));\" && yarn build && PLAYWRIGHT_COVERAGE=1 playwright test && nyc report --reporter=text-summary --reporter=html",
     "clean": "rimraf dist",
