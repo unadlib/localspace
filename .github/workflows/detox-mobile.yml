@@ -1,17 +1,7 @@
-name: Detox iOS E2E
+name: Detox iOS E2E (manual)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/detox-mobile.yml
-      - integration/react-native-detox/**
-  pull_request:
-    paths:
-      - .github/workflows/detox-mobile.yml
-      - integration/react-native-detox/**
 
 concurrency:
   group: detox-ios-${{ github.ref }}

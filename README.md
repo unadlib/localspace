@@ -209,7 +209,7 @@ yarn test:rn:integration
 
 See `integration/react-native-jest/README.md` for details.
 
-GitHub Actions Detox workflow template (real simulator/emulator runtime):
+Manual Detox smoke workflow (real simulator/emulator runtime):
 
 - Workflow: `.github/workflows/detox-mobile.yml`
 - Fixture app folder: `integration/react-native-detox/`
