@@ -5,6 +5,7 @@ import type {
   BatchResponse,
 } from '../types';
 import { normalizeBatchEntries } from '../utils/helpers';
+import { warnOnce } from '../utils/warnings';
 import { createLocalSpaceError } from '../errors';
 import serializer from '../utils/serializer';
 
@@ -155,6 +156,11 @@ const evictEntries = async (
 export const quotaPlugin = (
   options: QuotaPluginOptions = {}
 ): LocalSpacePlugin => {
+  warnOnce(
+    'quota-plugin-v2-rename',
+    '[localspace] quotaPlugin will be renamed/repositioned in v2.0. It enforces an application-level serialized-size limit, not the browser storage quota.'
+  );
+
   const evictionPolicy = options.evictionPolicy ?? 'error';
 
   return {

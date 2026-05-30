@@ -195,6 +195,10 @@ const pakoStore = localspace.createInstance({
 
 Keeps multiple tabs/processes in sync via `BroadcastChannel` (with `storage`-event fallback).
 
+> 1.x compatibility note: `syncPlugin` is deprecated as a built-in plugin for
+> the v2.0 surface. It broadcasts single-item `setItem`/`removeItem` calls only;
+> batch operations are not broadcast.
+
 **Options:**
 
 - `channelName` separates logical buses
@@ -236,7 +240,12 @@ await syncedStore.setItems([
 
 ### Quota Plugin
 
-Tracks approximate storage usage after every mutation and enforces limits.
+Tracks approximate localspace payload size after every mutation and enforces
+limits.
+
+> 1.x compatibility note: `quotaPlugin` will be renamed/repositioned in v2.0.
+> It enforces an application-level serialized-size limit, not the browser's
+> storage quota.
 
 **Options:**
 

@@ -1,4 +1,5 @@
 import type { LocalSpacePlugin, PluginContext } from '../types';
+import { warnOnce } from '../utils/warnings';
 
 export interface SyncPluginOptions {
   channelName?: string;
@@ -252,6 +253,11 @@ const handleIncoming = async (
 export const syncPlugin = (
   options: SyncPluginOptions = {}
 ): LocalSpacePlugin => {
+  warnOnce(
+    'sync-plugin-v2-scope',
+    '[localspace] syncPlugin is deprecated as a built-in plugin and will move out of the default plugin set in v2.0. It only broadcasts single-item set/remove operations; batch operations are not broadcast.'
+  );
+
   const channelName = options.channelName ?? 'localspace-sync';
 
   return {

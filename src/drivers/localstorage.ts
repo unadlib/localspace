@@ -17,6 +17,7 @@ import {
   normalizeKey,
   chunkArray,
 } from '../utils/helpers';
+import { warnOnce } from '../utils/warnings';
 import serializer from '../utils/serializer';
 
 type LocalStorageDbInfo = DbInfo & {
@@ -561,6 +562,11 @@ const localStorageWrapper: Driver = {
     runner: (scope: TransactionScope) => Promise<T> | T,
     callback?: Callback<T>
   ): Promise<T> {
+    warnOnce(
+      'localstorage-runtransaction-non-atomic',
+      '[localspace] localStorage runTransaction executes grouped operations sequentially and is not atomic. In v2.0 this will no longer be documented as transaction semantics; prefer IndexedDB for atomic work.'
+    );
+
     const makeReadOnlyGuard = () => {
       if (mode === 'readonly') {
         throw createLocalSpaceError(

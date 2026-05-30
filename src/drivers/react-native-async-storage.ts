@@ -18,6 +18,7 @@ import {
   normalizeKey,
   chunkArray,
 } from '../utils/helpers';
+import { warnOnce } from '../utils/warnings';
 import serializer from '../utils/serializer';
 
 type ReactNativeAsyncStorageDbInfo = DbInfo & {
@@ -715,6 +716,11 @@ const reactNativeAsyncStorageWrapper: Driver = {
     runner: (scope: TransactionScope) => Promise<T> | T,
     callback?: Callback<T>
   ): Promise<T> {
+    warnOnce(
+      'react-native-runtransaction-non-atomic',
+      '[localspace] React Native AsyncStorage runTransaction executes grouped operations sequentially and is not atomic. In v2.0 this will no longer be documented as transaction semantics; prefer a transactional storage driver for atomic work.'
+    );
+
     const makeReadOnlyGuard = () => {
       if (mode === 'readonly') {
         throw createLocalSpaceError(
