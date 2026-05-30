@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+---
+
+## [1.3.0] - 2026-05-30
+
+### Fixed
+
+- Restored CommonJS package exports by emitting real `.cjs` bundles for the
+  default and `localspace/react-native` entry points.
+
+### Changed
+
+- Moved the Detox simulator workflow to manual dispatch so the heavyweight
+  React Native smoke fixture no longer runs as blocking CI.
+- Documented coalesced writes as experimental and clarified the
+  `coalesceFireAndForget` persistence risk.
+
+### Deprecated
+
+- Added 2.0 migration warnings for `syncPlugin` as a built-in plugin,
+  `quotaPlugin`'s app-level size-limit semantics, and non-atomic
+  `runTransaction()` behavior in the localStorage and React Native drivers.
+
+### Tests
+
+- Added package export smoke coverage for CommonJS and ESM entry points.
+
+---
+
+## [1.2.0] - 2026-04-26
+
 ### Added
 
 - Built-in opt-in memory driver (`MEMORY` / `'memoryStorageWrapper'`) for
