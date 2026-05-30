@@ -220,7 +220,7 @@ import localspace, {
 const apiCache = localspace.createInstance({
   name: 'offline-app',
   storeName: 'api-cache',
-  coalesceWrites: true, // Batch rapid cache updates
+  coalesceWrites: true, // Experimental; measure before enabling
   coalesceWindowMs: 16,
   plugins: [
     // Different TTLs for different data types

@@ -74,7 +74,8 @@ export interface LocalSpaceConfig {
   maxConcurrentTransactions?: number;
 
   /**
-   * Enable automatic write coalescing for single set/remove operations.
+   * Experimental: enable automatic write coalescing for single set/remove
+   * operations. Prefer setItems/removeItems for predictable bulk writes.
    */
   coalesceWrites?: boolean;
 
@@ -98,9 +99,9 @@ export interface LocalSpaceConfig {
   coalesceReadConsistency?: 'strong' | 'eventual';
 
   /**
-   * When true and coalesceReadConsistency is 'eventual', set/remove resolves
-   * immediately and flush happens in the background. Errors are logged but not
-   * surfaced to callers. Use with care.
+   * Experimental: when true and coalesceReadConsistency is 'eventual',
+   * set/remove resolves immediately and flush happens in the background.
+   * Errors are logged but not surfaced to callers. Use with care.
    */
   coalesceFireAndForget?: boolean;
 

@@ -254,11 +254,13 @@ await localspace.runTransaction('readwrite', async (tx) => {
 
 ## Coalesced Writes
 
-Opt-in automatic batching of rapid writes for **3-10x performance improvement**:
+Experimental IndexedDB-only batching for rapid single-key writes. Prefer
+`setItems()` for predictable bulk writes; use coalescing only after measuring
+your workload.
 
 ```ts
 const store = localspace.createInstance({
-  coalesceWrites: true, // Enable (default: false)
+  coalesceWrites: true, // Experimental; default: false
   coalesceWindowMs: 8, // 8ms merge window
 });
 
@@ -274,6 +276,8 @@ await Promise.all([
 
 - `'strong'` (default): Reads flush pending writes first
 - `'eventual'`: Reads may see stale values briefly
+- `coalesceFireAndForget`: resolves writes before persistence; background
+  failures are logged instead of surfaced to callers
 
 ```ts
 // Get performance stats
@@ -370,7 +374,7 @@ const mobileStore = await createReactNativeInstance(localspace, {
 ## Performance Notes
 
 - **Batch APIs outperform loops:** `setItems()` ~6x faster, `getItems()` ~7.7x faster than per-item loops
-- **Coalesced writes:** 3-10x faster under write bursts (opt-in)
+- **Coalesced writes:** experimental IndexedDB-only write burst optimization
 - **Transaction helpers:** `runTransaction()` for atomic migrations
 - **IndexedDB durability:** Chrome 121+ uses relaxed durability by default
 - **localStorage batches are non-atomic:** Prefer IndexedDB for atomic operations

@@ -476,12 +476,12 @@ interface LocalSpaceConfig {
   // Batch operations
   maxBatchSize?: number; // Split large batches into chunks
 
-  // Write coalescing (IndexedDB only)
+  // Experimental write coalescing (IndexedDB only)
   coalesceWrites?: boolean; // Enable write merging (default: false)
   coalesceWindowMs?: number; // Merge window in ms (default: 8)
   coalesceMaxBatchSize?: number; // Max ops per flush
   coalesceReadConsistency?: 'strong' | 'eventual'; // Read behavior
-  coalesceFireAndForget?: boolean; // Resolve immediately in eventual mode
+  coalesceFireAndForget?: boolean; // Resolve before persistence in eventual mode
 
   // Compatibility
   compatibilityMode?: boolean; // Legacy callback style for driver methods
