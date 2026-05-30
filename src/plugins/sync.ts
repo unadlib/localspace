@@ -255,7 +255,7 @@ export const syncPlugin = (
 ): LocalSpacePlugin => {
   warnOnce(
     'sync-plugin-v2-scope',
-    '[localspace] syncPlugin is deprecated as a built-in plugin and will move out of the default plugin set in v2.0. It only broadcasts single-item set/remove operations; batch operations are not broadcast.'
+    '[localspace] syncPlugin is deprecated as a main package plugin export and will move out of the v2.0 package surface. It only broadcasts single-item set/remove operations; batch operations are not broadcast.'
   );
 
   const channelName = options.channelName ?? 'localspace-sync';

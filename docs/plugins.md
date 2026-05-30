@@ -195,9 +195,9 @@ const pakoStore = localspace.createInstance({
 
 Keeps multiple tabs/processes in sync via `BroadcastChannel` (with `storage`-event fallback).
 
-> 1.x compatibility note: `syncPlugin` is deprecated as a built-in plugin for
-> the v2.0 surface. It broadcasts single-item `setItem`/`removeItem` calls only;
-> batch operations are not broadcast.
+> 1.x compatibility note: `syncPlugin` is deprecated as a main package plugin
+> export for the v2.0 surface. It broadcasts single-item `setItem`/`removeItem`
+> calls only; batch operations are not broadcast.
 
 **Options:**
 
@@ -224,17 +224,17 @@ const syncedStore = localspace.createInstance({
   ],
 });
 
-// Changes sync across tabs automatically
+// Single-item changes sync across tabs automatically
 await syncedStore.setItem('cart', {
   items: [
     /* cart items */
   ],
 });
-await syncedStore.setItems([
-  { key: 'preferences', value: { darkMode: true } },
-  { key: 'theme', value: 'blue' },
-]);
 ```
+
+`setItems()` and `removeItems()` still pass through plugin hooks, but
+`syncPlugin` does not broadcast them. Use single-item writes for cross-tab
+broadcasts or add custom sync logic for batch updates.
 
 ---
 
@@ -312,7 +312,7 @@ await quotaStore.setItems([
    });
    ```
 
-4. **Batch operations work with all plugins**: All built-in plugins support `setItems`, `getItems`, and `removeItems`.
+4. **Batch operations run through plugin hooks**: Built-in plugins support `setItems`, `getItems`, and `removeItems`, but plugin-specific side effects can differ. In particular, `syncPlugin` does not broadcast batch operations.
 
 ---
 

@@ -221,10 +221,12 @@ Manual Detox smoke workflow (real simulator/emulator runtime):
 
 ## Batch Operations
 
-Use batch APIs for better performance with IndexedDB:
+Use batch APIs for better performance. IndexedDB runs batch mutations inside a
+single transaction; other drivers expose the same API but may perform grouped
+work sequentially.
 
 ```ts
-// Single transaction write
+// Single transaction write on IndexedDB
 await localspace.setItems([
   { key: 'user:1', value: { name: 'Ada' } },
   { key: 'user:2', value: { name: 'Lin' } },
@@ -234,13 +236,13 @@ await localspace.setItems([
 const result = await localspace.getItems(['user:1', 'user:2']);
 // [{ key: 'user:1', value: {...} }, { key: 'user:2', value: {...} }]
 
-// Single transaction delete
+// Single transaction delete on IndexedDB
 await localspace.removeItems(['user:1', 'user:2']);
 ```
 
 ### Transactions
 
-For atomic multi-step operations:
+For atomic multi-step operations on IndexedDB:
 
 ```ts
 await localspace.runTransaction('readwrite', async (tx) => {
@@ -249,6 +251,9 @@ await localspace.runTransaction('readwrite', async (tx) => {
   await tx.set('lastUpdated', Date.now());
 });
 ```
+
+The localStorage and React Native AsyncStorage drivers keep this API for
+compatibility, but grouped operations run sequentially and are not atomic.
 
 ---
 
@@ -347,7 +352,7 @@ const store = localspace.createInstance({
 
   // Batching
   maxBatchSize: 200, // Split large batches
-  coalesceWrites: false, // Merge rapid writes
+  coalesceWrites: false, // Experimental IndexedDB-only write coalescing
 
   // Plugins
   plugins: [],
@@ -375,9 +380,9 @@ const mobileStore = await createReactNativeInstance(localspace, {
 
 - **Batch APIs outperform loops:** `setItems()` ~6x faster, `getItems()` ~7.7x faster than per-item loops
 - **Coalesced writes:** experimental IndexedDB-only write burst optimization
-- **Transaction helpers:** `runTransaction()` for atomic migrations
+- **Transaction helpers:** `runTransaction()` is atomic on IndexedDB
 - **IndexedDB durability:** Chrome 121+ uses relaxed durability by default
-- **localStorage batches are non-atomic:** Prefer IndexedDB for atomic operations
+- **Non-IndexedDB grouped work is non-atomic:** Prefer IndexedDB for atomic operations
 
 ---
 

@@ -105,11 +105,14 @@ const admin = await localspace.iterate<User, User>((value, key) => {
 
 ## Batch Operations
 
-Batch operations execute in a single transaction (IndexedDB) for better performance.
+Batch operations execute in a single transaction on IndexedDB for better
+performance. Other drivers expose the same API but may run grouped work
+sequentially.
 
 ### `setItems<T>(entries: BatchItems<T>, callback?: Callback<BatchResponse<T>>): Promise<BatchResponse<T>>`
 
-Stores multiple items atomically.
+Stores multiple items atomically on IndexedDB. On other drivers this is a
+grouped operation with driver-specific atomicity.
 
 ```ts
 // Array format
@@ -160,7 +163,8 @@ users.forEach(({ key, value }) => {
 
 ### `removeItems(keys: string[], callback?: Callback<void>): Promise<void>`
 
-Removes multiple items atomically.
+Removes multiple items atomically on IndexedDB. On other drivers this is a
+grouped operation with driver-specific atomicity.
 
 ```ts
 await localspace.removeItems(['user:1', 'user:2', 'temp:session']);
@@ -179,7 +183,7 @@ by running grouped work sequentially; they are not atomic and emit a 2.0
 migration warning.
 
 ```ts
-// Atomic counter increment
+// Atomic counter increment on IndexedDB
 const newValue = await localspace.runTransaction('readwrite', async (tx) => {
   const current = (await tx.get<number>('counter')) ?? 0;
   const next = current + 1;
@@ -481,11 +485,11 @@ interface LocalSpaceConfig {
   maxBatchSize?: number; // Split large batches into chunks
 
   // Experimental write coalescing (IndexedDB only)
-  coalesceWrites?: boolean; // Enable write merging (default: false)
+  coalesceWrites?: boolean; // Enable IndexedDB write merging (default: false)
   coalesceWindowMs?: number; // Merge window in ms (default: 8)
   coalesceMaxBatchSize?: number; // Max ops per flush
   coalesceReadConsistency?: 'strong' | 'eventual'; // Read behavior
-  coalesceFireAndForget?: boolean; // Resolve before persistence in eventual mode
+  coalesceFireAndForget?: boolean; // Resolve before persistence; background errors are logged
 
   // Compatibility
   compatibilityMode?: boolean; // Legacy callback style for driver methods

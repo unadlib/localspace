@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed
+
+- Clarified that IndexedDB provides atomic batch and transaction semantics,
+  while localStorage and React Native AsyncStorage grouped work is sequential.
+- Clarified that `syncPlugin` only broadcasts single-item writes and is
+  deprecated as a main package plugin export rather than a default plugin.
+
 ---
 
 ## [1.3.0] - 2026-05-30
@@ -20,7 +27,7 @@
 
 ### Deprecated
 
-- Added 2.0 migration warnings for `syncPlugin` as a built-in plugin,
+- Added 2.0 migration warnings for `syncPlugin` as a main package plugin export,
   `quotaPlugin`'s app-level size-limit semantics, and non-atomic
   `runTransaction()` behavior in the localStorage and React Native drivers.
 
