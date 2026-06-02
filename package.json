@@ -58,7 +58,7 @@
     "clean": "rimraf dist",
     "check:type": "tsc --skipLibCheck --noEmit",
     "build": "pnpm run clean && tsc --skipLibCheck && pnpm run build:prod",
-    "build:prod": "NODE_ENV=production rollup --config --bundleConfigAsCjs",
+    "build:prod": "NODE_ENV=production rolldown --config rolldown.config.ts",
     "build:doc": "typedoc --plugin typedoc-plugin-markdown --out docs src/index.ts",
     "commit": "pnpm exec git-cz",
     "format": "prettier --write src"
@@ -71,10 +71,6 @@
   "license": "MIT",
   "devDependencies": {
     "@playwright/test": "^1.56.0",
-    "@rollup/plugin-commonjs": "^28.0.6",
-    "@rollup/plugin-node-resolve": "^16.0.1",
-    "@rollup/plugin-replace": "^6.0.2",
-    "@rollup/plugin-terser": "^0.4.4",
     "@types/node": "^24.6.0",
     "@typescript-eslint/eslint-plugin": "^8.44.1",
     "@typescript-eslint/parser": "^8.44.1",
@@ -93,7 +89,6 @@
     "prettier": "^3.2.5",
     "rimraf": "^6.0.1",
     "rolldown": "^1.0.3",
-    "rollup": "^4.52.3",
     "serve": "^14.2.5",
     "tslib": "^2.8.1",
     "typedoc": "^0.28.13",
