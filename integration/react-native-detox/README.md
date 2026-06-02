@@ -23,14 +23,14 @@ It validates `localspace/react-native` in iOS simulator runtime via Detox.
 Build localspace first (from repository root):
 
 ```bash
-yarn install
-yarn build
+pnpm install
+pnpm run build
 ```
 
-Then in this fixture directory install dependencies:
+Then install fixture dependencies (from repository root):
 
 ```bash
-yarn install
+pnpm --filter localspace-detox-fixture install --prod=false
 ```
 
 Run iOS:
@@ -38,15 +38,15 @@ Run iOS:
 ```bash
 bundle install
 cd ios && bundle exec pod install && cd ..
-yarn build:ios:detox
-yarn test:ios:detox
+pnpm run build:ios:detox
+pnpm run test:ios:detox
 ```
 
 Run Android:
 
 ```bash
-yarn build:android:detox
-yarn test:android:detox
+pnpm run build:android:detox
+pnpm run test:android:detox
 ```
 
 ## Workflow Notes

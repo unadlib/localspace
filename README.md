@@ -19,8 +19,8 @@ Get started in 5 minutes:
 ### 1. Install
 
 ```bash
-npm install localspace
-# or: yarn add localspace / pnpm add localspace
+pnpm add localspace
+# or: npm install localspace
 ```
 
 ### 2. Basic Usage
@@ -100,11 +100,9 @@ That's it! For more details, see the sections below.
 ## Installation
 
 ```bash
-npm install localspace
-# or
-yarn add localspace
-# or
 pnpm add localspace
+# or
+npm install localspace
 ```
 
 ```ts
@@ -204,7 +202,7 @@ await localspace.setDriver(localspace.REACTNATIVEASYNCSTORAGE);
 Integration smoke (official AsyncStorage Jest mock):
 
 ```bash
-yarn test:rn:integration
+pnpm test:rn:integration
 ```
 
 See `integration/react-native-jest/README.md` for details.

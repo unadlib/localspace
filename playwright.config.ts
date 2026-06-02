@@ -19,7 +19,7 @@ export default defineConfig({
   },
   reporter: [['list']],
   webServer: {
-    command: `npx serve -l 3333 "${rootDir}"`,
+    command: `pnpm exec serve -l 3333 "${rootDir}"`,
     url: 'http://localhost:3333',
     reuseExistingServer: !process.env.CI,
     timeout: 30 * 1000,

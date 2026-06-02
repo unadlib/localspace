@@ -16,14 +16,16 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
+      - name: Enable pnpm
+        run: corepack enable
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
       - name: Type check
-        run: yarn check:type
+        run: pnpm run check:type
       - name: Run unit tests
-        run: yarn test:unit
+        run: pnpm run test:unit
       - name: Check package exports
-        run: yarn test:exports
+        run: pnpm run test:exports
       - name: Check package contents
         run: npm pack --dry-run --json
       - name: Publish to npm

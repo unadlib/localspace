@@ -12,15 +12,15 @@ It is intentionally isolated from the main unit test pipeline.
 From repository root:
 
 ```bash
-yarn test:rn:integration
+pnpm test:rn:integration
 ```
 
 If you want to install once and then run test directly:
 
 ```bash
-yarn test:rn:integration:setup
-yarn build
-yarn --cwd integration/react-native-jest test
+pnpm test:rn:integration:setup
+pnpm run build
+pnpm -C integration/react-native-jest test
 ```
 
 ## Notes

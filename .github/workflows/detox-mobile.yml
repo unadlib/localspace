@@ -55,6 +55,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Enable pnpm
+        run: corepack enable
+
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
@@ -62,11 +65,11 @@ jobs:
 
       - name: Install root dependencies
         working-directory: .
-        run: yarn install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build localspace package
         working-directory: .
-        run: yarn build
+        run: pnpm run build
 
       - name: Install applesimutils
         run: |
@@ -89,7 +92,8 @@ jobs:
           echo "DETOX_IOS_DEVICE_TYPE=$IOS_DEVICE_TYPE" >> "$GITHUB_ENV"
 
       - name: Install JS dependencies
-        run: yarn install --frozen-lockfile --production=false
+        working-directory: .
+        run: pnpm --filter localspace-detox-fixture install --frozen-lockfile --prod=false
 
       - name: Install CocoaPods (if present)
         run: |
@@ -99,10 +103,10 @@ jobs:
           fi
 
       - name: Build iOS app for Detox
-        run: yarn build:ios:detox
+        run: pnpm run build:ios:detox
 
       - name: Run Detox tests on iOS simulator
-        run: yarn test:ios:detox
+        run: pnpm run test:ios:detox
 
       - name: Upload iOS artifacts on failure
         if: failure()
