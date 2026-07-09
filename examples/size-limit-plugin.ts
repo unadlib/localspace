@@ -103,7 +103,14 @@ export const sizeLimitPlugin = (
       projectedBytes,
       maxBytes: options.maxBytes,
     };
-    await options.onLimitExceeded?.(info);
+    try {
+      await options.onLimitExceeded?.(info);
+    } catch (error) {
+      console.error(
+        '[localspace example] size limit notification handler failed',
+        error
+      );
+    }
     throw new SizeLimitExceededError(info);
   };
 

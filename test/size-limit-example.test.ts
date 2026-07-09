@@ -28,6 +28,28 @@ describe('size limit plugin example', () => {
     expect(await store.getItem('second')).toBeNull();
   });
 
+  it('still rejects the write when the limit callback fails', async () => {
+    const callbackFailure = new Error('notification failed');
+    const onLimitExceeded = vi.fn(async () => {
+      throw callbackFailure;
+    });
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const { store } = await createStore(60, onLimitExceeded);
+
+    await store.setItem('first', 'a'.repeat(20));
+    await expect(
+      store.setItem('second', 'b'.repeat(50))
+    ).rejects.toBeInstanceOf(SizeLimitExceededError);
+
+    expect(consoleError).toHaveBeenCalledWith(
+      '[localspace example] size limit notification handler failed',
+      callbackFailure
+    );
+    expect(await store.getItem('second')).toBeNull();
+  });
+
   it('checks the final value for duplicate keys in a batch', async () => {
     const { store } = await createStore(60);
 
