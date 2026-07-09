@@ -31,10 +31,25 @@ export class SizeLimitExceededError extends PluginAbortError {
   }
 }
 
+export class SizeLimitMeasurementError extends PluginAbortError {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super('Application storage size could not be measured');
+    this.name = 'SizeLimitMeasurementError';
+    this.cause = cause;
+  }
+}
+
 const encoder = new TextEncoder();
 
-const measureValue = async (value: unknown): Promise<number> =>
-  encoder.encode(await serializer.serialize(value)).byteLength;
+const measureValue = async (value: unknown): Promise<number> => {
+  try {
+    return encoder.encode(await serializer.serialize(value)).byteLength;
+  } catch (error) {
+    throw new SizeLimitMeasurementError(error);
+  }
+};
 
 const normalizeEntries = <T>(entries: BatchItems<T>): Map<string, T> => {
   if (Array.isArray(entries)) {

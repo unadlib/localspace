@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import localspace from '../src';
 import {
   SizeLimitExceededError,
+  SizeLimitMeasurementError,
   sizeLimitPlugin,
 } from '../examples/size-limit-plugin';
 
@@ -16,6 +17,10 @@ const createStore = async (maxBytes: number, onLimitExceeded = vi.fn()) => {
 };
 
 describe('size limit plugin example', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('rejects a single write under the default lenient plugin policy', async () => {
     const { store, onLimitExceeded } = await createStore(60);
 
@@ -48,6 +53,22 @@ describe('size limit plugin example', () => {
       callbackFailure
     );
     expect(await store.getItem('second')).toBeNull();
+  });
+
+  it('rejects values whose serialized size cannot be measured', async () => {
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const { store } = await createStore(1_000);
+    const cyclic: { self?: unknown } = {};
+    cyclic.self = cyclic;
+
+    await expect(store.setItem('cyclic', cyclic)).rejects.toBeInstanceOf(
+      SizeLimitMeasurementError
+    );
+
+    expect(consoleError).toHaveBeenCalled();
+    expect(await store.getItem('cyclic')).toBeNull();
   });
 
   it('checks the final value for duplicate keys in a batch', async () => {
