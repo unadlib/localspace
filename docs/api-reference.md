@@ -223,15 +223,22 @@ const name = localspace.config('name');
 const driver = localspace.config('driver');
 ```
 
-### `config(options: LocalSpaceConfig): true | Error`
+### `config(options: LocalSpaceConfig): true | Error | Promise<void>`
 
-Updates configuration. Must be called before first storage operation.
+Updates configuration. Must be called before the first storage operation.
+Configuration without `driver` returns synchronously. Supplying `driver`
+returns the `setDriver()` promise, while invalid or locked configuration is
+returned as an `Error` value.
 
 ```ts
 localspace.config({
   name: 'myapp',
   storeName: 'data',
   version: 2,
+});
+
+await localspace.config({
+  driver: [localspace.INDEXEDDB, localspace.LOCALSTORAGE],
 });
 ```
 
