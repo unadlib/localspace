@@ -99,13 +99,6 @@ export interface LocalSpaceConfig {
   coalesceReadConsistency?: 'strong' | 'eventual';
 
   /**
-   * Experimental: when true and coalesceReadConsistency is 'eventual',
-   * set/remove resolves immediately and flush happens in the background.
-   * Errors are logged but not surfaced to callers. Use with care.
-   */
-  coalesceFireAndForget?: boolean;
-
-  /**
    * Driver(s) to use (string or array of strings)
    */
   driver?: string | string[];

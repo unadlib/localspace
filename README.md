@@ -279,8 +279,6 @@ await Promise.all([
 
 - `'strong'` (default): Reads flush pending writes first
 - `'eventual'`: Reads may see stale values briefly
-- `coalesceFireAndForget`: resolves writes before persistence; background
-  failures are logged instead of surfaced to callers
 
 ```ts
 // Get performance stats

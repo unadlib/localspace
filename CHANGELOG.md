@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Removed
+
+- Removed `coalesceFireAndForget`; write promises no longer resolve before
+  IndexedDB persistence completes.
+
 ### Fixed
 
 - Clarified that IndexedDB provides atomic batch and transaction semantics,

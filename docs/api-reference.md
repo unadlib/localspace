@@ -489,7 +489,6 @@ interface LocalSpaceConfig {
   coalesceWindowMs?: number; // Merge window in ms (default: 8)
   coalesceMaxBatchSize?: number; // Max ops per flush
   coalesceReadConsistency?: 'strong' | 'eventual'; // Read behavior
-  coalesceFireAndForget?: boolean; // Resolve before persistence; background errors are logged
 
   // Compatibility
   compatibilityMode?: boolean; // Legacy callback style for driver methods

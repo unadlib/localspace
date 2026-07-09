@@ -687,8 +687,7 @@ function enqueueCoalescedWrite(
   dbInfo: DbInfo,
   opData:
     | { type: 'set'; key: string; value: unknown }
-    | { type: 'remove'; key: string },
-  options?: { resolveImmediately?: boolean }
+    | { type: 'remove'; key: string }
 ): Promise<unknown> {
   const coalesceState = ensureCoalesceState(dbInfo);
   const op: QueuedWrite =
@@ -731,18 +730,6 @@ function enqueueCoalescedWrite(
     op.resolve = resolve as (value: unknown) => void;
     op.reject = reject;
   });
-
-  if (options?.resolveImmediately) {
-    // Resolve to caller right away; let flush happen in the background.
-    // Errors are surfaced as console warnings to avoid unhandled rejections.
-    flushPromise.catch((error) =>
-      console.warn('[localspace] coalesced write failed (eventual mode)', error)
-    );
-    if (opData.type === 'set') {
-      return Promise.resolve(opData.value);
-    }
-    return Promise.resolve();
-  }
 
   return flushPromise;
 }
@@ -1504,8 +1491,6 @@ async function setItem<T>(
 
       const normalizedValue = (value === undefined ? null : value) as T;
       const coalesce = !!dbInfo.coalesceWrites;
-      const eventual = dbInfo.coalesceReadConsistency === 'eventual';
-      const fireAndForget = coalesce && eventual && !!dbInfo.coalesceFireAndForget;
 
       if (coalesce) {
         const pending = enqueueCoalescedWrite(
@@ -1514,14 +1499,8 @@ async function setItem<T>(
             type: 'set',
             key,
             value: normalizedValue,
-          },
-          { resolveImmediately: fireAndForget }
+          }
         );
-
-        if (fireAndForget) {
-          resolve(normalizedValue);
-          return;
-        }
 
         pending.then((result) => resolve(result as T)).catch(reject);
         return;
@@ -1581,20 +1560,9 @@ function removeItem(
       }
 
       const coalesce = !!dbInfo.coalesceWrites;
-      const eventual = dbInfo.coalesceReadConsistency === 'eventual';
-      const fireAndForget = coalesce && eventual && !!dbInfo.coalesceFireAndForget;
 
       if (coalesce) {
-        const pending = enqueueCoalescedWrite(
-          dbInfo,
-          { type: 'remove', key },
-          { resolveImmediately: fireAndForget }
-        );
-
-        if (fireAndForget) {
-          resolve();
-          return;
-        }
+        const pending = enqueueCoalescedWrite(dbInfo, { type: 'remove', key });
 
         pending.then(() => resolve()).catch(reject);
         return;
@@ -2156,7 +2124,6 @@ function dropInstance(
     coalesceWindowMs: currentDbInfo?.coalesceWindowMs,
     coalesceReadConsistency: currentDbInfo?.coalesceReadConsistency,
     coalesceMaxBatchSize: currentDbInfo?.coalesceMaxBatchSize,
-    coalesceFireAndForget: currentDbInfo?.coalesceFireAndForget,
   };
   if (!dropDbInfo.bucket && currentConfig.bucket) {
     dropDbInfo.bucket = currentConfig.bucket;

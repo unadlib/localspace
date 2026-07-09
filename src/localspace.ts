@@ -95,7 +95,6 @@ const DefaultConfig: LocalSpaceConfig = {
   coalesceWrites: false,
   coalesceWindowMs: 8,
   coalesceReadConsistency: 'strong',
-  coalesceFireAndForget: false,
   coalesceMaxBatchSize: undefined,
   pluginInitPolicy: 'fail',
   pluginErrorPolicy: 'lenient',
