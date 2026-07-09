@@ -1,13 +1,12 @@
 # Changelog
 
-## Unreleased
+## [2.0.0] - 2026-07-10
 
 ### Removed
 
-- Removed `coalesceFireAndForget`; write promises no longer resolve before
-  IndexedDB persistence completes.
-- Removed automatic write coalescing and its `getPerformanceStats()` API. Use
-  explicit `setItems()` and `removeItems()` calls for predictable batching.
+- Removed `coalesceFireAndForget`, automatic write coalescing, and the
+  `getPerformanceStats()` API. Use explicit `setItems()` and `removeItems()`
+  calls for predictable batching.
 - Removed `syncPlugin` from the package surface. Cross-context synchronization
   now belongs to application code; a best-effort notification example remains
   in `examples/broadcast-notification-plugin.ts`.
@@ -22,12 +21,21 @@
   `compatibilityMode`. All public storage and driver-management operations are
   Promise-only.
 
-### Fixed
+### Changed
 
-- Clarified that IndexedDB provides atomic batch and transaction semantics,
-  while localStorage and React Native AsyncStorage grouped work is sequential.
-- Clarified that `syncPlugin` only broadcasts single-item writes and is
-  deprecated as a main package plugin export rather than a default plugin.
+- Write promises now always settle after the driver operation completes.
+- `runTransaction()` is available only when the selected driver can provide
+  rollback semantics: IndexedDB and memory. localStorage and React Native
+  AsyncStorage reject it with `UNSUPPORTED_OPERATION`.
+- The built-in plugin surface is focused on TTL, encryption, and compression.
+  Cross-context notifications and application size limits remain as explicitly
+  non-published, best-effort examples.
+
+### Migration
+
+- Existing core key/value data does not require a storage migration.
+- See `docs/migration-guide.md` for callback conversion, explicit batching,
+  transaction capability checks, and plugin replacements.
 
 ---
 

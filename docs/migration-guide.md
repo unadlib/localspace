@@ -1,119 +1,137 @@
 # Migration Guide
 
-How to migrate Promise-based and callback-based localForage code to localspace.
+## Upgrade From 1.x To 2.0
 
-## Table of Contents
+Install the new major version:
 
-- [Overview](#overview)
-- [Differences from localForage](#differences-from-localforage)
-- [Convert Callback Code](#convert-callback-code)
-- [Recommended Migration Steps](#recommended-migration-steps)
+```bash
+pnpm add localspace@^2
+```
 
----
+The core serializer, database names, store names, and key layout are unchanged,
+so existing core key/value data does not need to be rewritten. The breaking
+changes are in API behavior and package surface.
 
-## Overview
+### Breaking Changes
 
-localspace retains the familiar key-value API, but it is Promise-only. Existing
-localForage code that already awaits operations can usually start with an import
-change:
+| 1.x API or behavior                              | 2.0 migration                                                                                  |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| Completion callbacks and exported callback types | Use `await`, `.then()`, and `try`/`catch`                                                      |
+| `compatibilityMode`                              | Remove the option; all public operations are Promise-only                                      |
+| `coalesceWrites` and related options             | Remove them and call `setItems()` or `removeItems()` explicitly                                |
+| `coalesceFireAndForget`                          | Await the returned write promise; early success before persistence is no longer supported      |
+| `getPerformanceStats()`                          | Measure explicit operations in application telemetry                                           |
+| `syncPlugin`                                     | Implement application synchronization; start with the limited notification example if useful   |
+| `quotaPlugin`                                    | Enforce application policy outside the package; adapt the limited size guard example if useful |
+| localStorage or React Native `runTransaction()`  | Use explicit operations or select IndexedDB/memory when rollback is required                   |
+
+### Convert Completion Callbacks
+
+Replace completion callbacks with Promise control flow:
+
+```diff
+-store.getItem('user', (error, user) => {
+-  if (error) {
+-    report(error);
+-    return;
+-  }
+-  render(user);
+-});
++try {
++  const user = await store.getItem('user');
++  render(user);
++} catch (error) {
++  report(error);
++}
+```
+
+Driver management is Promise-only too:
+
+```diff
+-store.setDriver([store.INDEXEDDB], onSuccess, onError);
++await store.setDriver([store.INDEXEDDB]);
+```
+
+Remove `Callback`, `CompatibilitySuccessCallback`, and
+`CompatibilityErrorCallback` imports.
+
+### Replace Automatic Write Coalescing
+
+Use explicit batches when writes belong together:
+
+```diff
+-const store = localspace.createInstance({
+-  coalesceWrites: true,
+-  coalesceDelay: 8,
+-});
+-await Promise.all([
+-  store.setItem('a', 1),
+-  store.setItem('b', 2),
+-]);
++const store = localspace.createInstance();
++await store.setItems([
++  { key: 'a', value: 1 },
++  { key: 'b', value: 2 },
++]);
+```
+
+On IndexedDB, each batch chunk is transactional. `maxBatchSize` can split one
+call into multiple transactions, so omit it when the whole batch must be
+atomic.
+
+### Use Transactions Only On Capable Drivers
+
+IndexedDB provides native transactions. The memory driver restores a snapshot
+after a failed readwrite transaction, but it is runtime-only and does not
+isolate concurrent callers. localStorage and React Native AsyncStorage reject
+`runTransaction()` with `UNSUPPORTED_OPERATION`.
+
+```ts
+if (store.driver() === store.INDEXEDDB || store.driver() === store.MEMORY) {
+  await store.runTransaction('readwrite', async (tx) => {
+    const count = (await tx.get<number>('count')) ?? 0;
+    await tx.set('count', count + 1);
+  });
+}
+```
+
+Do not replace a rejected transaction with a loop when partial writes would be
+incorrect.
+
+### Move Application Policy Out Of The Package
+
+`syncPlugin` and `quotaPlugin` are no longer exported. Their names overstated
+what could be guaranteed across tabs, processes, concurrent writers, and
+browser quota enforcement.
+
+- `examples/broadcast-notification-plugin.ts` demonstrates best-effort
+  single-item notifications. It does not replicate values or guarantee
+  delivery, ordering, or batch coverage.
+- `examples/size-limit-plugin.ts` demonstrates a serialized-value guard. It is
+  not browser quota management, does not evict data, and cannot enforce a limit
+  atomically across concurrent writers.
+
+Copy and adapt those examples only when their limitations match the
+application's policy.
+
+## Migrate From localForage
+
+localspace keeps a familiar key/value API, but it is not a callback-compatible
+drop-in replacement. Promise-based localForage usage can usually begin with an
+import change:
 
 ```diff
 -import localforage from 'localforage';
 +import localspace from 'localspace';
 
 await localspace.setItem('key', value);
-const data = await localspace.getItem('key');
+const value = await localspace.getItem('key');
 ```
 
-Code that passes completion callbacks must be converted before migration.
+Before switching:
 
----
-
-## Differences from localForage
-
-Before upgrading, note these differences:
-
-### 1. Error Handling
-
-`dropInstance()` throws a real `Error` when arguments are invalid. Examine `error.message` instead of comparing string literals.
-
-```ts
-try {
-  await localspace.dropInstance({ name: 'invalid' });
-} catch (error) {
-  // error is an Error instance with proper message
-  console.error(error.message);
-}
-```
-
-### 2. Blob Capability Checks
-
-Blob capability checks run on each request instead of being cached. Cache the result in your application if repeated blob writes dominate your workload:
-
-```ts
-// Cache the blob support check if needed
-const supportsBlobs = await localspace.supports(localspace.INDEXEDDB);
-```
-
-### 3. WebSQL Not Supported
-
-**WebSQL is intentionally unsupported.** Migrate any WebSQL-only code to IndexedDB or localStorage before switching.
-
-### 4. Memory Fallback Is Opt-In
-
-localspace includes a built-in memory driver for cases where browser persistent
-storage is blocked. Add it explicitly as the last fallback:
-
-```ts
-await localspace.setDriver([
-  localspace.INDEXEDDB,
-  localspace.LOCALSTORAGE,
-  localspace.MEMORY,
-]);
-```
-
-Memory data is runtime-only and is lost on page reload, so it is not enabled by
-default.
-
----
-
-## Convert Callback Code
-
-Replace completion callbacks with `await` and `try`/`catch`:
-
-```diff
--localforage.getItem('key', (error, value) => {
--  if (error) {
--    report(error);
--    return;
--  }
--  render(value);
--});
-+try {
-+  const value = await localspace.getItem('key');
-+  render(value);
-+} catch (error) {
-+  report(error);
-+}
-```
-
-Driver setup is Promise-only as well:
-
-```diff
--localforage.setDriver([localforage.INDEXEDDB], onSuccess, onError);
-+await localspace.setDriver([localspace.INDEXEDDB]);
-```
-
-There is no `compatibilityMode`; unsupported callback arguments are not part of
-the TypeScript or runtime contract.
-
----
-
-## Recommended Migration Steps
-
-1. **Convert callbacks**: Replace completion callbacks with Promises.
-2. **Remove WebSQL**: Move WebSQL-only data and driver selection to IndexedDB.
-3. **Update imports**: Change `localforage` to `localspace`.
-4. **Update error handling**: Handle `LocalSpaceError` codes where relevant.
-5. **Run migration tests**: Verify driver selection, persistence, and data shape.
-6. **Adopt extensions explicitly**: Add batch APIs or plugins only where needed.
+1. Convert completion callbacks to Promises.
+2. Move WebSQL-only data and driver selection to IndexedDB.
+3. Remove assumptions that every driver supports transactions.
+4. Test database names, store names, persisted values, and fallback order.
+5. Adopt batch APIs and plugins explicitly rather than as compatibility shims.
