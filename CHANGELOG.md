@@ -8,6 +8,9 @@
   IndexedDB persistence completes.
 - Removed automatic write coalescing and its `getPerformanceStats()` API. Use
   explicit `setItems()` and `removeItems()` calls for predictable batching.
+- Removed `syncPlugin` from the package surface. Cross-context synchronization
+  now belongs to application code; a best-effort notification example remains
+  in `examples/broadcast-notification-plugin.ts`.
 
 ### Fixed
 

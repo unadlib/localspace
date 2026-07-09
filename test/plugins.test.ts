@@ -3,77 +3,17 @@ import {
   it,
   expect,
   vi,
-  beforeAll,
-  afterAll,
-  beforeEach,
 } from 'vitest';
 import localspace, {
   LocalSpace,
   ttlPlugin,
   encryptionPlugin,
   compressionPlugin,
-  syncPlugin,
   quotaPlugin,
   LocalSpacePlugin,
 } from '../src';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-declare global {
-  // eslint-disable-next-line no-var
-  var BroadcastChannel: typeof globalThis.BroadcastChannel;
-}
-
-let originalBroadcastChannel: typeof globalThis.BroadcastChannel | undefined;
-
-class MockBroadcastChannel {
-  static channels: Record<string, Set<MockBroadcastChannel>> = {};
-
-  name: string;
-
-  onmessage: ((event: MessageEvent) => void) | null = null;
-
-  constructor(name: string) {
-    this.name = name;
-    MockBroadcastChannel.channels[name] =
-      MockBroadcastChannel.channels[name] || new Set();
-    MockBroadcastChannel.channels[name]!.add(this);
-  }
-
-  postMessage(data: unknown) {
-    const peers = MockBroadcastChannel.channels[this.name];
-    if (!peers) return;
-    for (const peer of peers) {
-      if (peer === this) continue;
-      peer.onmessage?.({ data } as MessageEvent);
-    }
-  }
-
-  close() {
-    MockBroadcastChannel.channels[this.name]?.delete(this);
-  }
-
-  static reset() {
-    MockBroadcastChannel.channels = {};
-  }
-}
-
-beforeAll(() => {
-  originalBroadcastChannel = globalThis.BroadcastChannel;
-  (globalThis as any).BroadcastChannel = MockBroadcastChannel;
-});
-
-afterAll(() => {
-  if (originalBroadcastChannel !== undefined) {
-    (globalThis as any).BroadcastChannel = originalBroadcastChannel;
-  } else {
-    delete (globalThis as any).BroadcastChannel;
-  }
-});
-
-beforeEach(() => {
-  MockBroadcastChannel.reset();
-});
 
 describe('Plugin system', () => {
   it('applies custom plugins in registration order', async () => {
@@ -241,25 +181,6 @@ describe('Plugin system', () => {
 
     const restored = await compressedStore.getItem<string>('blob');
     expect(restored).toBe(payload);
-  });
-
-  it('synchronizes changes across instances', async () => {
-    const plugins = [syncPlugin({ channelName: 'sync-test' })];
-    const primary = localspace.createInstance({
-      name: 'sync-db',
-      storeName: 'sync-store',
-      plugins,
-    });
-    const secondary = localspace.createInstance({
-      name: 'sync-db',
-      storeName: 'sync-store',
-      plugins,
-    });
-
-    await primary.setItem('shared', 'value-1');
-    await sleep(5);
-    const synced = await secondary.getItem('shared');
-    expect(synced).toBe('value-1');
   });
 
   it('enforces quota limits with errors', async () => {
@@ -502,43 +423,6 @@ describe('Plugin system', () => {
     expect(contexts[2].batchSize).toBe(2);
   });
 
-  it('sync plugin broadcasts original value, not transformed', async () => {
-    const broadcastedValues: unknown[] = [];
-
-    // Intercept what sync plugin broadcasts
-    const interceptor: LocalSpacePlugin = {
-      name: 'interceptor',
-      priority: -101, // After sync
-      afterSet: (_key, _value, context) => {
-        // Sync runs at -100, so by the time we get here the message is sent
-        // We can check operationState to see what was available
-        broadcastedValues.push(context.operationState.originalValue);
-      },
-    };
-
-    const transformer: LocalSpacePlugin = {
-      name: 'transformer',
-      priority: 50,
-      beforeSet: <T>(_key: string, value: T): T => {
-        return `transformed:${value}` as unknown as T;
-      },
-    };
-
-    const primary = localspace.createInstance({
-      name: 'sync-transform-db-2',
-      storeName: 'sync-transform-store-2',
-      plugins: [
-        syncPlugin({ channelName: 'sync-transform-test-2' }),
-        transformer,
-        interceptor,
-      ],
-    });
-
-    await primary.setItem('msg', 'hello');
-
-    // The sync plugin should have access to originalValue = 'hello'
-    expect(broadcastedValues[0]).toBe('hello');
-  });
 });
 
 describe('Plugin batch operations', () => {
@@ -715,33 +599,6 @@ describe('Plugin batch operations', () => {
     expect(result).toBe('z'.repeat(70)); // Should be the last value
   });
 
-  it('sync plugin works with batch operations through shared DB', async () => {
-    // Note: Sync plugin does not broadcast batch operations because original
-    // values are transformed before reaching afterSetItems. However, instances
-    // sharing the same database can still read batch data correctly.
-    const plugins = [syncPlugin({ channelName: 'sync-batch-test' })];
-    const primary = localspace.createInstance({
-      name: 'sync-batch-db',
-      storeName: 'sync-batch-store',
-      plugins,
-    });
-    const secondary = localspace.createInstance({
-      name: 'sync-batch-db',
-      storeName: 'sync-batch-store',
-      plugins,
-    });
-
-    await primary.setItems([
-      { key: 'batch1', value: 'value1' },
-      { key: 'batch2', value: 'value2' },
-    ]);
-
-    // Secondary reads from shared DB (not via sync broadcast)
-    const result = await secondary.getItems(['batch1', 'batch2']);
-    expect(result[0].value).toBe('value1');
-    expect(result[1].value).toBe('value2');
-  });
-
   it('combined plugins work correctly with batch operations', async () => {
     const key = '0123456789abcdef0123456789abcdef';
     const store = localspace.createInstance({
@@ -833,35 +690,32 @@ describe('Plugin edge cases and combinations', () => {
     expect(result).toBe(payload);
   });
 
-  it('all five plugins work together', async () => {
+  it('built-in data plugins work together', async () => {
     const key = '0123456789abcdef0123456789abcdef';
     // Create separate plugin instances for each store to avoid shared state
     const createPlugins = () => [
       ttlPlugin({ defaultTTL: 60000 }),
       compressionPlugin({ threshold: 10 }),
       encryptionPlugin({ key }),
-      syncPlugin({ channelName: 'all-five-test' }),
       quotaPlugin({ maxSize: 10000, evictionPolicy: 'error' }),
     ];
 
     const primary = localspace.createInstance({
-      name: 'all-five-db',
-      storeName: 'all-five-store',
+      name: 'data-plugins-db',
+      storeName: 'data-plugins-store',
       plugins: createPlugins(),
     });
 
     const secondary = localspace.createInstance({
-      name: 'all-five-db',
-      storeName: 'all-five-store',
+      name: 'data-plugins-db',
+      storeName: 'data-plugins-store',
       plugins: createPlugins(),
     });
 
     const payload = { data: 'x'.repeat(200) };
     await primary.setItem('complex', payload);
 
-    await sleep(10);
-
-    // Verify through secondary (synced)
+    // Verify through a second instance sharing the same database.
     const result = await secondary.getItem<{ data: string }>('complex');
     expect(result?.data).toBe('x'.repeat(200));
 
@@ -876,9 +730,7 @@ describe('Plugin edge cases and combinations', () => {
     expect(primaryBatch[0].value?.n).toBe(1);
     expect(primaryBatch[1].value?.n).toBe(2);
 
-    await sleep(10);
-
-    // Verify batch operations work through secondary (shared DB)
+    // Verify batch operations work through the shared database.
     const batchResult = await secondary.getItems<{ n: number }>(['b1', 'b2']);
     expect(batchResult[0].value?.n).toBe(1);
     expect(batchResult[1].value?.n).toBe(2);

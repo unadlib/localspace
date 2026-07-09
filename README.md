@@ -263,7 +263,6 @@ import localspace, {
   ttlPlugin,
   compressionPlugin,
   encryptionPlugin,
-  syncPlugin,
   quotaPlugin,
 } from 'localspace';
 
@@ -273,7 +272,6 @@ const store = localspace.createInstance({
     ttlPlugin({ defaultTTL: 60_000 }), // Auto-expire
     compressionPlugin({ threshold: 1024 }), // Compress > 1KB
     encryptionPlugin({ key: '32-byte-key-here' }), // Encrypt
-    syncPlugin({ channelName: 'my-app' }), // Multi-tab sync
     quotaPlugin({ maxSize: 5 * 1024 * 1024 }), // 5MB limit
   ],
   pluginErrorPolicy: 'strict', // Recommended for encryption
@@ -287,8 +285,12 @@ const store = localspace.createInstance({
 | **TTL**         | Auto-expire items with `{ data, expiresAt }` wrapper |
 | **Encryption**  | AES-GCM encryption via Web Crypto API                |
 | **Compression** | LZ-string compression for large values               |
-| **Sync**        | Multi-tab synchronization via BroadcastChannel       |
 | **Quota**       | Storage limit enforcement with LRU eviction          |
+
+Cross-context replication is intentionally not built in. For best-effort
+single-item notifications, adapt
+[`examples/broadcast-notification-plugin.ts`](./examples/broadcast-notification-plugin.ts)
+to your application-level synchronization protocol.
 
 📖 **Full Plugin Documentation:** [docs/plugins.md](./docs/plugins.md)
 📖 **Real-World Examples:** [docs/examples.md](./docs/examples.md)

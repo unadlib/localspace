@@ -10,7 +10,6 @@ const store = localspace.createInstance({
     ttlPlugin({ defaultTTL: 60_000 }),
     compressionPlugin({ threshold: 1024 }),
     encryptionPlugin({ key: '0123456789abcdef0123456789abcdef' }),
-    syncPlugin({ channelName: 'localspace-sync' }),
     quotaPlugin({ maxSize: 5 * 1024 * 1024, evictionPolicy: 'lru' }),
   ],
 });
@@ -24,7 +23,6 @@ const store = localspace.createInstance({
   - [TTL Plugin](#ttl-plugin)
   - [Encryption Plugin](#encryption-plugin)
   - [Compression Plugin](#compression-plugin)
-  - [Sync Plugin](#sync-plugin)
   - [Quota Plugin](#quota-plugin)
 - [Plugin Combination Best Practices](#plugin-combination-best-practices)
 - [Plugin Troubleshooting](#plugin-troubleshooting)
@@ -50,15 +48,14 @@ const store = localspace.createInstance({
 
 Plugins are sorted by `priority` (higher runs first in `before*`, last in `after*`). Default priorities:
 
-| Plugin      | Priority | Notes                                                                |
-| ----------- | -------- | -------------------------------------------------------------------- |
-| sync        | -100     | Runs last in `afterSet` to broadcast original (untransformed) values |
-| quota       | -10      | Runs late so it measures final payload sizes                         |
-| encryption  | 0        | Encrypts after compression so decrypt runs first in `after*`         |
-| compression | 5        | Runs before encryption so payload is compressible                    |
-| ttl         | 10       | Runs outermost so TTL wrapper is transformed by other plugins        |
+| Plugin      | Priority | Notes                                                        |
+| ----------- | -------- | ------------------------------------------------------------ |
+| quota       | -10      | Runs late so it measures final payload sizes                 |
+| encryption  | 0        | Encrypts after compression so decrypt runs first in `after*` |
+| compression | 5        | Runs before encryption so payload is compressible            |
+| ttl         | 10       | Runs outermost so TTL wrapper is transformed by other plugins |
 
-**Recommended order**: `[ttlPlugin, compressionPlugin, encryptionPlugin, syncPlugin, quotaPlugin]`
+**Recommended order**: `[ttlPlugin, compressionPlugin, encryptionPlugin, quotaPlugin]`
 
 ---
 
@@ -191,53 +188,6 @@ const pakoStore = localspace.createInstance({
 
 ---
 
-### Sync Plugin
-
-Keeps multiple tabs/processes in sync via `BroadcastChannel` (with `storage`-event fallback).
-
-> 1.x compatibility note: `syncPlugin` is deprecated as a main package plugin
-> export for the v2.0 surface. It broadcasts single-item `setItem`/`removeItem`
-> calls only; batch operations are not broadcast.
-
-**Options:**
-
-- `channelName` separates logical buses
-- `syncKeys` lets you scope which keys broadcast
-- `conflictStrategy` defaults to `last-write-wins`; provide `onConflict` (return `false` to drop remote writes) for merge logic
-
-```ts
-const syncedStore = localspace.createInstance({
-  name: 'synced-store',
-  plugins: [
-    syncPlugin({
-      channelName: 'my-app-sync',
-      syncKeys: ['cart', 'preferences', 'theme'], // Only sync these keys
-      conflictStrategy: 'last-write-wins',
-      onConflict: ({ key, localTimestamp, incomingTimestamp, value }) => {
-        console.log(
-          `Conflict on ${key}: local=${localTimestamp}, incoming=${incomingTimestamp}`
-        );
-        // Return false to reject the incoming change
-        return localTimestamp < incomingTimestamp;
-      },
-    }),
-  ],
-});
-
-// Single-item changes sync across tabs automatically
-await syncedStore.setItem('cart', {
-  items: [
-    /* cart items */
-  ],
-});
-```
-
-`setItems()` and `removeItems()` still pass through plugin hooks, but
-`syncPlugin` does not broadcast them. Use single-item writes for cross-tab
-broadcasts or add custom sync logic for batch updates.
-
----
-
 ### Quota Plugin
 
 Tracks approximate localspace payload size after every mutation and enforces
@@ -290,7 +240,6 @@ await quotaStore.setItems([
      compressionPlugin({ ... }), // priority: 5
      encryptionPlugin({ ... }),  // priority: 0
      quotaPlugin({ ... }),       // priority: -10
-     syncPlugin({ ... }),        // priority: -100
    ]
    ```
 
@@ -312,7 +261,11 @@ await quotaStore.setItems([
    });
    ```
 
-4. **Batch operations run through plugin hooks**: Built-in plugins support `setItems`, `getItems`, and `removeItems`, but plugin-specific side effects can differ. In particular, `syncPlugin` does not broadcast batch operations.
+4. **Batch operations run through plugin hooks**: Built-in plugins support `setItems`, `getItems`, and `removeItems`, but plugin-specific side effects can differ.
+
+Cross-context synchronization is application policy, not a built-in plugin.
+See `examples/broadcast-notification-plugin.ts` for a deliberately limited
+best-effort notification example.
 
 ---
 

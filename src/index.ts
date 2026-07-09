@@ -59,7 +59,6 @@ export { default as serializer } from './utils/serializer';
 export { ttlPlugin } from './plugins/ttl';
 export { encryptionPlugin } from './plugins/encryption';
 export { compressionPlugin } from './plugins/compression';
-export { syncPlugin } from './plugins/sync';
 export { quotaPlugin } from './plugins/quota';
 
 export { PluginAbortError } from './core/plugin-manager';

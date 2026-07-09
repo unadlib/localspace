@@ -7,19 +7,18 @@ Comprehensive examples demonstrating plugin usage in production scenarios.
 - [E-commerce Shopping Cart](#e-commerce-shopping-cart)
 - [Secure User Credentials Storage](#secure-user-credentials-storage)
 - [Offline-First Application Cache](#offline-first-application-cache)
-- [Multi-Tab Collaborative Editor](#multi-tab-collaborative-editor)
 - [Mobile App with Limited Storage](#mobile-app-with-limited-storage)
 
 ---
 
 ## E-commerce Shopping Cart
 
-Multi-tab synchronized cart with TTL expiration and quota management:
+Persistent cart with TTL expiration and size management:
 
 ```ts
-import localspace, { ttlPlugin, syncPlugin, quotaPlugin } from 'localspace';
+import localspace, { ttlPlugin, quotaPlugin } from 'localspace';
 
-// Create cart storage with sync and expiration
+// Create cart storage with expiration and an application-level size limit
 const cartStore = localspace.createInstance({
   name: 'ecommerce',
   storeName: 'cart',
@@ -33,20 +32,6 @@ const cartStore = localspace.createInstance({
           key,
           itemCount: value?.items?.length,
         });
-      },
-    }),
-
-    // Sync cart across browser tabs
-    syncPlugin({
-      channelName: 'cart-sync',
-      syncKeys: ['cart', 'wishlist', 'recently-viewed'],
-      onConflict: ({ key, localTimestamp, incomingTimestamp, value }) => {
-        // Accept newer cart, merge for wishlist
-        if (key === 'wishlist') {
-          // Merge logic handled in application layer
-          return true;
-        }
-        return incomingTimestamp > localTimestamp;
       },
     }),
 
@@ -330,150 +315,6 @@ async function prefetchAppData() {
 // Clear cache on logout
 async function clearCacheOnLogout() {
   await apiCache.clear();
-}
-```
-
----
-
-## Multi-Tab Collaborative Editor
-
-Real-time document sync with conflict resolution:
-
-```ts
-import localspace, { syncPlugin, ttlPlugin } from 'localspace';
-
-interface Document {
-  id: string;
-  content: string;
-  version: number;
-  lastModified: number;
-  author: string;
-}
-
-interface SyncState {
-  localVersion: number;
-  pendingChanges: Change[];
-}
-
-interface Change {
-  type: 'insert' | 'delete';
-  position: number;
-  text?: string;
-  length?: number;
-  timestamp: number;
-}
-
-const editorStore = localspace.createInstance({
-  name: 'collaborative-editor',
-  storeName: 'documents',
-  plugins: [
-    // Auto-save draft recovery
-    ttlPlugin({
-      keyTTL: {
-        'draft:*': 7 * 24 * 60 * 60 * 1000, // Drafts expire after 7 days
-        'sync-state:*': 24 * 60 * 60 * 1000, // Sync state expires after 24 hours
-      },
-    }),
-
-    // Sync edits across tabs
-    syncPlugin({
-      channelName: 'editor-sync',
-      conflictStrategy: 'custom',
-      onConflict: ({
-        key,
-        value: incoming,
-        localTimestamp,
-        incomingTimestamp,
-      }) => {
-        if (!key.startsWith('doc:')) return true;
-
-        const incomingDoc = incoming as Document;
-        // Version-based conflict resolution
-        // Higher version always wins
-        return incomingDoc.version > localTimestamp;
-      },
-    }),
-  ],
-});
-
-// Real-time collaborative editing service
-class CollaborativeEditor {
-  private documentId: string;
-  private localChanges: Change[] = [];
-  private onRemoteChange?: (doc: Document) => void;
-
-  constructor(documentId: string) {
-    this.documentId = documentId;
-    this.setupSyncListener();
-  }
-
-  private setupSyncListener() {
-    // Listen for remote changes via storage event or broadcast
-    window.addEventListener('storage', async (e) => {
-      if (e.key?.includes(`doc:${this.documentId}`)) {
-        const doc = await editorStore.getItem<Document>(
-          `doc:${this.documentId}`
-        );
-        if (doc) {
-          this.onRemoteChange?.(doc);
-        }
-      }
-    });
-  }
-
-  async loadDocument(): Promise<Document | null> {
-    return editorStore.getItem(`doc:${this.documentId}`);
-  }
-
-  async saveDocument(content: string, author: string): Promise<Document> {
-    const existing = await this.loadDocument();
-    const doc: Document = {
-      id: this.documentId,
-      content,
-      version: (existing?.version ?? 0) + 1,
-      lastModified: Date.now(),
-      author,
-    };
-
-    await editorStore.setItem(`doc:${this.documentId}`, doc);
-
-    // Also save draft for recovery
-    await editorStore.setItem(`draft:${this.documentId}`, {
-      content,
-      savedAt: Date.now(),
-    });
-
-    return doc;
-  }
-
-  async saveDraft(content: string) {
-    await editorStore.setItem(`draft:${this.documentId}`, {
-      content,
-      savedAt: Date.now(),
-    });
-  }
-
-  async recoverDraft(): Promise<string | null> {
-    const draft = await editorStore.getItem<{
-      content: string;
-      savedAt: number;
-    }>(`draft:${this.documentId}`);
-    return draft?.content ?? null;
-  }
-
-  onRemoteUpdate(callback: (doc: Document) => void) {
-    this.onRemoteChange = callback;
-  }
-
-  async getRecentDocuments(limit = 10): Promise<Document[]> {
-    const docs: Document[] = [];
-    await editorStore.iterate<Document, void>((value, key) => {
-      if (key.startsWith('doc:') && value) {
-        docs.push(value);
-      }
-    });
-    return docs.sort((a, b) => b.lastModified - a.lastModified).slice(0, limit);
-  }
 }
 ```
 
