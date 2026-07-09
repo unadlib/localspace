@@ -79,7 +79,6 @@ interface DbContext {
   idleTimer?: ReturnType<typeof setTimeout> | null;
   activeTransactions: number;
   pendingTransactions: Array<() => void>;
-  coalesceStates: Record<string, CoalesceState>;
 }
 
 interface DeferredOperation {
@@ -87,42 +86,6 @@ interface DeferredOperation {
   resolve: () => void;
   reject: (error: Error) => void;
 }
-
-type QueuedWrite =
-  | {
-      type: 'set';
-      key: string;
-      value: unknown;
-      resolve: (value: unknown) => void;
-      reject: (error: Error) => void;
-    }
-  | {
-      type: 'remove';
-      key: string;
-      resolve: () => void;
-      reject: (error: Error) => void;
-    };
-type CoalesceQueue = QueuedWrite[];
-
-interface CoalesceState {
-  storeName: string;
-  queue: CoalesceQueue;
-  timer?: ReturnType<typeof setTimeout> | null;
-  coalescing?: boolean;
-  drainPromise?: Promise<void> | null;
-  stats: {
-    totalWrites: number;
-    coalescedWrites: number;
-    transactionsSaved: number;
-  };
-}
-
-const createEmptyStats = () => ({
-  totalWrites: 0,
-  coalescedWrites: 0,
-  transactionsSaved: 0,
-  avgCoalesceSize: 0,
-});
 
 function getDefaultIDB(): IDBFactory | null {
   if (typeof indexedDB !== 'undefined') {
@@ -342,22 +305,6 @@ function createDbContext(): DbContext {
     idleTimer: null,
     activeTransactions: 0,
     pendingTransactions: [],
-    coalesceStates: {},
-  };
-}
-
-function createCoalesceState(storeName: string): CoalesceState {
-  return {
-    storeName,
-    queue: [],
-    timer: null,
-    coalescing: false,
-    drainPromise: null,
-    stats: {
-      totalWrites: 0,
-      coalescedWrites: 0,
-      transactionsSaved: 0,
-    },
   };
 }
 
@@ -396,60 +343,6 @@ function ensureDbContext(dbInfo: DbInfo): DbContext {
   const key = getDbContextKey(dbInfo);
   dbContexts[key] = dbContexts[key] || createDbContext();
   return dbContexts[key];
-}
-
-function getCoalesceStateKey(dbInfo: DbInfo): string {
-  return requireStoreName(dbInfo);
-}
-
-function getCoalesceState(dbInfo: DbInfo): CoalesceState | undefined {
-  const dbContext = getDbContext(dbInfo);
-  if (!dbContext) {
-    return undefined;
-  }
-
-  return dbContext.coalesceStates[getCoalesceStateKey(dbInfo)];
-}
-
-function ensureCoalesceState(dbInfo: DbInfo): CoalesceState {
-  const dbContext = ensureDbContext(dbInfo);
-  const key = getCoalesceStateKey(dbInfo);
-  dbContext.coalesceStates[key] =
-    dbContext.coalesceStates[key] || createCoalesceState(key);
-  return dbContext.coalesceStates[key];
-}
-
-function clearCoalesceState(dbInfo: DbInfo): void {
-  const dbContext = getDbContext(dbInfo);
-  if (!dbContext) {
-    return;
-  }
-
-  const key = getCoalesceStateKey(dbInfo);
-  const coalesceState = dbContext.coalesceStates[key];
-  if (!coalesceState) {
-    return;
-  }
-
-  if (coalesceState.timer) {
-    clearTimeout(coalesceState.timer);
-  }
-
-  delete dbContext.coalesceStates[key];
-}
-
-function getDbInfoForCoalesceState(
-  dbInfo: DbInfo,
-  coalesceState: CoalesceState
-): DbInfo {
-  if (dbInfo.storeName === coalesceState.storeName) {
-    return dbInfo;
-  }
-
-  return {
-    ...dbInfo,
-    storeName: coalesceState.storeName,
-  };
 }
 
 function deferReadiness(dbInfo: DbInfo): void {
@@ -681,218 +574,6 @@ function scheduleIdleClose(dbInfo: DbInfo): void {
       forage._dbInfo.db = null;
     }
   }, idleMs);
-}
-
-function enqueueCoalescedWrite(
-  dbInfo: DbInfo,
-  opData:
-    | { type: 'set'; key: string; value: unknown }
-    | { type: 'remove'; key: string }
-): Promise<unknown> {
-  const coalesceState = ensureCoalesceState(dbInfo);
-  const op: QueuedWrite =
-    opData.type === 'set'
-      ? {
-          type: 'set',
-          key: opData.key,
-          value: opData.value,
-          resolve: () => {},
-          reject: () => {},
-        }
-      : {
-          type: 'remove',
-          key: opData.key,
-          resolve: () => {},
-          reject: () => {},
-        };
-
-  coalesceState.queue.push(op);
-  coalesceState.stats.totalWrites++;
-
-  const windowMs = dbInfo.coalesceWindowMs ?? 8;
-  const maxBatch = dbInfo.coalesceMaxBatchSize;
-  const exceedsBatch =
-    typeof maxBatch === 'number' && Number.isFinite(maxBatch) && maxBatch > 0
-      ? coalesceState.queue.length >= maxBatch
-      : false;
-
-  if (exceedsBatch) {
-    // Flush immediately to keep batches bounded.
-    void flushCoalescedWrites(dbInfo, coalesceState);
-  } else if (!coalesceState.timer) {
-    coalesceState.timer = setTimeout(() => {
-      coalesceState.timer = null;
-      void flushCoalescedWrites(dbInfo, coalesceState);
-    }, windowMs);
-  }
-
-  const flushPromise = new Promise((resolve, reject) => {
-    op.resolve = resolve as (value: unknown) => void;
-    op.reject = reject;
-  });
-
-  return flushPromise;
-}
-
-function flushCoalescedWrites(
-  dbInfo: DbInfo,
-  coalesceState: CoalesceState
-): Promise<void> {
-  if (coalesceState.timer) {
-    clearTimeout(coalesceState.timer);
-    coalesceState.timer = null;
-  }
-
-  if (coalesceState.coalescing) {
-    return coalesceState.drainPromise ?? Promise.resolve();
-  }
-
-  const batch = coalesceState.queue.splice(0);
-  if (batch.length === 0) {
-    return Promise.resolve();
-  }
-
-  const effectiveDbInfo = getDbInfoForCoalesceState(dbInfo, coalesceState);
-  const maxBatch = dbInfo.coalesceMaxBatchSize;
-  const batches =
-    typeof maxBatch === 'number' && Number.isFinite(maxBatch) && maxBatch > 0
-      ? chunkArray(batch, maxBatch)
-      : [batch];
-
-  coalesceState.coalescing = true;
-
-  const operation = new Promise<void>((resolve, reject) => {
-    const rejectAll = (error: Error) => {
-      for (const op of batch) {
-        op.reject(error);
-      }
-      reject(error);
-    };
-
-    const processBatch = (ops: QueuedWrite[]): Promise<void> =>
-      new Promise<void>((batchResolve, batchReject) => {
-        createTransaction(
-          effectiveDbInfo,
-          READ_WRITE,
-          (err: Error | null, transaction?: IDBTransaction) => {
-            if (err || !transaction) {
-              batchReject(err || new Error('Failed to create transaction'));
-              return;
-            }
-
-            try {
-              const storeName = requireStoreName(effectiveDbInfo);
-              const store = transaction.objectStore(storeName);
-              let requestError: Error | null = null;
-
-              for (const op of ops) {
-                if (op.type === 'set') {
-                  const req = store.put(op.value, op.key);
-                  req.onerror = () => {
-                    requestError =
-                      req.error || new Error(`Failed to set "${String(op.key)}"`);
-                  };
-                } else {
-                  const req = store.delete(op.key);
-                  req.onerror = () => {
-                    requestError =
-                      req.error || new Error(`Failed to remove "${String(op.key)}"`);
-                  };
-                }
-              }
-
-              transaction.oncomplete = () => {
-                for (const op of ops) {
-                  if (op.type === 'set') {
-                    op.resolve(op.value);
-                  } else {
-                    op.resolve();
-                  }
-                }
-                if (ops.length > 1) {
-                  coalesceState.stats.coalescedWrites += ops.length;
-                  coalesceState.stats.transactionsSaved += ops.length - 1;
-                }
-                batchResolve();
-              };
-
-              transaction.onabort = transaction.onerror = () => {
-                batchReject(
-                  requestError ||
-                    transaction.error ||
-                    new Error('Failed to apply coalesced writes')
-                );
-              };
-            } catch (error) {
-              batchReject(error as Error);
-            }
-          }
-        );
-      });
-
-    (async () => {
-      for (const ops of batches) {
-        await processBatch(ops);
-      }
-    })()
-      .then(() => resolve())
-      .catch(rejectAll);
-  });
-
-  coalesceState.drainPromise = operation
-    .then(() => {
-      coalesceState.coalescing = false;
-      if (coalesceState.queue.length > 0) {
-        return flushCoalescedWrites(dbInfo, coalesceState);
-      }
-      return undefined;
-    })
-    .catch((error) => {
-      coalesceState.coalescing = false;
-      throw error;
-    })
-    .finally(() => {
-      if (!coalesceState.coalescing && coalesceState.queue.length === 0) {
-        coalesceState.drainPromise = null;
-      }
-    });
-
-  return coalesceState.drainPromise;
-}
-
-function drainCoalescedWrites(
-  dbInfo: DbInfo,
-  options?: { force?: boolean; scope?: 'store' | 'database' }
-): Promise<void> {
-  // Skip flush when coalescing is disabled unless force is explicitly requested.
-  if (!options?.force && !dbInfo.coalesceWrites) {
-    return Promise.resolve();
-  }
-  if (!options?.force && dbInfo.coalesceReadConsistency === 'eventual') {
-    return Promise.resolve();
-  }
-
-  const dbContext = getDbContext(dbInfo);
-  if (!dbContext) {
-    return Promise.resolve();
-  }
-
-  if (options?.scope === 'database') {
-    const states = Object.values(dbContext.coalesceStates);
-
-    return states.reduce<Promise<void>>(
-      (chain, coalesceState) =>
-        chain.then(() => flushCoalescedWrites(dbInfo, coalesceState)),
-      Promise.resolve()
-    );
-  }
-
-  const coalesceState = getCoalesceState(dbInfo);
-  if (!coalesceState) {
-    return Promise.resolve();
-  }
-
-  return flushCoalescedWrites(dbInfo, coalesceState);
 }
 
 function createTransaction(
@@ -1141,7 +822,6 @@ function getItem<T>(
   const promise = new Promise<T | null>((resolve, reject) => {
     self
       .ready()
-      .then(() => drainCoalescedWrites(self._dbInfo))
       .then(() => {
         createTransaction(
           self._dbInfo,
@@ -1197,7 +877,6 @@ function getItems<T>(
   const promise = new Promise<BatchResponse<T>>(async (resolve, reject) => {
     try {
       await self.ready();
-      await drainCoalescedWrites(self._dbInfo);
 
       if (normalizedKeys.length === 0) {
         resolve([]);
@@ -1292,7 +971,6 @@ function iterate<T, U>(
   const promise = new Promise<U>((resolve, reject) => {
     self
       .ready()
-      .then(() => drainCoalescedWrites(self._dbInfo))
       .then(() => {
         createTransaction(
           self._dbInfo,
@@ -1359,7 +1037,6 @@ function setItems<T>(
   const promise = new Promise<BatchResponse<T>>(async (resolve, reject) => {
     try {
       await self.ready();
-      await drainCoalescedWrites(self._dbInfo);
       const dbInfo = self._dbInfo;
 
       let blobSupport: boolean | undefined;
@@ -1477,10 +1154,6 @@ async function setItem<T>(
         await self.ready();
         dbInfo = self._dbInfo;
       }
-      const coalesceEnabled = !!dbInfo.coalesceWrites;
-      if (coalesceEnabled && dbInfo.coalesceReadConsistency !== 'eventual') {
-        await drainCoalescedWrites(dbInfo);
-      }
 
       if (toString.call(value) === '[object Blob]') {
         const blobSupport = await ensureBlobSupportForDb(dbInfo);
@@ -1490,21 +1163,6 @@ async function setItem<T>(
       }
 
       const normalizedValue = (value === undefined ? null : value) as T;
-      const coalesce = !!dbInfo.coalesceWrites;
-
-      if (coalesce) {
-        const pending = enqueueCoalescedWrite(
-          dbInfo,
-          {
-            type: 'set',
-            key,
-            value: normalizedValue,
-          }
-        );
-
-        pending.then((result) => resolve(result as T)).catch(reject);
-        return;
-      }
 
       createTransaction(
         dbInfo,
@@ -1559,15 +1217,6 @@ function removeItem(
         dbInfo = self._dbInfo;
       }
 
-      const coalesce = !!dbInfo.coalesceWrites;
-
-      if (coalesce) {
-        const pending = enqueueCoalescedWrite(dbInfo, { type: 'remove', key });
-
-        pending.then(() => resolve()).catch(reject);
-        return;
-      }
-
       createTransaction(
         dbInfo,
         READ_WRITE,
@@ -1617,8 +1266,6 @@ function removeItems(
 
       const dbInfo = self._dbInfo;
       const batchSize = dbInfo.maxBatchSize ?? normalizedKeys.length;
-
-      await drainCoalescedWrites(dbInfo, { force: true });
 
       const processBatch = (batchKeys: string[]) =>
         new Promise<void>((batchResolve, batchReject) => {
@@ -1687,7 +1334,6 @@ function runTransaction<T>(
     try {
       await self.ready();
       const dbInfo = self._dbInfo;
-      await drainCoalescedWrites(dbInfo, { force: true });
       // Compute blob support once up front so we don't pause an empty transaction later.
       let precomputedBlobSupport: boolean | undefined;
       try {
@@ -1894,7 +1540,6 @@ function clear(
   const promise = new Promise<void>((resolve, reject) => {
     self
       .ready()
-      .then(() => drainCoalescedWrites(self._dbInfo, { force: true }))
       .then(() => {
         createTransaction(
           self._dbInfo,
@@ -1936,7 +1581,6 @@ function length(
   const promise = new Promise<number>((resolve, reject) => {
     self
       .ready()
-      .then(() => drainCoalescedWrites(self._dbInfo))
       .then(() => {
         createTransaction(
           self._dbInfo,
@@ -1981,7 +1625,6 @@ function key(
 
     self
       .ready()
-      .then(() => drainCoalescedWrites(self._dbInfo))
       .then(() => {
         createTransaction(
           self._dbInfo,
@@ -2039,7 +1682,6 @@ function keys(
   const promise = new Promise<string[]>((resolve, reject) => {
     self
       .ready()
-      .then(() => drainCoalescedWrites(self._dbInfo))
       .then(() => {
         createTransaction(
           self._dbInfo,
@@ -2120,10 +1762,6 @@ function dropInstance(
   const dropDbInfo: DbInfo = {
     ...(effectiveOptions as DbInfo),
     idbFactory: currentDbInfo?.idbFactory ?? undefined,
-    coalesceWrites: currentDbInfo?.coalesceWrites,
-    coalesceWindowMs: currentDbInfo?.coalesceWindowMs,
-    coalesceReadConsistency: currentDbInfo?.coalesceReadConsistency,
-    coalesceMaxBatchSize: currentDbInfo?.coalesceMaxBatchSize,
   };
   if (!dropDbInfo.bucket && currentConfig.bucket) {
     dropDbInfo.bucket = currentConfig.bucket;
@@ -2157,10 +1795,6 @@ function dropInstance(
   // Case 1: Drop entire database (no storeName specified)
   if (!effectiveOptions.storeName) {
     promise = dbPromise.then(async (db) => {
-      await drainCoalescedWrites(dropDbInfo, {
-        force: true,
-        scope: 'database',
-      });
       deferReadiness(dropDbInfo);
 
       const dbContext = dbContexts[contextKey];
@@ -2222,12 +1856,7 @@ function dropInstance(
   } else {
     // Case 2: Drop specific object store
     promise = dbPromise.then(async (db) => {
-      await drainCoalescedWrites(dropDbInfo, {
-        force: true,
-        scope: 'database',
-      });
       if (!db.objectStoreNames.contains(effectiveOptions.storeName!)) {
-        clearCoalesceState(dropDbInfo);
         // Store doesn't exist, nothing to do
         return;
       }
@@ -2286,7 +1915,6 @@ function dropInstance(
         .then((db) => {
           if (dbContext) {
             dbContext.db = db;
-            clearCoalesceState(dropDbInfo);
             for (const forage of forages) {
               forage._dbInfo.db = db;
               advanceReadiness(forage._dbInfo);
@@ -2311,40 +1939,6 @@ function dropInstance(
   return wrappedPromise;
 }
 
-function getPerformanceStats(
-  this: IndexedDBDriverContext
-): import('../types').PerformanceStats {
-  const dbInfo = this._dbInfo;
-  if (!dbInfo) {
-    return createEmptyStats();
-  }
-
-  const dbContext = getDbContext(dbInfo);
-
-  if (!dbContext) {
-    return createEmptyStats();
-  }
-
-  const coalesceState = getCoalesceState(dbInfo);
-  if (!coalesceState) {
-    return createEmptyStats();
-  }
-
-  const stats = coalesceState.stats;
-  const avgCoalesceSize =
-    stats.coalescedWrites > 0
-      ? stats.coalescedWrites /
-        (stats.totalWrites - stats.transactionsSaved || 1)
-      : 0;
-
-  return {
-    totalWrites: stats.totalWrites,
-    coalescedWrites: stats.coalescedWrites,
-    transactionsSaved: stats.transactionsSaved,
-    avgCoalesceSize: parseFloat(avgCoalesceSize.toFixed(2)),
-  };
-}
-
 const asyncStorage: Driver = {
   _driver: 'asyncStorage',
   _initStorage,
@@ -2362,7 +1956,6 @@ const asyncStorage: Driver = {
   key,
   keys,
   dropInstance,
-  getPerformanceStats,
 };
 
 // Expose limited internals for testing without altering public API surface

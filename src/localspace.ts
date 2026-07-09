@@ -92,10 +92,6 @@ const DefaultConfig: LocalSpaceConfig = {
   storeName: 'keyvaluepairs',
   version: 1.0,
   compatibilityMode: false,
-  coalesceWrites: false,
-  coalesceWindowMs: 8,
-  coalesceReadConsistency: 'strong',
-  coalesceMaxBatchSize: undefined,
   pluginInitPolicy: 'fail',
   pluginErrorPolicy: 'lenient',
 };

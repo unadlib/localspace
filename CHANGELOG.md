@@ -6,6 +6,8 @@
 
 - Removed `coalesceFireAndForget`; write promises no longer resolve before
   IndexedDB persistence completes.
+- Removed automatic write coalescing and its `getPerformanceStats()` API. Use
+  explicit `setItems()` and `removeItems()` calls for predictable batching.
 
 ### Fixed
 

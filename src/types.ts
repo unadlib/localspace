@@ -74,31 +74,6 @@ export interface LocalSpaceConfig {
   maxConcurrentTransactions?: number;
 
   /**
-   * Experimental: enable automatic write coalescing for single set/remove
-   * operations. Prefer setItems/removeItems for predictable bulk writes.
-   */
-  coalesceWrites?: boolean;
-
-  /**
-   * Time window (ms) to coalesce writes when coalesceWrites is enabled.
-   */
-  coalesceWindowMs?: number;
-
-  /**
-   * Optional maximum number of operations to coalesce per flush. When exceeded,
-   * the queue is flushed immediately and split into multiple transactions to
-   * avoid oversized batches.
-   */
-  coalesceMaxBatchSize?: number;
-
-  /**
-   * Read consistency when coalesceWrites is enabled.
-   * - 'strong': drain pending writes before reads (default)
-   * - 'eventual': skip drain for faster reads at the cost of staleness
-   */
-  coalesceReadConsistency?: 'strong' | 'eventual';
-
-  /**
    * Driver(s) to use (string or array of strings)
    */
   driver?: string | string[];
@@ -262,10 +237,6 @@ export interface Driver {
     callback?: Callback<void>
   ): Promise<void>;
 
-  /**
-   * Get performance statistics (optional, IndexedDB only)
-   */
-  getPerformanceStats?(): PerformanceStats;
 }
 
 /**
@@ -467,11 +438,6 @@ export interface LocalSpaceInstance {
   ): Promise<void>;
 
   /**
-   * Get performance statistics (only available for IndexedDB driver)
-   */
-  getPerformanceStats?(): PerformanceStats;
-
-  /**
    * Internal properties
    */
   _initReady?: () => Promise<void>;
@@ -518,28 +484,6 @@ export interface TransactionScope {
     iterator: (value: T, key: string, iterationNumber: number) => U
   ): Promise<U>;
   clear(): Promise<void>;
-}
-
-/**
- * Performance statistics for write coalescing
- */
-export interface PerformanceStats {
-  /**
-   * Total number of individual write operations (setItem/removeItem)
-   */
-  totalWrites: number;
-  /**
-   * Number of writes that were merged via coalescing
-   */
-  coalescedWrites: number;
-  /**
-   * Number of transactions saved by coalescing
-   */
-  transactionsSaved: number;
-  /**
-   * Average number of operations per coalesced batch
-   */
-  avgCoalesceSize: number;
 }
 
 export type PluginEnabledPredicate = boolean | (() => boolean);

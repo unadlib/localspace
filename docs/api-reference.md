@@ -435,22 +435,6 @@ Tears down plugins and releases resources.
 await store.destroy();
 ```
 
-### `getPerformanceStats(): PerformanceStats` (IndexedDB only)
-
-Returns write coalescing statistics.
-
-```ts
-const stats = localspace.getPerformanceStats?.();
-// {
-//   totalWrites: 150,
-//   coalescedWrites: 120,
-//   transactionsSaved: 100,
-//   avgCoalesceSize: 4.8
-// }
-```
-
----
-
 ## Configuration Options
 
 Full `LocalSpaceConfig` interface:
@@ -483,12 +467,6 @@ interface LocalSpaceConfig {
 
   // Batch operations
   maxBatchSize?: number; // Split large batches into chunks
-
-  // Experimental write coalescing (IndexedDB only)
-  coalesceWrites?: boolean; // Enable IndexedDB write merging (default: false)
-  coalesceWindowMs?: number; // Merge window in ms (default: 8)
-  coalesceMaxBatchSize?: number; // Max ops per flush
-  coalesceReadConsistency?: 'strong' | 'eventual'; // Read behavior
 
   // Compatibility
   compatibilityMode?: boolean; // Legacy callback style for driver methods

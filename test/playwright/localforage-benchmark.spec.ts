@@ -25,12 +25,6 @@ const CONCURRENCY_CONFIG = {
   concurrency: 8,
 };
 
-const COALESCE_CONFIG = {
-  itemCount: 200,
-  payloadBytes: 256,
-  concurrency: 8,
-};
-
 const randomStoreName = (label: string) =>
   `${label}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
@@ -464,111 +458,6 @@ test.describe('localspace vs localforage benchmarks', () => {
     expect(metrics.localspace.getMs).toBeGreaterThan(0);
     expect(metrics.localforage.setMs).toBeGreaterThan(0);
     expect(metrics.localforage.getMs).toBeGreaterThan(0);
-  });
-
-  test('localspace coalesce modes under concurrency', async ({ page }) => {
-    await ensureStoragesReady(page);
-
-    const metrics = await page.evaluate(async (config) => {
-      const localspace = (window as any).localspace;
-      const randomStoreName = (label: string) =>
-        `${label}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-
-      const payload = 'z'.repeat(config.payloadBytes);
-      const items = Array.from({ length: config.itemCount }, (_, index) => ({
-        key: `coalesce-${index}`,
-        value: `${payload}-${index}`,
-      }));
-
-      const runWithLimit = async <T>(tasks: Array<() => Promise<T>>, limit: number) => {
-        let cursor = 0;
-        const results: T[] = [];
-
-        const worker = async () => {
-          while (cursor < tasks.length) {
-            const current = tasks[cursor];
-            cursor += 1;
-            results.push(await current());
-          }
-        };
-
-        const workers = Array.from({ length: Math.max(1, limit) }, () => worker());
-        await Promise.all(workers);
-        return results;
-      };
-
-      const modes = [
-        {
-          label: 'default',
-          options: {},
-        },
-        {
-          label: 'coalesce-disabled',
-          options: { coalesceWrites: false },
-        },
-        {
-          label: 'coalesce-eventual',
-          options: {
-            coalesceWrites: true,
-            coalesceReadConsistency: 'eventual' as const,
-          },
-        },
-      ];
-
-      const measure = async (mode: (typeof modes)[number]) => {
-        const instance = localspace.createInstance({
-          name: `playwright-localspace-${mode.label}`,
-          storeName: randomStoreName(mode.label),
-          ...mode.options,
-        });
-
-        await instance.setDriver([instance.INDEXEDDB]);
-        await instance.ready();
-        await instance.clear();
-
-        const setTasks = items.map((item) => () => instance.setItem(item.key, item.value));
-        const setStart = performance.now();
-        await runWithLimit(setTasks, config.concurrency);
-        const setMs = performance.now() - setStart;
-
-        const getTasks = items.map((item) => () => instance.getItem(item.key));
-        const getStart = performance.now();
-        await runWithLimit(getTasks, config.concurrency);
-        const getMs = performance.now() - getStart;
-
-        await instance.dropInstance();
-
-        return {
-          label: mode.label,
-          setMs,
-          getMs,
-          setOpsPerSec: (items.length / setMs) * 1000,
-          getOpsPerSec: (items.length / getMs) * 1000,
-        };
-      };
-
-      const results = [] as Array<Awaited<ReturnType<typeof measure>>>;
-      for (const mode of modes) {
-        results.push(await measure(mode));
-      }
-
-      return results;
-    }, COALESCE_CONFIG);
-
-    console.log(
-      `[coalesce] ${COALESCE_CONFIG.itemCount} items x ${COALESCE_CONFIG.payloadBytes}B, concurrency=${COALESCE_CONFIG.concurrency}`,
-    );
-    for (const mode of metrics) {
-      console.log(
-        `${mode.label}: set/get ops/sec ${mode.setOpsPerSec.toFixed(2)} / ${mode.getOpsPerSec.toFixed(2)} (set ${mode.setMs.toFixed(2)}ms, get ${mode.getMs.toFixed(2)}ms)`,
-      );
-    }
-
-    expect(metrics.length).toBeGreaterThan(0);
-    for (const mode of metrics) {
-      expect(mode.setMs).toBeGreaterThan(0);
-      expect(mode.getMs).toBeGreaterThan(0);
-    }
   });
 
   test('startup/teardown latency comparison', async ({ page }) => {

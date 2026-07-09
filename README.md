@@ -87,7 +87,6 @@ That's it! For more details, see the sections below.
 - [Installation](#installation)
 - [Core API](#core-api)
 - [Batch Operations](#batch-operations)
-- [Coalesced Writes](#coalesced-writes)
 - [Plugin System](#plugin-system)
 - [Configuration](#configuration)
 - [Performance Notes](#performance-notes)
@@ -255,39 +254,6 @@ compatibility, but grouped operations run sequentially and are not atomic.
 
 ---
 
-## Coalesced Writes
-
-Experimental IndexedDB-only batching for rapid single-key writes. Prefer
-`setItems()` for predictable bulk writes; use coalescing only after measuring
-your workload.
-
-```ts
-const store = localspace.createInstance({
-  coalesceWrites: true, // Experimental; default: false
-  coalesceWindowMs: 8, // 8ms merge window
-});
-
-// These are automatically batched into one transaction
-await Promise.all([
-  store.setItem('a', 1),
-  store.setItem('b', 2),
-  store.setItem('c', 3),
-]);
-```
-
-**Consistency modes:**
-
-- `'strong'` (default): Reads flush pending writes first
-- `'eventual'`: Reads may see stale values briefly
-
-```ts
-// Get performance stats
-const stats = localspace.getPerformanceStats?.();
-// { totalWrites: 150, coalescedWrites: 120, transactionsSaved: 100 }
-```
-
----
-
 ## Plugin System
 
 localspace ships with a powerful plugin engine:
@@ -348,7 +314,6 @@ const store = localspace.createInstance({
 
   // Batching
   maxBatchSize: 200, // Split large batches
-  coalesceWrites: false, // Experimental IndexedDB-only write coalescing
 
   // Plugins
   plugins: [],
@@ -375,7 +340,6 @@ const mobileStore = await createReactNativeInstance(localspace, {
 ## Performance Notes
 
 - **Batch APIs outperform loops:** `setItems()` ~6x faster, `getItems()` ~7.7x faster than per-item loops
-- **Coalesced writes:** experimental IndexedDB-only write burst optimization
 - **Transaction helpers:** `runTransaction()` is atomic on IndexedDB
 - **IndexedDB durability:** Chrome 121+ uses relaxed durability by default
 - **Non-IndexedDB grouped work is non-atomic:** Prefer IndexedDB for atomic operations
@@ -390,7 +354,6 @@ const mobileStore = await createReactNativeInstance(localspace, {
 | Quota errors                | Check `error.code === 'QUOTA_EXCEEDED'`                |
 | Persistent storage blocked  | Add `localspace.MEMORY` as an explicit fallback        |
 | Plugin errors swallowed     | Set `pluginErrorPolicy: 'strict'`                      |
-| Stale reads with coalescing | Use `coalesceReadConsistency: 'strong'` (default)      |
 
 **Errors** are `LocalSpaceError` with `code`, `details`, and `cause` properties.
 
