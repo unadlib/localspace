@@ -241,189 +241,70 @@ writes without automatically deleting data.
 
 ## Custom Plugin Development
 
-Creating your own plugin with full lifecycle support:
+Creating a plugin that times successful single-item and batch entry operations:
 
 ```ts
 import localspace, { LocalSpacePlugin, PluginContext } from 'localspace';
 
-interface AuditLogEntry {
-  timestamp: number;
-  operation: 'set' | 'get' | 'remove' | 'clear';
-  key?: string;
-  success: boolean;
+interface TimingEntry {
+  operation: 'set' | 'get' | 'remove';
+  key: string;
   duration: number;
-  error?: string;
 }
 
-interface AuditPluginOptions {
-  logToConsole?: boolean;
-  maxLogSize?: number;
-  onAuditEntry?: (entry: AuditLogEntry) => void;
-  excludeKeys?: string[];
-}
+function timingPlugin(report: (entry: TimingEntry) => void): LocalSpacePlugin {
+  const startedAtKey = 'timing-plugin-started-at';
 
-function auditPlugin(options: AuditPluginOptions = {}): LocalSpacePlugin {
-  const {
-    logToConsole = false,
-    maxLogSize = 1000,
-    onAuditEntry,
-    excludeKeys = [],
-  } = options;
+  const start = (context: PluginContext) => {
+    context.operationState[startedAtKey] = performance.now();
+  };
 
-  const auditLog: AuditLogEntry[] = [];
-
-  function addEntry(entry: AuditLogEntry) {
-    auditLog.push(entry);
-    if (auditLog.length > maxLogSize) {
-      auditLog.shift(); // Remove oldest entry
+  const finish = (
+    operation: TimingEntry['operation'],
+    key: string,
+    context: PluginContext
+  ) => {
+    const startedAt = context.operationState[startedAtKey];
+    if (typeof startedAt === 'number') {
+      report({ operation, key, duration: performance.now() - startedAt });
     }
-
-    if (logToConsole) {
-      console.log(`[Audit] ${entry.operation} ${entry.key ?? ''}`, entry);
-    }
-
-    onAuditEntry?.(entry);
-  }
-
-  function shouldAudit(key?: string): boolean {
-    return (
-      !key ||
-      !excludeKeys.some((pattern) =>
-        pattern.endsWith('*')
-          ? key.startsWith(pattern.slice(0, -1))
-          : key === pattern
-      )
-    );
-  }
+  };
 
   return {
-    name: 'audit',
-    priority: 100, // Run first (before other plugins)
-
-    async onInit(context: PluginContext) {
-      console.log('[Audit] Plugin initialized for', context.config.name);
+    name: 'timing',
+    beforeSet(_key, value, context) {
+      start(context);
+      return value;
     },
-
-    async onDestroy() {
-      console.log(
-        '[Audit] Plugin destroyed, logged',
-        auditLog.length,
-        'entries'
-      );
+    afterSet(key, _value, context) {
+      finish('set', key, context);
     },
-
-    async beforeSet(context) {
-      if (shouldAudit(context.key)) {
-        context.operationState.auditStartTime = performance.now();
-      }
-      return context.value;
+    beforeGet(key, context) {
+      start(context);
+      return key;
     },
-
-    async afterSet(context) {
-      if (shouldAudit(context.key) && context.operationState.auditStartTime) {
-        addEntry({
-          timestamp: Date.now(),
-          operation: 'set',
-          key: context.key,
-          success: true,
-          duration: performance.now() - context.operationState.auditStartTime,
-        });
-      }
-      return context.value;
+    afterGet(key, value, context) {
+      finish('get', key, context);
+      return value;
     },
-
-    async beforeGet(context) {
-      if (shouldAudit(context.key)) {
-        context.operationState.auditStartTime = performance.now();
-      }
-      return context.value;
+    beforeRemove(key, context) {
+      start(context);
+      return key;
     },
-
-    async afterGet(context) {
-      if (shouldAudit(context.key) && context.operationState.auditStartTime) {
-        addEntry({
-          timestamp: Date.now(),
-          operation: 'get',
-          key: context.key,
-          success: context.value !== null,
-          duration: performance.now() - context.operationState.auditStartTime,
-        });
-      }
-      return context.value;
-    },
-
-    async beforeRemove(context) {
-      if (shouldAudit(context.key)) {
-        context.operationState.auditStartTime = performance.now();
-      }
-    },
-
-    async afterRemove(context) {
-      if (shouldAudit(context.key) && context.operationState.auditStartTime) {
-        addEntry({
-          timestamp: Date.now(),
-          operation: 'remove',
-          key: context.key,
-          success: true,
-          duration: performance.now() - context.operationState.auditStartTime,
-        });
-      }
-    },
-
-    async beforeClear(context) {
-      context.operationState.auditStartTime = performance.now();
-    },
-
-    async afterClear(context) {
-      if (context.operationState.auditStartTime) {
-        addEntry({
-          timestamp: Date.now(),
-          operation: 'clear',
-          success: true,
-          duration: performance.now() - context.operationState.auditStartTime,
-        });
-      }
-    },
-
-    onError(error, context) {
-      addEntry({
-        timestamp: Date.now(),
-        operation: context.operation as 'set' | 'get' | 'remove' | 'clear',
-        key: context.key,
-        success: false,
-        duration: 0,
-        error: error.message,
-      });
-    },
-
-    // Expose audit log for external access
-    getAuditLog: () => [...auditLog],
-    clearAuditLog: () => {
-      auditLog.length = 0;
+    afterRemove(key, context) {
+      finish('remove', key, context);
     },
   };
 }
 
-// Usage
-const auditedStore = localspace.createInstance({
-  name: 'audited-store',
+const timedStore = localspace.createInstance({
+  name: 'timed-store',
   plugins: [
-    auditPlugin({
-      logToConsole: true,
-      maxLogSize: 500,
-      excludeKeys: ['internal:*', 'temp:*'],
-      onAuditEntry: (entry) => {
-        // Send to analytics or monitoring service
-        if (!entry.success) {
-          reportError(entry);
-        }
-      },
+    timingPlugin((entry) => {
+      console.log(`${entry.operation} ${entry.key}: ${entry.duration}ms`);
     }),
   ],
 });
 
-function reportError(entry: AuditLogEntry) {
-  // Send to error tracking service
-  console.error('Storage operation failed:', entry);
-}
+await timedStore.setItem('key', 'value');
 ```
