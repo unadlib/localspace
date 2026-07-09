@@ -8,16 +8,16 @@ import type {
   KeyValuePair,
   TransactionMode,
   TransactionScope,
-} from '../types';
-import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors';
-import { createLocalSpaceError, toLocalSpaceError } from '../errors';
+} from '../types.js';
+import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors.js';
+import { createLocalSpaceError, toLocalSpaceError } from '../errors.js';
 import {
   normalizeBatchEntries,
   normalizeKey,
   createBlob,
   chunkArray,
-} from '../utils/helpers';
-import serializer from '../utils/serializer';
+} from '../utils/helpers.js';
+import serializer from '../utils/serializer.js';
 
 type IndexedDBDriverContext = LocalSpaceInstance &
   Partial<Driver> & {

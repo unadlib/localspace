@@ -1,4 +1,4 @@
-import { LocalSpace } from './localspace';
+import { LocalSpace } from './localspace.js';
 import type {
   LocalSpaceInstance,
   LocalSpaceConfig,
@@ -18,7 +18,7 @@ import type {
   BatchResponse,
   TransactionMode,
   TransactionScope,
-} from './types';
+} from './types.js';
 
 // Create default instance
 const localspace = new LocalSpace() as LocalSpaceInstance;
@@ -47,23 +47,23 @@ export type {
   TransactionMode,
   TransactionScope,
 };
-export type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from './errors';
-export { LocalSpaceError } from './errors';
+export type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from './errors.js';
+export { LocalSpaceError } from './errors.js';
 
 // Export class for creating instances
 export { LocalSpace };
 
 // Export drivers
-export { default as indexedDBDriver } from './drivers/indexeddb';
-export { default as localStorageDriver } from './drivers/localstorage';
-export { default as memoryDriver } from './drivers/memory';
+export { default as indexedDBDriver } from './drivers/indexeddb.js';
+export { default as localStorageDriver } from './drivers/localstorage.js';
+export { default as memoryDriver } from './drivers/memory.js';
 
 // Export serializer
-export { default as serializer } from './utils/serializer';
+export { default as serializer } from './utils/serializer.js';
 
 // Export plugins
-export { ttlPlugin } from './plugins/ttl';
-export { encryptionPlugin } from './plugins/encryption';
-export { compressionPlugin } from './plugins/compression';
+export { ttlPlugin } from './plugins/ttl.js';
+export { encryptionPlugin } from './plugins/encryption.js';
+export { compressionPlugin } from './plugins/compression.js';
 
-export { PluginAbortError } from './core/plugin-manager';
+export { PluginAbortError } from './core/plugin-manager.js';

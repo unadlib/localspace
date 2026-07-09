@@ -1,5 +1,5 @@
-import type { BatchItems, KeyValuePair } from '../types';
-import { createLocalSpaceError } from '../errors';
+import type { BatchItems, KeyValuePair } from '../types.js';
+import { createLocalSpaceError } from '../errors.js';
 
 /**
  * Check if value is in array

@@ -14,19 +14,19 @@ import type {
   TransactionScope,
   PluginOperation,
   PluginContext,
-} from './types';
+} from './types.js';
 import {
   extend,
   isArray,
   includes,
   normalizeBatchEntries,
-} from './utils/helpers';
-import { createLocalSpaceError, LocalSpaceError } from './errors';
-import serializer from './utils/serializer';
-import idbDriver from './drivers/indexeddb';
-import localstorageDriver from './drivers/localstorage';
-import memoryDriver from './drivers/memory';
-import { PluginManager } from './core/plugin-manager';
+} from './utils/helpers.js';
+import { createLocalSpaceError, LocalSpaceError } from './errors.js';
+import serializer from './utils/serializer.js';
+import idbDriver from './drivers/indexeddb.js';
+import localstorageDriver from './drivers/localstorage.js';
+import memoryDriver from './drivers/memory.js';
+import { PluginManager } from './core/plugin-manager.js';
 
 // Shared drivers across all instances
 const DefinedDrivers: DefinedDriversMap = {};

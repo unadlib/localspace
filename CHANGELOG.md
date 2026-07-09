@@ -2,6 +2,11 @@
 
 ## [2.0.0] - 2026-07-10
 
+### Fixed
+
+- Added module-specific declaration graphs for CommonJS and ESM consumers,
+  including the `localspace/react-native` subpath.
+
 ### Removed
 
 - Removed `coalesceFireAndForget`, automatic write coalescing, and the

@@ -3,10 +3,10 @@ import type {
   PluginContext,
   BatchItems,
   BatchResponse,
-} from '../types';
-import { normalizeBatchEntries } from '../utils/helpers';
-import { createLocalSpaceError, toLocalSpaceError } from '../errors';
-import serializer from '../utils/serializer';
+} from '../types.js';
+import { normalizeBatchEntries } from '../utils/helpers.js';
+import { createLocalSpaceError, toLocalSpaceError } from '../errors.js';
+import serializer from '../utils/serializer.js';
 
 export interface EncryptionPluginOptions {
   /** Pre-shared CryptoKey or raw key material */

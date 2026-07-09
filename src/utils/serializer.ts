@@ -1,6 +1,6 @@
-import { createBlob } from './helpers';
-import type { Serializer } from '../types';
-import { createLocalSpaceError } from '../errors';
+import { createBlob } from './helpers.js';
+import type { Serializer } from '../types.js';
+import { createLocalSpaceError } from '../errors.js';
 
 const BASE_CHARS =
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';

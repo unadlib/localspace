@@ -7,15 +7,15 @@ import type {
   BatchItems,
   BatchResponse,
   ReactNativeAsyncStorage,
-} from '../types';
-import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors';
-import { createLocalSpaceError, toLocalSpaceError } from '../errors';
+} from '../types.js';
+import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors.js';
+import { createLocalSpaceError, toLocalSpaceError } from '../errors.js';
 import {
   normalizeBatchEntries,
   normalizeKey,
   chunkArray,
-} from '../utils/helpers';
-import serializer from '../utils/serializer';
+} from '../utils/helpers.js';
+import serializer from '../utils/serializer.js';
 
 type ReactNativeAsyncStorageDbInfo = DbInfo & {
   keyPrefix: string;

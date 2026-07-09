@@ -16,12 +16,19 @@
   "main": "./dist/index.cjs",
   "module": "./dist/index.esm.js",
   "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "react-native": [
+        "dist/react-native.d.ts"
+      ]
+    }
+  },
   "unpkg": "./dist/index.umd.js",
   "exports": {
     "./package.json": "./package.json",
     ".": {
       "require": {
-        "types": "./dist/index.d.ts",
+        "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       },
       "default": {
@@ -31,7 +38,7 @@
     },
     "./react-native": {
       "require": {
-        "types": "./dist/react-native.d.ts",
+        "types": "./dist/react-native.d.cts",
         "default": "./dist/react-native.cjs"
       },
       "default": {
@@ -46,18 +53,20 @@
     "dist"
   ],
   "scripts": {
-    "test": "vitest run && pnpm run build && node test/package-exports.cjs && playwright test",
+    "test": "vitest run && pnpm run build && node test/package-exports.cjs && pnpm run test:types:package && playwright test",
     "test:coverage": "vitest run --coverage",
     "test:unit": "vitest run",
     "test:rn:integration:setup": "pnpm --filter localspace-rn-integration install --prod=false",
     "test:rn:integration": "pnpm run test:rn:integration:setup && pnpm run build && pnpm -C integration/react-native-jest test",
     "test:e2e": "pnpm run build && playwright test",
-    "test:exports": "pnpm run build && node test/package-exports.cjs",
+    "test:exports": "pnpm run build && node test/package-exports.cjs && pnpm run test:types:package",
+    "test:types:package": "tsc -p test/package-types/tsconfig.json",
     "test:e2e:coverage": "rimraf .nyc_output && pnpm run build && PLAYWRIGHT_COVERAGE=1 playwright test && nyc report --reporter=text-summary --reporter=html",
     "coverage:full": "rimraf coverage .nyc_output && vitest run --coverage && node -e \"const fs=require('fs');const path=require('path');const src=path.join('coverage','coverage-final.json');if(!fs.existsSync(src)){console.error('Vitest coverage JSON not found:',src);process.exit(1);}fs.mkdirSync('.nyc_output',{recursive:true});fs.copyFileSync(src,path.join('.nyc_output','vitest.json'));\" && pnpm run build && PLAYWRIGHT_COVERAGE=1 playwright test && nyc report --reporter=text-summary --reporter=html",
     "clean": "rimraf dist",
     "check:type": "tsc --skipLibCheck --noEmit && tsc --skipLibCheck -p tsconfig.examples.json",
-    "build": "pnpm run clean && tsc --skipLibCheck && pnpm run build:prod",
+    "build": "pnpm run clean && tsc --skipLibCheck && pnpm run build:types:cjs && pnpm run build:prod",
+    "build:types:cjs": "node scripts/build-cjs-types.mjs",
     "build:prod": "NODE_ENV=production rolldown --config rolldown.config.ts",
     "build:doc": "typedoc --plugin typedoc-plugin-markdown --out docs src/index.ts",
     "commit": "pnpm exec git-cz",

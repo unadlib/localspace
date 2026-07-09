@@ -9,9 +9,9 @@ import type {
   PluginErrorInfo,
   PluginOperation,
   PluginStage,
-} from '../types';
-import { LocalSpaceError } from '../errors';
-import { normalizeBatchEntries } from '../utils/helpers';
+} from '../types.js';
+import { LocalSpaceError } from '../errors.js';
+import { normalizeBatchEntries } from '../utils/helpers.js';
 
 export class PluginAbortError extends Error {
   constructor(message = 'Plugin aborted the operation') {

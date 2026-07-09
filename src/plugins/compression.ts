@@ -3,10 +3,10 @@ import type {
   PluginContext,
   BatchItems,
   BatchResponse,
-} from '../types';
-import { normalizeBatchEntries } from '../utils/helpers';
-import { toLocalSpaceError } from '../errors';
-import serializer from '../utils/serializer';
+} from '../types.js';
+import { normalizeBatchEntries } from '../utils/helpers.js';
+import { toLocalSpaceError } from '../errors.js';
+import serializer from '../utils/serializer.js';
 import { compressToUint8Array, decompressFromUint8Array } from 'lz-string';
 
 export interface CompressionCodec {

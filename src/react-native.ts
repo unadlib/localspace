@@ -2,8 +2,8 @@ import type {
   LocalSpaceInstance,
   LocalSpaceOptions,
   ReactNativeAsyncStorage,
-} from './types';
-import reactNativeAsyncStorageDriver from './drivers/react-native-async-storage';
+} from './types.js';
+import reactNativeAsyncStorageDriver from './drivers/react-native-async-storage.js';
 
 /**
  * Install the React Native AsyncStorage driver on a localspace instance.
@@ -68,4 +68,4 @@ export async function createReactNativeInstance(
 }
 
 export { reactNativeAsyncStorageDriver };
-export type { ReactNativeAsyncStorage } from './types';
+export type { ReactNativeAsyncStorage } from './types.js';

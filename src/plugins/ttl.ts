@@ -3,8 +3,8 @@ import type {
   PluginContext,
   BatchItems,
   BatchResponse,
-} from '../types';
-import { normalizeBatchEntries } from '../utils/helpers';
+} from '../types.js';
+import { normalizeBatchEntries } from '../utils/helpers.js';
 
 export interface TTLPluginOptions {
   /** Default TTL in milliseconds applied when key-specific TTL is not defined */
