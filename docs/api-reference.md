@@ -335,34 +335,34 @@ Real device-runtime template (Detox on simulator/emulator) lives in `integration
 Registers a custom driver.
 
 ```ts
+import localspace, { type Driver } from 'localspace';
+
+const values = new Map<string, unknown>();
 const customDriver: Driver = {
   _driver: 'customDriver',
-  _initStorage: async (config) => {
-    /* ... */
-  },
-  getItem: async (key) => {
-    /* ... */
-  },
-  setItem: async (key, value) => {
-    /* ... */
+  _initStorage: async () => undefined,
+  getItem: async <T>(key: string) =>
+    values.has(key) ? (values.get(key) as T) : null,
+  setItem: async <T>(key: string, value: T) => {
+    values.set(key, value);
+    return value;
   },
   removeItem: async (key) => {
-    /* ... */
+    values.delete(key);
   },
   clear: async () => {
-    /* ... */
+    values.clear();
   },
-  length: async () => {
-    /* ... */
-  },
-  key: async (index) => {
-    /* ... */
-  },
-  keys: async () => {
-    /* ... */
-  },
-  iterate: async (iterator) => {
-    /* ... */
+  length: async () => values.size,
+  key: async (index) => [...values.keys()][index] ?? null,
+  keys: async () => [...values.keys()],
+  iterate: async <T, U>(iterator: (value: T, key: string, n: number) => U) => {
+    let iteration = 1;
+    for (const [key, value] of values) {
+      const result = iterator(value as T, key, iteration++);
+      if (result !== undefined) return result;
+    }
+    return undefined as U;
   },
 };
 
