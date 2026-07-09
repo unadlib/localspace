@@ -196,9 +196,9 @@ const apiCache = localspace.createInstance({
     ttlPlugin({
       defaultTTL: 5 * 60 * 1000, // 5 minutes for general API data
       keyTTL: {
-        'static:*': 24 * 60 * 60 * 1000, // 24 hours for static content
-        'user:profile': 30 * 60 * 1000, // 30 minutes for user data
-        'feed:*': 2 * 60 * 1000, // 2 minutes for feeds
+        'api:/api/app-manifest': 24 * 60 * 60 * 1000, // 24 hours
+        'api:/api/user/profile': 30 * 60 * 1000, // 30 minutes
+        'api:/api/feed/home': 2 * 60 * 1000, // 2 minutes
       },
       cleanupInterval: 5 * 60 * 1000, // Cleanup every 5 minutes
       cleanupBatchSize: 200,

@@ -64,7 +64,7 @@ Wraps values as `{ data, expiresAt }`, invalidates stale reads, and optionally r
 
 **Options:**
 
-- `defaultTTL` (ms) and `keyTTL` overrides
+- `defaultTTL` (ms) and exact-key `keyTTL` overrides
 - `cleanupInterval` to periodically scan expired entries
 - `cleanupBatchSize` (default: 100) for efficient batch cleanup
 - `onExpire(key, value)` callback before removal
