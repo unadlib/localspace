@@ -23,6 +23,22 @@ type NotificationMetadata = {
 
 const METADATA_KEY = '__broadcast_notification_plugin';
 
+const isStorageNotification = (
+  value: unknown
+): value is StorageNotification => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const candidate = value as Partial<StorageNotification>;
+  return (
+    typeof candidate.key === 'string' &&
+    (candidate.operation === 'set' || candidate.operation === 'remove') &&
+    typeof candidate.source === 'string' &&
+    typeof candidate.timestamp === 'number' &&
+    Number.isFinite(candidate.timestamp)
+  );
+};
+
 const getMetadata = (context: PluginContext): NotificationMetadata => {
   const existing = context.metadata[METADATA_KEY] as
     | NotificationMetadata
@@ -99,7 +115,10 @@ export const broadcastNotificationPlugin = (
       const metadata = getMetadata(context);
       const channel = new BroadcastChannel(channelName);
       channel.onmessage = (event) => {
-        const message = event.data as StorageNotification;
+        const message: unknown = event.data;
+        if (!isStorageNotification(message)) {
+          return;
+        }
         if (message.source !== metadata.source) {
           void receive(message, context);
         }

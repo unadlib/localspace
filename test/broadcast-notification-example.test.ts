@@ -65,4 +65,24 @@ describe('broadcast notification plugin example', () => {
       expect(onError).toHaveBeenCalledWith(failure, context)
     );
   });
+
+  it('ignores malformed messages from a shared channel', async () => {
+    vi.stubGlobal('BroadcastChannel', BroadcastChannelMock);
+    const onMessage = vi.fn();
+    const plugin = broadcastNotificationPlugin({ onMessage });
+    const context = createContext();
+
+    await plugin.onInit?.(context);
+    const channel = BroadcastChannelMock.instances[0];
+
+    expect(() =>
+      channel.onmessage?.({ data: null } as MessageEvent)
+    ).not.toThrow();
+    expect(() =>
+      channel.onmessage?.({
+        data: { source: 'remote', operation: 'unknown' },
+      } as MessageEvent)
+    ).not.toThrow();
+    expect(onMessage).not.toHaveBeenCalled();
+  });
 });
