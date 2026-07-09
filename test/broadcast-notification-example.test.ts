@@ -4,6 +4,7 @@ import type { PluginContext } from '../src';
 
 class BroadcastChannelMock {
   static instances: BroadcastChannelMock[] = [];
+  static postMessageError: unknown;
 
   onmessage: ((event: MessageEvent) => void) | null = null;
 
@@ -11,7 +12,11 @@ class BroadcastChannelMock {
     BroadcastChannelMock.instances.push(this);
   }
 
-  postMessage() {}
+  postMessage() {
+    if (BroadcastChannelMock.postMessageError) {
+      throw BroadcastChannelMock.postMessageError;
+    }
+  }
 
   close() {}
 }
@@ -31,6 +36,7 @@ describe('broadcast notification plugin example', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     BroadcastChannelMock.instances = [];
+    BroadcastChannelMock.postMessageError = undefined;
   });
 
   it('exposes notification hooks without entering the package surface', () => {
@@ -107,6 +113,39 @@ describe('broadcast notification plugin example', () => {
     );
     expect(BroadcastChannelMock.instances[2].name).not.toBe(
       BroadcastChannelMock.instances[0].name
+    );
+  });
+
+  it('does not fail plugin initialization when channel creation fails', async () => {
+    const failure = new Error('channel unavailable');
+    class FailingBroadcastChannel {
+      constructor() {
+        throw failure;
+      }
+    }
+    vi.stubGlobal('BroadcastChannel', FailingBroadcastChannel);
+    const onError = vi.fn();
+    const plugin = broadcastNotificationPlugin({ onError });
+    const context = createContext();
+
+    expect(() => plugin.onInit?.(context)).not.toThrow();
+    await vi.waitFor(() =>
+      expect(onError).toHaveBeenCalledWith(failure, context)
+    );
+  });
+
+  it('does not fail writes when broadcasting fails', async () => {
+    vi.stubGlobal('BroadcastChannel', BroadcastChannelMock);
+    const failure = new Error('send failed');
+    const onError = vi.fn();
+    const plugin = broadcastNotificationPlugin({ onError });
+    const context = createContext();
+    await plugin.onInit?.(context);
+    BroadcastChannelMock.postMessageError = failure;
+
+    expect(() => plugin.afterSet?.('key', 'value', context)).not.toThrow();
+    await vi.waitFor(() =>
+      expect(onError).toHaveBeenCalledWith(failure, context)
     );
   });
 });

@@ -72,6 +72,25 @@ const getMetadata = (context: PluginContext): NotificationMetadata => {
 export const broadcastNotificationPlugin = (
   options: BroadcastNotificationOptions = {}
 ): LocalSpacePlugin => {
+  const reportError = async (
+    error: unknown,
+    context: PluginContext,
+    message: string
+  ): Promise<void> => {
+    try {
+      if (options.onError) {
+        await options.onError(error, context);
+      } else {
+        console.error(`[localspace example] ${message}`, error);
+      }
+    } catch (reportingError) {
+      console.error(
+        '[localspace example] broadcast notification error handler failed',
+        reportingError
+      );
+    }
+  };
+
   const receive = async (
     message: StorageNotification,
     context: PluginContext
@@ -79,21 +98,11 @@ export const broadcastNotificationPlugin = (
     try {
       await options.onMessage?.(message, context);
     } catch (error) {
-      try {
-        if (options.onError) {
-          await options.onError(error, context);
-        } else {
-          console.error(
-            '[localspace example] broadcast notification handler failed',
-            error
-          );
-        }
-      } catch (reportingError) {
-        console.error(
-          '[localspace example] broadcast notification error handler failed',
-          reportingError
-        );
-      }
+      await reportError(
+        error,
+        context,
+        'broadcast notification handler failed'
+      );
     }
   };
 
@@ -103,12 +112,16 @@ export const broadcastNotificationPlugin = (
     operation: StorageNotification['operation']
   ) => {
     const metadata = getMetadata(context);
-    metadata.channel?.postMessage({
-      key,
-      operation,
-      source: metadata.source,
-      timestamp: Date.now(),
-    } satisfies StorageNotification);
+    try {
+      metadata.channel?.postMessage({
+        key,
+        operation,
+        source: metadata.source,
+        timestamp: Date.now(),
+      } satisfies StorageNotification);
+    } catch (error) {
+      void reportError(error, context, 'broadcast notification send failed');
+    }
   };
 
   return {
@@ -119,24 +132,41 @@ export const broadcastNotificationPlugin = (
       }
 
       const metadata = getMetadata(context);
-      const channel = new BroadcastChannel(
-        options.channelName ?? defaultChannelName(context)
-      );
-      channel.onmessage = (event) => {
-        const message: unknown = event.data;
-        if (!isStorageNotification(message)) {
-          return;
-        }
-        if (message.source !== metadata.source) {
-          void receive(message, context);
-        }
-      };
-      metadata.channel = channel;
+      try {
+        const channel = new BroadcastChannel(
+          options.channelName ?? defaultChannelName(context)
+        );
+        channel.onmessage = (event) => {
+          const message: unknown = event.data;
+          if (!isStorageNotification(message)) {
+            return;
+          }
+          if (message.source !== metadata.source) {
+            void receive(message, context);
+          }
+        };
+        metadata.channel = channel;
+      } catch (error) {
+        void reportError(
+          error,
+          context,
+          'broadcast notification channel initialization failed'
+        );
+      }
     },
     onDestroy: (context) => {
       const metadata = getMetadata(context);
-      metadata.channel?.close();
-      metadata.channel = undefined;
+      try {
+        metadata.channel?.close();
+      } catch (error) {
+        void reportError(
+          error,
+          context,
+          'broadcast notification channel close failed'
+        );
+      } finally {
+        metadata.channel = undefined;
+      }
     },
     afterSet: (key, _value, context) => {
       if (!context.operationState.isBatch) {
