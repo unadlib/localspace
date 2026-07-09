@@ -4,6 +4,7 @@ import type { PluginContext } from '../src';
 
 class BroadcastChannelMock {
   static instances: BroadcastChannelMock[] = [];
+
   static postMessageError: unknown;
 
   onmessage: ((event: MessageEvent) => void) | null = null;

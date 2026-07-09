@@ -31,6 +31,10 @@ const defaultChannelName = (context: PluginContext): string =>
     context.config.storeName ?? 'keyvaluepairs',
   ])}`;
 
+const runInBackground = (operation: Promise<void>): void => {
+  operation.catch(() => undefined);
+};
+
 const isStorageNotification = (
   value: unknown
 ): value is StorageNotification => {
@@ -120,7 +124,9 @@ export const broadcastNotificationPlugin = (
         timestamp: Date.now(),
       } satisfies StorageNotification);
     } catch (error) {
-      void reportError(error, context, 'broadcast notification send failed');
+      runInBackground(
+        reportError(error, context, 'broadcast notification send failed')
+      );
     }
   };
 
@@ -142,15 +148,17 @@ export const broadcastNotificationPlugin = (
             return;
           }
           if (message.source !== metadata.source) {
-            void receive(message, context);
+            runInBackground(receive(message, context));
           }
         };
         metadata.channel = channel;
       } catch (error) {
-        void reportError(
-          error,
-          context,
-          'broadcast notification channel initialization failed'
+        runInBackground(
+          reportError(
+            error,
+            context,
+            'broadcast notification channel initialization failed'
+          )
         );
       }
     },
@@ -159,10 +167,12 @@ export const broadcastNotificationPlugin = (
       try {
         metadata.channel?.close();
       } catch (error) {
-        void reportError(
-          error,
-          context,
-          'broadcast notification channel close failed'
+        runInBackground(
+          reportError(
+            error,
+            context,
+            'broadcast notification channel close failed'
+          )
         );
       } finally {
         metadata.channel = undefined;
