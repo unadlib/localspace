@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import localspace, { LocalSpace, ttlPlugin, quotaPlugin } from '../src/index';
+import localspace, { LocalSpace, ttlPlugin } from '../src/index';
 import type { LocalSpaceInstance } from '../src/types';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -402,29 +402,6 @@ describe('Edge cases and concurrency tests', () => {
       // Value should be expired
       const expired = await instance.getItem('ttl-key');
       expect(expired).toBe(null);
-
-      await instance.destroy();
-    });
-
-    it('should handle quota plugin with concurrent writes', async () => {
-      const instance = localspace.createInstance({
-        name: `quota-concurrent-${Math.random().toString(36).slice(2)}`,
-        storeName: 'testStore',
-        plugins: [quotaPlugin({ maxSize: 10000, evictionPolicy: 'error' })],
-      });
-
-      await instance.setDriver([instance.INDEXEDDB]);
-      await instance.ready();
-
-      // Small concurrent writes should succeed
-      const writes = Array.from({ length: 10 }, (_, i) =>
-        instance.setItem(`quota-key-${i}`, `value-${i}`)
-      );
-
-      await Promise.all(writes);
-
-      const keys = await instance.keys();
-      expect(keys.length).toBe(10);
 
       await instance.destroy();
     });

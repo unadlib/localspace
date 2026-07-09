@@ -7,18 +7,17 @@ Comprehensive examples demonstrating plugin usage in production scenarios.
 - [E-commerce Shopping Cart](#e-commerce-shopping-cart)
 - [Secure User Credentials Storage](#secure-user-credentials-storage)
 - [Offline-First Application Cache](#offline-first-application-cache)
-- [Mobile App with Limited Storage](#mobile-app-with-limited-storage)
 
 ---
 
 ## E-commerce Shopping Cart
 
-Persistent cart with TTL expiration and size management:
+Persistent cart with TTL expiration:
 
 ```ts
-import localspace, { ttlPlugin, quotaPlugin } from 'localspace';
+import localspace, { ttlPlugin } from 'localspace';
 
-// Create cart storage with expiration and an application-level size limit
+// Create cart storage with expiration
 const cartStore = localspace.createInstance({
   name: 'ecommerce',
   storeName: 'cart',
@@ -32,15 +31,6 @@ const cartStore = localspace.createInstance({
           key,
           itemCount: value?.items?.length,
         });
-      },
-    }),
-
-    // Limit cart storage to 1MB
-    quotaPlugin({
-      maxSize: 1 * 1024 * 1024,
-      evictionPolicy: 'error', // Don't auto-delete cart items
-      onQuotaExceeded: ({ attemptedSize, currentUsage, maxSize }) => {
-        showToast('Cart is too large. Please remove some items.');
       },
     }),
   ],
@@ -196,11 +186,7 @@ class CredentialManager {
 Compressed API cache with intelligent expiration:
 
 ```ts
-import localspace, {
-  ttlPlugin,
-  compressionPlugin,
-  quotaPlugin,
-} from 'localspace';
+import localspace, { ttlPlugin, compressionPlugin } from 'localspace';
 
 const apiCache = localspace.createInstance({
   name: 'offline-app',
@@ -222,15 +208,6 @@ const apiCache = localspace.createInstance({
     compressionPlugin({
       threshold: 2048, // Compress responses > 2KB
       algorithm: 'lz-string',
-    }),
-
-    // Manage cache size (50MB limit)
-    quotaPlugin({
-      maxSize: 50 * 1024 * 1024,
-      evictionPolicy: 'lru', // Auto-evict old cached items
-      onQuotaExceeded: ({ key }) => {
-        console.log(`Evicted cache entry: ${key}`);
-      },
     }),
   ],
 });
@@ -315,137 +292,5 @@ async function prefetchAppData() {
 // Clear cache on logout
 async function clearCacheOnLogout() {
   await apiCache.clear();
-}
-```
-
----
-
-## Mobile App with Limited Storage
-
-Progressive quota management for mobile-first apps:
-
-```ts
-import localspace, {
-  ttlPlugin,
-  compressionPlugin,
-  quotaPlugin,
-} from 'localspace';
-
-// Detect if running on mobile
-const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-const storageLimit = isMobile ? 10 * 1024 * 1024 : 50 * 1024 * 1024; // 10MB mobile, 50MB desktop
-
-const mobileStore = localspace.createInstance({
-  name: 'mobile-app',
-  storeName: 'data',
-  plugins: [
-    // Aggressive TTL for mobile
-    ttlPlugin({
-      defaultTTL: isMobile ? 2 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000, // 2h mobile, 24h desktop
-      cleanupInterval: isMobile ? 10 * 60 * 1000 : 60 * 60 * 1000, // 10min mobile, 1h desktop
-      cleanupBatchSize: isMobile ? 50 : 200,
-      onExpire: (key) => {
-        console.debug(`[Storage] Expired: ${key}`);
-      },
-    }),
-
-    // Compress everything on mobile
-    compressionPlugin({
-      threshold: isMobile ? 512 : 2048, // Lower threshold on mobile
-    }),
-
-    // Strict quota management
-    quotaPlugin({
-      maxSize: storageLimit,
-      evictionPolicy: 'lru',
-      useNavigatorEstimate: true, // Also respect browser limits
-      onQuotaExceeded: async ({
-        key,
-        attemptedSize,
-        currentUsage,
-        maxSize,
-      }) => {
-        const usage = Math.round((currentUsage / maxSize) * 100);
-        console.warn(`[Storage] Quota ${usage}% used, evicting old data`);
-
-        // Show user notification on mobile
-        if (isMobile && usage > 90) {
-          showStorageWarning();
-        }
-      },
-    }),
-  ],
-});
-
-// Priority-based storage with automatic cleanup
-type Priority = 'critical' | 'high' | 'normal' | 'low';
-
-const priorityTTL: Record<Priority, number> = {
-  critical: Infinity, // Never auto-expire
-  high: 7 * 24 * 60 * 60 * 1000,
-  normal: 24 * 60 * 60 * 1000,
-  low: 2 * 60 * 60 * 1000,
-};
-
-async function storeWithPriority<T>(
-  key: string,
-  value: T,
-  priority: Priority = 'normal'
-) {
-  const wrapper = {
-    data: value,
-    priority,
-    storedAt: Date.now(),
-  };
-  await mobileStore.setItem(key, wrapper);
-}
-
-async function getStorageStats() {
-  let totalItems = 0;
-  let byPriority: Record<Priority, number> = {
-    critical: 0,
-    high: 0,
-    normal: 0,
-    low: 0,
-  };
-
-  await mobileStore.iterate<{ priority?: Priority }, void>((value) => {
-    totalItems++;
-    if (value?.priority) {
-      byPriority[value.priority]++;
-    }
-  });
-
-  return { totalItems, byPriority };
-}
-
-// Manual cleanup for low-priority items
-async function freeUpSpace(targetBytes: number) {
-  const keysToRemove: string[] = [];
-  let freedBytes = 0;
-
-  // First, remove low-priority items
-  await mobileStore.iterate<{ priority?: Priority; data: unknown }, void>(
-    (value, key) => {
-      if (value?.priority === 'low') {
-        keysToRemove.push(key);
-        freedBytes += JSON.stringify(value).length;
-        if (freedBytes >= targetBytes) {
-          return true; // Stop iteration
-        }
-      }
-    }
-  );
-
-  if (keysToRemove.length > 0) {
-    await mobileStore.removeItems(keysToRemove);
-  }
-
-  return { removed: keysToRemove.length, freedBytes };
-}
-
-function showStorageWarning() {
-  // Show toast or modal to user
-  console.warn('Storage is almost full. Some cached data may be removed.');
 }
 ```

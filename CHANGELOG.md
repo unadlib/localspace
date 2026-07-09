@@ -11,6 +11,9 @@
 - Removed `syncPlugin` from the package surface. Cross-context synchronization
   now belongs to application code; a best-effort notification example remains
   in `examples/broadcast-notification-plugin.ts`.
+- Removed `quotaPlugin` from the package surface. Application-level size policy
+  does not represent browser storage quota and cannot be enforced atomically;
+  a deliberately limited example remains in `examples/size-limit-plugin.ts`.
 
 ### Fixed
 

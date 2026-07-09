@@ -6,6 +6,7 @@ async function main() {
   assert.equal(typeof cjs.default?.setItem, 'function');
   assert.equal(typeof cjs.ttlPlugin, 'function');
   assert.equal('syncPlugin' in cjs, false);
+  assert.equal('quotaPlugin' in cjs, false);
 
   const cjsReactNative = require('localspace/react-native');
   assert.equal(typeof cjsReactNative.createReactNativeInstance, 'function');
@@ -18,6 +19,7 @@ async function main() {
   assert.equal(typeof esm.LocalSpace, 'function');
   assert.equal(typeof esm.default?.setItem, 'function');
   assert.equal('syncPlugin' in esm, false);
+  assert.equal('quotaPlugin' in esm, false);
 
   const esmReactNative = await import('localspace/react-native');
   assert.equal(typeof esmReactNative.createReactNativeInstance, 'function');

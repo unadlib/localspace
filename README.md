@@ -263,7 +263,6 @@ import localspace, {
   ttlPlugin,
   compressionPlugin,
   encryptionPlugin,
-  quotaPlugin,
 } from 'localspace';
 
 const store = localspace.createInstance({
@@ -272,7 +271,6 @@ const store = localspace.createInstance({
     ttlPlugin({ defaultTTL: 60_000 }), // Auto-expire
     compressionPlugin({ threshold: 1024 }), // Compress > 1KB
     encryptionPlugin({ key: '32-byte-key-here' }), // Encrypt
-    quotaPlugin({ maxSize: 5 * 1024 * 1024 }), // 5MB limit
   ],
   pluginErrorPolicy: 'strict', // Recommended for encryption
 });
@@ -285,12 +283,16 @@ const store = localspace.createInstance({
 | **TTL**         | Auto-expire items with `{ data, expiresAt }` wrapper |
 | **Encryption**  | AES-GCM encryption via Web Crypto API                |
 | **Compression** | LZ-string compression for large values               |
-| **Quota**       | Storage limit enforcement with LRU eviction          |
 
 Cross-context replication is intentionally not built in. For best-effort
 single-item notifications, adapt
 [`examples/broadcast-notification-plugin.ts`](./examples/broadcast-notification-plugin.ts)
 to your application-level synchronization protocol.
+
+Serialized-size limits are also application policy rather than browser quota
+management. The non-published
+[`examples/size-limit-plugin.ts`](./examples/size-limit-plugin.ts) example
+shows a best-effort guard without automatic data eviction.
 
 📖 **Full Plugin Documentation:** [docs/plugins.md](./docs/plugins.md)
 📖 **Real-World Examples:** [docs/examples.md](./docs/examples.md)
@@ -350,12 +352,12 @@ const mobileStore = await createReactNativeInstance(localspace, {
 
 ## Troubleshooting
 
-| Issue                       | Solution                                               |
-| --------------------------- | ------------------------------------------------------ |
-| Driver not ready            | Call `await localspace.ready()` before first operation |
-| Quota errors                | Check `error.code === 'QUOTA_EXCEEDED'`                |
-| Persistent storage blocked  | Add `localspace.MEMORY` as an explicit fallback        |
-| Plugin errors swallowed     | Set `pluginErrorPolicy: 'strict'`                      |
+| Issue                      | Solution                                               |
+| -------------------------- | ------------------------------------------------------ |
+| Driver not ready           | Call `await localspace.ready()` before first operation |
+| Browser storage is full    | Check `error.code === 'QUOTA_EXCEEDED'`                |
+| Persistent storage blocked | Add `localspace.MEMORY` as an explicit fallback        |
+| Plugin errors swallowed    | Set `pluginErrorPolicy: 'strict'`                      |
 
 **Errors** are `LocalSpaceError` with `code`, `details`, and `cause` properties.
 
@@ -391,8 +393,8 @@ const mobileStore = await createReactNativeInstance(localspace, {
 - [x] React Native AsyncStorage driver
 - [x] Full localForage API parity
 - [x] TypeScript-first implementation
-- [x] Batch operations & write coalescing
-- [x] Plugin system (TTL, Encryption, Compression, Sync, Quota)
+- [x] Explicit batch operations
+- [x] Plugin system (TTL, Encryption, Compression)
 
 ### Coming Soon
 

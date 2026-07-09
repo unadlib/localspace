@@ -10,7 +10,6 @@ const store = localspace.createInstance({
     ttlPlugin({ defaultTTL: 60_000 }),
     compressionPlugin({ threshold: 1024 }),
     encryptionPlugin({ key: '0123456789abcdef0123456789abcdef' }),
-    quotaPlugin({ maxSize: 5 * 1024 * 1024, evictionPolicy: 'lru' }),
   ],
 });
 ```
@@ -23,7 +22,6 @@ const store = localspace.createInstance({
   - [TTL Plugin](#ttl-plugin)
   - [Encryption Plugin](#encryption-plugin)
   - [Compression Plugin](#compression-plugin)
-  - [Quota Plugin](#quota-plugin)
 - [Plugin Combination Best Practices](#plugin-combination-best-practices)
 - [Plugin Troubleshooting](#plugin-troubleshooting)
 - [Custom Plugin Development](#custom-plugin-development)
@@ -40,7 +38,7 @@ const store = localspace.createInstance({
 
 - **Per-call state** – plugins can stash data on `context.operationState` (e.g., capture the original value in `beforeSet` and reuse it in `afterSet`). For batch operations, `context.operationState.isBatch` is `true` and `context.operationState.batchSize` provides the total count.
 
-- **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (quota violations, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'lenient'` reports and continues; use `strict` for encryption/compression/ttl or any correctness-critical plugin.
+- **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (validation failures, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'lenient'` reports and continues; use `strict` for encryption/compression/ttl or any correctness-critical plugin.
 
 ---
 
@@ -48,14 +46,13 @@ const store = localspace.createInstance({
 
 Plugins are sorted by `priority` (higher runs first in `before*`, last in `after*`). Default priorities:
 
-| Plugin      | Priority | Notes                                                        |
-| ----------- | -------- | ------------------------------------------------------------ |
-| quota       | -10      | Runs late so it measures final payload sizes                 |
-| encryption  | 0        | Encrypts after compression so decrypt runs first in `after*` |
-| compression | 5        | Runs before encryption so payload is compressible            |
+| Plugin      | Priority | Notes                                                         |
+| ----------- | -------- | ------------------------------------------------------------- |
+| encryption  | 0        | Encrypts after compression so decrypt runs first in `after*`  |
+| compression | 5        | Runs before encryption so payload is compressible             |
 | ttl         | 10       | Runs outermost so TTL wrapper is transformed by other plugins |
 
-**Recommended order**: `[ttlPlugin, compressionPlugin, encryptionPlugin, quotaPlugin]`
+**Recommended order**: `[ttlPlugin, compressionPlugin, encryptionPlugin]`
 
 ---
 
@@ -188,48 +185,6 @@ const pakoStore = localspace.createInstance({
 
 ---
 
-### Quota Plugin
-
-Tracks approximate localspace payload size after every mutation and enforces
-limits.
-
-> 1.x compatibility note: `quotaPlugin` will be renamed/repositioned in v2.0.
-> It enforces an application-level serialized-size limit, not the browser's
-> storage quota.
-
-**Options:**
-
-- `maxSize` (bytes) and optional `useNavigatorEstimate` to read the browser's quota
-- `evictionPolicy: 'error' | 'lru'` (LRU removes least-recently-used keys automatically)
-- `onQuotaExceeded(info)` fires before throwing so you can log/alert users
-
-```ts
-const quotaStore = localspace.createInstance({
-  name: 'quota-store',
-  plugins: [
-    quotaPlugin({
-      maxSize: 5 * 1024 * 1024, // 5 MB
-      evictionPolicy: 'lru', // Automatically evict least-recently-used items
-      useNavigatorEstimate: true, // Also respect browser quota
-      onQuotaExceeded: ({ key, attemptedSize, maxSize, currentUsage }) => {
-        console.warn(`Quota exceeded: tried to write ${attemptedSize} bytes`);
-        console.warn(`Current usage: ${currentUsage}/${maxSize} bytes`);
-      },
-    }),
-  ],
-});
-
-// Batch operations are also quota-checked
-await quotaStore.setItems([
-  { key: 'large-1', value: largeData1 },
-  { key: 'large-2', value: largeData2 },
-]); // Throws QUOTA_EXCEEDED if total exceeds limit
-```
-
-> **Tip**: Place quota plugins last so they see the final payload size after other transformations (TTL, encryption, compression, etc.).
-
----
-
 ## Plugin Combination Best Practices
 
 1. **Recommended plugin order** (from highest to lowest priority):
@@ -239,7 +194,6 @@ await quotaStore.setItems([
      ttlPlugin({ ... }),         // priority: 10
      compressionPlugin({ ... }), // priority: 5
      encryptionPlugin({ ... }),  // priority: 0
-     quotaPlugin({ ... }),       // priority: -10
    ]
    ```
 
@@ -267,18 +221,21 @@ Cross-context synchronization is application policy, not a built-in plugin.
 See `examples/broadcast-notification-plugin.ts` for a deliberately limited
 best-effort notification example.
 
+Application-level serialized-size limits are likewise not browser quota
+management and cannot be enforced atomically by a plugin. See
+`examples/size-limit-plugin.ts` for a deliberately limited guard that rejects
+writes without automatically deleting data.
+
 ---
 
 ## Plugin Troubleshooting
 
-| Issue                        | Solution                                                               |
-| ---------------------------- | ---------------------------------------------------------------------- |
-| TTL items not expiring       | Ensure `cleanupInterval` is set, or read items to trigger expiration   |
-| Encryption fails silently    | Set `pluginErrorPolicy: 'strict'` for encryption/compression/ttl       |
-| Compression not working      | Verify payload exceeds `threshold`                                     |
-| Sync not updating other tabs | Check `channelName` matches and `syncKeys` includes your key           |
-| Quota errors on small writes | Other plugins (TTL, encryption) add overhead; account for wrapper size |
-| Plugin order seems wrong     | Check `priority` values; higher = runs first in `before*` hooks        |
+| Issue                     | Solution                                                             |
+| ------------------------- | -------------------------------------------------------------------- |
+| TTL items not expiring    | Ensure `cleanupInterval` is set, or read items to trigger expiration |
+| Encryption fails silently | Set `pluginErrorPolicy: 'strict'` for encryption/compression/ttl     |
+| Compression not working   | Verify payload exceeds `threshold`                                   |
+| Plugin order seems wrong  | Check `priority` values; higher = runs first in `before*` hooks      |
 
 ---
 

@@ -9,7 +9,6 @@ import localspace, {
   ttlPlugin,
   encryptionPlugin,
   compressionPlugin,
-  quotaPlugin,
   LocalSpacePlugin,
 } from '../src';
 
@@ -181,38 +180,6 @@ describe('Plugin system', () => {
 
     const restored = await compressedStore.getItem<string>('blob');
     expect(restored).toBe(payload);
-  });
-
-  it('enforces quota limits with errors', async () => {
-    const store = localspace.createInstance({
-      name: 'quota-db',
-      storeName: 'quota-store',
-      plugins: [quotaPlugin({ maxSize: 200, evictionPolicy: 'error' })],
-    });
-
-    await store.setItem('alpha', 'a'.repeat(100));
-    await expect(store.setItem('beta', 'b'.repeat(500))).rejects.toMatchObject({
-      code: 'QUOTA_EXCEEDED',
-    });
-  });
-
-  it('evicts least-recently-used entries when quota allows', async () => {
-    const store = localspace.createInstance({
-      name: 'quota-db-lru',
-      storeName: 'quota-store-lru',
-      plugins: [quotaPlugin({ maxSize: 400, evictionPolicy: 'lru' })],
-    });
-
-    await store.setItem('k1', 'a'.repeat(150));
-    await store.setItem('k2', 'b'.repeat(150));
-    await store.getItem('k1'); // refresh access
-
-    await store.setItem('k3', 'c'.repeat(200));
-    const removed = await store.getItem('k2');
-    const kept = await store.getItem('k3');
-
-    expect(removed).toBeNull();
-    expect(kept).toBe('c'.repeat(200));
   });
 
   it('unwinds plugin transformations in reverse order', async () => {
@@ -535,70 +502,6 @@ describe('Plugin batch operations', () => {
     expect(result[1].value).toBe(largePayload2);
   });
 
-  it('quota plugin enforces limits on batch setItems', async () => {
-    const store = localspace.createInstance({
-      name: 'quota-batch-db',
-      storeName: 'quota-batch-store',
-      plugins: [quotaPlugin({ maxSize: 300, evictionPolicy: 'error' })],
-    });
-
-    await store.setItems([{ key: 'small', value: 'x'.repeat(50) }]);
-
-    // This batch should exceed quota
-    await expect(
-      store.setItems([
-        { key: 'big1', value: 'y'.repeat(200) },
-        { key: 'big2', value: 'z'.repeat(200) },
-      ])
-    ).rejects.toMatchObject({ code: 'QUOTA_EXCEEDED' });
-  });
-
-  it('quota plugin tracks batch removes correctly', async () => {
-    const store = localspace.createInstance({
-      name: 'quota-batch-remove-db',
-      storeName: 'quota-batch-remove-store',
-      plugins: [quotaPlugin({ maxSize: 500, evictionPolicy: 'error' })],
-    });
-
-    await store.setItems([
-      { key: 'k1', value: 'a'.repeat(100) },
-      { key: 'k2', value: 'b'.repeat(100) },
-      { key: 'k3', value: 'c'.repeat(100) },
-    ]);
-
-    // Remove in batch
-    await store.removeItems(['k1', 'k2']);
-
-    // Now we should have room for more
-    await store.setItems([{ key: 'k4', value: 'd'.repeat(200) }]);
-    const result = await store.getItem('k4');
-    expect(result).toBe('d'.repeat(200));
-  });
-
-  it('quota plugin deduplicates same key in batch to calculate correct delta', async () => {
-    // This test verifies that when the same key appears multiple times in a batch,
-    // the quota calculation only considers the final value, not accumulating deltas
-    const store = localspace.createInstance({
-      name: 'quota-dedupe-db',
-      storeName: 'quota-dedupe-store',
-      plugins: [quotaPlugin({ maxSize: 200, evictionPolicy: 'error' })],
-    });
-
-    // Original value: ~50 bytes
-    await store.setItem('key1', 'x'.repeat(50));
-
-    // Batch with same key multiple times: should only count final value (70 bytes)
-    // Correct delta: 70 - 50 = 20 bytes
-    // Bug case: would calculate (60-50) + (70-50) = 30 bytes, potentially exceeding quota
-    await store.setItems([
-      { key: 'key1', value: 'y'.repeat(60) },
-      { key: 'key1', value: 'z'.repeat(70) },
-    ]);
-
-    const result = await store.getItem('key1');
-    expect(result).toBe('z'.repeat(70)); // Should be the last value
-  });
-
   it('combined plugins work correctly with batch operations', async () => {
     const key = '0123456789abcdef0123456789abcdef';
     const store = localspace.createInstance({
@@ -634,34 +537,6 @@ describe('Plugin batch operations', () => {
 });
 
 describe('Plugin edge cases and combinations', () => {
-  it('ttl + quota: expired items free up quota', async () => {
-    // Note: TTL wraps values with { __ls_ttl, data, expiresAt } which adds ~50-60 bytes overhead
-    const store = localspace.createInstance({
-      name: 'ttl-quota-combo-db',
-      storeName: 'ttl-quota-combo-store',
-      plugins: [
-        ttlPlugin({ defaultTTL: 15 }),
-        quotaPlugin({ maxSize: 600, evictionPolicy: 'error' }), // Increased to account for TTL wrapper
-      ],
-    });
-
-    // Fill up quota (each item ~200 bytes with TTL wrapper)
-    await store.setItem('temp', 'x'.repeat(100));
-    await store.setItem('temp2', 'y'.repeat(100));
-
-    // Wait for expiration
-    await sleep(30);
-
-    // Reading expired items should free quota
-    await store.getItem('temp');
-    await store.getItem('temp2');
-
-    // Now we should be able to write again
-    await store.setItem('new', 'z'.repeat(100));
-    const result = await store.getItem('new');
-    expect(result).toBe('z'.repeat(100));
-  });
-
   it('encryption + compression: order matters for security', async () => {
     const key = '0123456789abcdef0123456789abcdef';
     // Correct order: compress first, then encrypt
@@ -697,7 +572,6 @@ describe('Plugin edge cases and combinations', () => {
       ttlPlugin({ defaultTTL: 60000 }),
       compressionPlugin({ threshold: 10 }),
       encryptionPlugin({ key }),
-      quotaPlugin({ maxSize: 10000, evictionPolicy: 'error' }),
     ];
 
     const primary = localspace.createInstance({
@@ -736,34 +610,6 @@ describe('Plugin edge cases and combinations', () => {
     expect(batchResult[1].value?.n).toBe(2);
   });
 
-  it('quota with lru eviction and batch operations', async () => {
-    const store = localspace.createInstance({
-      name: 'quota-lru-batch-db',
-      storeName: 'quota-lru-batch-store',
-      plugins: [quotaPlugin({ maxSize: 400, evictionPolicy: 'lru' })],
-    });
-
-    // Fill up storage
-    await store.setItems([
-      { key: 'old1', value: 'x'.repeat(100) },
-      { key: 'old2', value: 'y'.repeat(100) },
-    ]);
-
-    // Access old1 to make it more recent
-    await store.getItem('old1');
-
-    // New batch that exceeds quota should evict old2 (least recently used)
-    await store.setItems([{ key: 'new1', value: 'z'.repeat(250) }]);
-
-    const old1 = await store.getItem('old1');
-    const old2 = await store.getItem('old2');
-    const new1 = await store.getItem('new1');
-
-    expect(old1).toBe('x'.repeat(100)); // kept (recently accessed)
-    expect(old2).toBeNull(); // evicted (least recently used)
-    expect(new1).toBe('z'.repeat(250)); // newly added
-  });
-
   it('handles mixed batch with some items below compression threshold', async () => {
     const store = localspace.createInstance({
       name: 'mixed-compress-db',
@@ -800,7 +646,6 @@ describe('Plugin edge cases and combinations', () => {
       plugins: [
         ttlPlugin({ defaultTTL: 60000 }),
         compressionPlugin({ threshold: 100 }),
-        quotaPlugin({ maxSize: 1000, evictionPolicy: 'error' }),
       ],
     });
 

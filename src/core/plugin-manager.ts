@@ -77,24 +77,6 @@ const PLUGIN_WARNINGS = {
     message:
       '[localspace] Warning: Encryption plugin runs before compression (either due to higher priority or earlier registration order). This means data will be encrypted before compression, which reduces compression effectiveness. Consider adjusting priorities (compression should have higher priority than encryption) or registration order.',
   },
-  QUOTA_NOT_LAST: {
-    condition: (plugins: LocalSpacePlugin[]): boolean => {
-      const quotaPlugin = plugins.find((p) => p.name === 'quota');
-      if (!quotaPlugin) return false;
-      const quotaPriority = quotaPlugin.priority ?? 0;
-      // Quota should have one of the lowest priorities to measure final size
-      // Only sync should be lower
-      const hasHigherPriorityAfter = plugins.some(
-        (p) =>
-          p.name !== 'quota' &&
-          p.name !== 'sync' &&
-          (p.priority ?? 0) < quotaPriority
-      );
-      return hasHigherPriorityAfter;
-    },
-    message:
-      '[localspace] Warning: Quota plugin may not measure final payload sizes correctly. Consider giving it a lower priority than transformation plugins (TTL, compression, encryption).',
-  },
 } as const;
 
 export class PluginManager {
