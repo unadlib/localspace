@@ -56,7 +56,7 @@
     "test:e2e:coverage": "rimraf .nyc_output && pnpm run build && PLAYWRIGHT_COVERAGE=1 playwright test && nyc report --reporter=text-summary --reporter=html",
     "coverage:full": "rimraf coverage .nyc_output && vitest run --coverage && node -e \"const fs=require('fs');const path=require('path');const src=path.join('coverage','coverage-final.json');if(!fs.existsSync(src)){console.error('Vitest coverage JSON not found:',src);process.exit(1);}fs.mkdirSync('.nyc_output',{recursive:true});fs.copyFileSync(src,path.join('.nyc_output','vitest.json'));\" && pnpm run build && PLAYWRIGHT_COVERAGE=1 playwright test && nyc report --reporter=text-summary --reporter=html",
     "clean": "rimraf dist",
-    "check:type": "tsc --skipLibCheck --noEmit",
+    "check:type": "tsc --skipLibCheck --noEmit && tsc --skipLibCheck -p tsconfig.examples.json",
     "build": "pnpm run clean && tsc --skipLibCheck && pnpm run build:prod",
     "build:prod": "NODE_ENV=production rolldown --config rolldown.config.ts",
     "build:doc": "typedoc --plugin typedoc-plugin-markdown --out docs src/index.ts",

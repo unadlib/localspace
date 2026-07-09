@@ -12,6 +12,11 @@ import type {
   Driver,
   Serializer,
   ReactNativeAsyncStorage,
+  StorageBucketConfig,
+  KeyValuePair,
+  BatchItems,
+  BatchResponse,
+  TransactionScope,
 } from './types';
 
 // Create default instance
@@ -34,6 +39,11 @@ export type {
   Driver,
   Serializer,
   ReactNativeAsyncStorage,
+  StorageBucketConfig,
+  KeyValuePair,
+  BatchItems,
+  BatchResponse,
+  TransactionScope,
 };
 export type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from './errors';
 export { LocalSpaceError } from './errors';
