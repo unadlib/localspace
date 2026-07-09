@@ -62,7 +62,7 @@ Use explicit batches when writes belong together:
 ```diff
 -const store = localspace.createInstance({
 -  coalesceWrites: true,
--  coalesceDelay: 8,
+-  coalesceWindowMs: 8,
 -});
 -await Promise.all([
 -  store.setItem('a', 1),
