@@ -134,7 +134,7 @@ export interface Driver {
   /**
    * Check if driver is supported (can be boolean or function)
    */
-  _support?: boolean | (() => Promise<boolean>);
+  _support?: boolean | (() => boolean | Promise<boolean>);
 
   /**
    * Iterate through all items

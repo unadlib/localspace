@@ -1910,7 +1910,7 @@ function dropInstance(
 const asyncStorage: Driver = {
   _driver: 'asyncStorage',
   _initStorage,
-  _support: (() => isIndexedDBValid()) as () => Promise<boolean>,
+  _support: isIndexedDBValid,
   iterate,
   getItem,
   getItems,

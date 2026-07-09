@@ -307,6 +307,28 @@ describe('LocalSpace class tests', () => {
       expect(instance.supports('asyncSupportDriver')).toBe(true);
     });
 
+    it('should handle synchronous _support checks', async () => {
+      const driverName = `sync-support-${Math.random().toString(36).slice(2)}`;
+      const customDriver = {
+        _driver: driverName,
+        _initStorage: vi.fn().mockResolvedValue(undefined),
+        _support: () => true,
+        getItem: vi.fn(),
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+        clear: vi.fn(),
+        length: vi.fn(),
+        key: vi.fn(),
+        keys: vi.fn(),
+        iterate: vi.fn(),
+      };
+
+      const instance = new LocalSpace();
+      await instance.defineDriver(customDriver);
+
+      expect(instance.supports(driverName)).toBe(true);
+    });
+
     it('should warn when redefining driver', async () => {
       const consoleInfoSpy = vi
         .spyOn(console, 'info')
