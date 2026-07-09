@@ -16,6 +16,7 @@ import type {
   KeyValuePair,
   BatchItems,
   BatchResponse,
+  TransactionMode,
   TransactionScope,
 } from './types';
 
@@ -43,6 +44,7 @@ export type {
   KeyValuePair,
   BatchItems,
   BatchResponse,
+  TransactionMode,
   TransactionScope,
 };
 export type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from './errors';

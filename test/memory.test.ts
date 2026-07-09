@@ -141,6 +141,19 @@ describe('memory driver', () => {
     ).rejects.toMatchObject({ code: 'TRANSACTION_READONLY' });
   });
 
+  it('rejects unsupported transaction modes without invoking the runner', async () => {
+    const instance = await createMemoryInstance(name);
+    const runner = vi.fn();
+
+    await expect(
+      instance.runTransaction('versionchange' as never, runner)
+    ).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      details: { transactionMode: 'versionchange' },
+    });
+    expect(runner).not.toHaveBeenCalled();
+  });
+
   it('drops the current store or all stores for a name', async () => {
     const storeA = await createMemoryInstance(name, 'a');
     const storeB = await createMemoryInstance(name, 'b');

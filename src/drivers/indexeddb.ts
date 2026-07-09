@@ -6,6 +6,7 @@ import type {
   BatchItems,
   BatchResponse,
   KeyValuePair,
+  TransactionMode,
   TransactionScope,
 } from '../types';
 import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors';
@@ -498,7 +499,7 @@ function isUpgradeNeeded(dbInfo: DbInfo, defaultVersion: number): boolean {
 
 function getTransactionOptions(
   dbInfo: DbInfo,
-  mode: IDBTransactionMode
+  mode: TransactionMode
 ): IDBTransactionOptions | undefined {
   if (mode === READ_WRITE && dbInfo.durability) {
     return { durability: dbInfo.durability };
@@ -576,7 +577,7 @@ function scheduleIdleClose(dbInfo: DbInfo): void {
 
 function createTransaction(
   dbInfo: DbInfo,
-  mode: IDBTransactionMode,
+  mode: TransactionMode,
   callback: (error: Error | null, transaction?: IDBTransaction) => void,
   retries: number = 1
 ): void {
@@ -1301,13 +1302,25 @@ function removeItems(
 
 function runTransaction<T>(
   this: IndexedDBDriverContext,
-  mode: IDBTransactionMode,
+  mode: TransactionMode,
   runner: (scope: TransactionScope) => Promise<T> | T
 ): Promise<T> {
   const self = this;
 
   const promise = new Promise<T>(async (resolve, reject) => {
     try {
+      if (mode !== READ_ONLY && mode !== READ_WRITE) {
+        throw createLocalSpaceError(
+          'INVALID_ARGUMENT',
+          `Unsupported transaction mode: ${String(mode)}`,
+          {
+            driver: DRIVER_NAME,
+            operation: 'runTransaction',
+            transactionMode: String(mode),
+          }
+        );
+      }
+
       await self.ready();
       const dbInfo = self._dbInfo;
       // Compute blob support once up front so we don't pause an empty transaction later.

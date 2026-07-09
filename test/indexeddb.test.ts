@@ -235,6 +235,18 @@ describe('IndexedDB driver tests', () => {
         })
       ).rejects.toBeInstanceOf(Error);
     });
+
+    it('should reject unsupported transaction modes without invoking the runner', async () => {
+      const runner = vi.fn();
+
+      await expect(
+        instance.runTransaction('versionchange' as never, runner)
+      ).rejects.toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        details: { transactionMode: 'versionchange' },
+      });
+      expect(runner).not.toHaveBeenCalled();
+    });
   });
 
   describe('Blob handling', () => {

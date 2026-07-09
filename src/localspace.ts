@@ -10,6 +10,7 @@ import type {
   Serializer,
   BatchItems,
   BatchResponse,
+  TransactionMode,
   TransactionScope,
   PluginOperation,
   PluginContext,
@@ -928,7 +929,7 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   async runTransaction<T>(
-    mode: IDBTransactionMode,
+    mode: TransactionMode,
     runner: (scope: TransactionScope) => Promise<T> | T
   ): Promise<T> {
     throw this._notInitializedError('runTransaction');

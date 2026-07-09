@@ -7,6 +7,7 @@ import type {
   LocalSpaceConfig,
   LocalSpaceInstance,
   Serializer,
+  TransactionMode,
   TransactionScope,
 } from '../types';
 import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors';
@@ -372,11 +373,23 @@ function dropInstance(
 
 function runTransaction<T>(
   this: MemoryDriverContext,
-  mode: IDBTransactionMode,
+  mode: TransactionMode,
   runner: (scope: TransactionScope) => Promise<T> | T
 ): Promise<T> {
   const promise = withMemoryErrorContext(
     this.ready().then(async () => {
+      if (mode !== 'readonly' && mode !== 'readwrite') {
+        throw createLocalSpaceError(
+          'INVALID_ARGUMENT',
+          `Unsupported transaction mode: ${String(mode)}`,
+          {
+            driver: DRIVER_NAME,
+            operation: 'runTransaction',
+            transactionMode: String(mode),
+          }
+        );
+      }
+
       const store = this._dbInfo.store;
       const snapshot = mode === 'readwrite' ? new Map(store) : null;
 

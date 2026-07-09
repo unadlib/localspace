@@ -12,6 +12,8 @@ export interface ReactNativeAsyncStorage {
   multiRemove?(keys: string[]): Promise<void>;
 }
 
+export type TransactionMode = 'readonly' | 'readwrite';
+
 /**
  * Configuration options for localspace
  */
@@ -176,7 +178,7 @@ export interface Driver {
    * Non-transactional drivers must omit this method.
    */
   runTransaction?<T>(
-    mode: IDBTransactionMode,
+    mode: TransactionMode,
     runner: (scope: TransactionScope) => Promise<T> | T
   ): Promise<T>;
 
@@ -357,7 +359,7 @@ export interface LocalSpaceInstance {
    * Run multiple operations in a single transaction when supported.
    */
   runTransaction<T>(
-    mode: IDBTransactionMode,
+    mode: TransactionMode,
     runner: (scope: TransactionScope) => Promise<T> | T
   ): Promise<T>;
 
