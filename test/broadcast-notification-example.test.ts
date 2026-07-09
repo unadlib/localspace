@@ -18,6 +18,11 @@ class BroadcastChannelMock {
 
 const createContext = (): PluginContext =>
   ({
+    config: {
+      name: 'broadcast-test',
+      storeName: 'notifications',
+    },
+    driver: 'memoryStorageWrapper',
     metadata: Object.create(null),
     operationState: Object.create(null),
   }) as PluginContext;
@@ -84,5 +89,24 @@ describe('broadcast notification plugin example', () => {
       } as MessageEvent)
     ).not.toThrow();
     expect(onMessage).not.toHaveBeenCalled();
+  });
+
+  it('isolates the default channel by storage namespace', async () => {
+    vi.stubGlobal('BroadcastChannel', BroadcastChannelMock);
+    const first = createContext();
+    const sameNamespace = createContext();
+    const otherStore = createContext();
+    otherStore.config.storeName = 'other';
+
+    await broadcastNotificationPlugin().onInit?.(first);
+    await broadcastNotificationPlugin().onInit?.(sameNamespace);
+    await broadcastNotificationPlugin().onInit?.(otherStore);
+
+    expect(BroadcastChannelMock.instances[0].name).toBe(
+      BroadcastChannelMock.instances[1].name
+    );
+    expect(BroadcastChannelMock.instances[2].name).not.toBe(
+      BroadcastChannelMock.instances[0].name
+    );
   });
 });

@@ -23,6 +23,14 @@ type NotificationMetadata = {
 
 const METADATA_KEY = '__broadcast_notification_plugin';
 
+const defaultChannelName = (context: PluginContext): string =>
+  `localspace-notifications:${JSON.stringify([
+    context.driver,
+    context.config.bucket?.name ?? null,
+    context.config.name ?? 'localforage',
+    context.config.storeName ?? 'keyvaluepairs',
+  ])}`;
+
 const isStorageNotification = (
   value: unknown
 ): value is StorageNotification => {
@@ -64,8 +72,6 @@ const getMetadata = (context: PluginContext): NotificationMetadata => {
 export const broadcastNotificationPlugin = (
   options: BroadcastNotificationOptions = {}
 ): LocalSpacePlugin => {
-  const channelName = options.channelName ?? 'localspace-notifications';
-
   const receive = async (
     message: StorageNotification,
     context: PluginContext
@@ -113,7 +119,9 @@ export const broadcastNotificationPlugin = (
       }
 
       const metadata = getMetadata(context);
-      const channel = new BroadcastChannel(channelName);
+      const channel = new BroadcastChannel(
+        options.channelName ?? defaultChannelName(context)
+      );
       channel.onmessage = (event) => {
         const message: unknown = event.data;
         if (!isStorageNotification(message)) {
