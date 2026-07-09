@@ -215,12 +215,12 @@ Manual Detox smoke workflow (real simulator/emulator runtime):
 
 ## Batch Operations
 
-Use batch APIs for better performance. IndexedDB runs batch mutations inside a
-single transaction; other drivers expose the same API but may perform grouped
-work sequentially.
+Use batch APIs for better performance. IndexedDB runs each batch chunk inside a
+transaction; when `maxBatchSize` is unset, the entire call is one chunk. Other
+drivers expose the same API but may perform grouped work sequentially.
 
 ```ts
-// Single transaction write on IndexedDB
+// One transaction on IndexedDB when maxBatchSize is unset
 await localspace.setItems([
   { key: 'user:1', value: { name: 'Ada' } },
   { key: 'user:2', value: { name: 'Lin' } },
@@ -230,7 +230,7 @@ await localspace.setItems([
 const result = await localspace.getItems(['user:1', 'user:2']);
 // [{ key: 'user:1', value: {...} }, { key: 'user:2', value: {...} }]
 
-// Single transaction delete on IndexedDB
+// One transaction on IndexedDB when maxBatchSize is unset
 await localspace.removeItems(['user:1', 'user:2']);
 ```
 

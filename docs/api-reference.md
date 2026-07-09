@@ -99,14 +99,15 @@ const admin = await localspace.iterate<User, User>((value, key) => {
 
 ## Batch Operations
 
-Batch operations execute in a single transaction on IndexedDB for better
-performance. Other drivers expose the same API but may run grouped work
-sequentially.
+Each batch chunk executes in a transaction on IndexedDB. When `maxBatchSize` is
+unset, the entire call is one chunk. Other drivers expose the same API but may
+run grouped work sequentially.
 
 ### `setItems<T>(entries: BatchItems<T>): Promise<BatchResponse<T>>`
 
-Stores multiple items atomically on IndexedDB. On other drivers this is a
-grouped operation with driver-specific atomicity.
+Stores multiple items atomically on IndexedDB when `maxBatchSize` is unset or
+the input fits in one chunk. On other drivers this is a grouped operation with
+driver-specific atomicity.
 
 ```ts
 // Array format
@@ -157,8 +158,9 @@ users.forEach(({ key, value }) => {
 
 ### `removeItems(keys: string[]): Promise<void>`
 
-Removes multiple items atomically on IndexedDB. On other drivers this is a
-grouped operation with driver-specific atomicity.
+Removes multiple items atomically on IndexedDB when `maxBatchSize` is unset or
+the input fits in one chunk. On other drivers this is a grouped operation with
+driver-specific atomicity.
 
 ```ts
 await localspace.removeItems(['user:1', 'user:2', 'temp:session']);
