@@ -1,4 +1,5 @@
 import {
+  PluginAbortError,
   serializer,
   type BatchItems,
   type LocalSpacePlugin,
@@ -18,7 +19,7 @@ export interface SizeLimitPluginOptions {
   onLimitExceeded?: (info: SizeLimitExceededInfo) => Promise<void> | void;
 }
 
-export class SizeLimitExceededError extends Error {
+export class SizeLimitExceededError extends PluginAbortError {
   readonly info: SizeLimitExceededInfo;
 
   constructor(info: SizeLimitExceededInfo) {

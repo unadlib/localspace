@@ -9,7 +9,6 @@ const createStore = async (maxBytes: number, onLimitExceeded = vi.fn()) => {
   const store = localspace.createInstance({
     name: `size-limit-example-${Math.random().toString(36).slice(2)}`,
     plugins: [sizeLimitPlugin({ maxBytes, onLimitExceeded })],
-    pluginErrorPolicy: 'strict',
   });
   await store.setDriver(store.MEMORY);
   await store.ready();
@@ -17,7 +16,7 @@ const createStore = async (maxBytes: number, onLimitExceeded = vi.fn()) => {
 };
 
 describe('size limit plugin example', () => {
-  it('rejects a single write that would exceed the application limit', async () => {
+  it('rejects a single write under the default lenient plugin policy', async () => {
     const { store, onLimitExceeded } = await createStore(60);
 
     await store.setItem('first', 'a'.repeat(20));
