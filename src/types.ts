@@ -1,19 +1,4 @@
 /**
- * Callback type for async operations
- */
-export type Callback<T = unknown> = (error: Error | null, value?: T) => void;
-
-/**
- * Compatibility success callback (no error parameter)
- */
-export type CompatibilitySuccessCallback<T = unknown> = (value: T) => void;
-
-/**
- * Compatibility error callback (receives Error only)
- */
-export type CompatibilityErrorCallback = (error: Error) => void;
-
-/**
  * React Native AsyncStorage-compatible adapter interface
  */
 export interface ReactNativeAsyncStorage {
@@ -106,11 +91,6 @@ export interface LocalSpaceConfig {
   version?: number;
 
   /**
-   * Enable legacy callback compatibility mode
-   */
-  compatibilityMode?: boolean;
-
-  /**
    * Plugin initialization failure policy.
    * - 'fail' (default): propagate errors and abort initialization
    * - 'disable-and-continue': log and skip the failing plugin
@@ -158,45 +138,38 @@ export interface Driver {
    * Iterate through all items
    */
   iterate<T, U>(
-    iteratorCallback: (value: T, key: string, iterationNumber: number) => U,
-    successCallback?: Callback<U>
+    iteratorCallback: (value: T, key: string, iterationNumber: number) => U
   ): Promise<U>;
 
   /**
    * Get item by key
    */
-  getItem<T>(key: string, callback?: Callback<T>): Promise<T | null>;
+  getItem<T>(key: string): Promise<T | null>;
 
   /**
    * Set item
    */
-  setItem<T>(key: string, value: T, callback?: Callback<T>): Promise<T>;
+  setItem<T>(key: string, value: T): Promise<T>;
 
   /**
    * Remove item
    */
-  removeItem(key: string, callback?: Callback<void>): Promise<void>;
+  removeItem(key: string): Promise<void>;
 
   /**
    * Batch set multiple items atomically when supported by the driver.
    */
-  setItems<T>(
-    entries: BatchItems<T>,
-    callback?: Callback<BatchResponse<T>>
-  ): Promise<BatchResponse<T>>;
+  setItems<T>(entries: BatchItems<T>): Promise<BatchResponse<T>>;
 
   /**
    * Batch get multiple items in order.
    */
-  getItems<T>(
-    keys: string[],
-    callback?: Callback<BatchResponse<T>>
-  ): Promise<BatchResponse<T>>;
+  getItems<T>(keys: string[]): Promise<BatchResponse<T>>;
 
   /**
    * Batch remove multiple items.
    */
-  removeItems(keys: string[], callback?: Callback<void>): Promise<void>;
+  removeItems(keys: string[]): Promise<void>;
 
   /**
    * Execute multiple operations within a driver-level transaction.
@@ -204,38 +177,33 @@ export interface Driver {
    */
   runTransaction?<T>(
     mode: IDBTransactionMode,
-    runner: (scope: TransactionScope) => Promise<T> | T,
-    callback?: Callback<T>
+    runner: (scope: TransactionScope) => Promise<T> | T
   ): Promise<T>;
 
   /**
    * Clear all items
    */
-  clear(callback?: Callback<void>): Promise<void>;
+  clear(): Promise<void>;
 
   /**
    * Get number of items
    */
-  length(callback?: Callback<number>): Promise<number>;
+  length(): Promise<number>;
 
   /**
    * Get key at index
    */
-  key(keyIndex: number, callback?: Callback<string>): Promise<string | null>;
+  key(keyIndex: number): Promise<string | null>;
 
   /**
    * Get all keys
    */
-  keys(callback?: Callback<string[]>): Promise<string[]>;
+  keys(): Promise<string[]>;
 
   /**
    * Drop instance (optional)
    */
-  dropInstance?(
-    options?: LocalSpaceConfig,
-    callback?: Callback<void>
-  ): Promise<void>;
-
+  dropInstance?(options?: LocalSpaceConfig): Promise<void>;
 }
 
 /**
@@ -311,11 +279,7 @@ export interface LocalSpaceInstance {
   /**
    * Define a custom driver
    */
-  defineDriver(
-    driver: Driver,
-    callback?: Callback<void> | CompatibilitySuccessCallback<void>,
-    errorCallback?: Callback<Error> | CompatibilityErrorCallback
-  ): Promise<void>;
+  defineDriver(driver: Driver): Promise<void>;
 
   /**
    * Get current driver name
@@ -325,30 +289,22 @@ export interface LocalSpaceInstance {
   /**
    * Get driver object
    */
-  getDriver(
-    driverName: string,
-    callback?: Callback<Driver>,
-    errorCallback?: Callback<Error>
-  ): Promise<Driver>;
+  getDriver(driverName: string): Promise<Driver>;
 
   /**
    * Get serializer
    */
-  getSerializer(callback?: Callback<Serializer>): Promise<Serializer>;
+  getSerializer(): Promise<Serializer>;
 
   /**
    * Wait for driver to be ready
    */
-  ready(callback?: Callback<void>): Promise<void>;
+  ready(): Promise<void>;
 
   /**
    * Set driver(s) to use
    */
-  setDriver(
-    drivers: string | string[],
-    callback?: Callback<void> | CompatibilitySuccessCallback<void>,
-    errorCallback?: Callback<Error> | CompatibilityErrorCallback
-  ): Promise<void>;
+  setDriver(drivers: string | string[]): Promise<void>;
 
   /**
    * Check if driver is supported
@@ -359,82 +315,71 @@ export interface LocalSpaceInstance {
    * Iterate through items
    */
   iterate<T, U>(
-    iteratorCallback: (value: T, key: string, iterationNumber: number) => U,
-    successCallback?: Callback<U>
+    iteratorCallback: (value: T, key: string, iterationNumber: number) => U
   ): Promise<U>;
 
   /**
    * Get item
    */
-  getItem<T>(key: string, callback?: Callback<T>): Promise<T | null>;
+  getItem<T>(key: string): Promise<T | null>;
 
   /**
    * Set item
    */
-  setItem<T>(key: string, value: T, callback?: Callback<T>): Promise<T>;
+  setItem<T>(key: string, value: T): Promise<T>;
 
   /**
    * Remove item
    */
-  removeItem(key: string, callback?: Callback<void>): Promise<void>;
+  removeItem(key: string): Promise<void>;
 
   /**
    * Clear all items
    */
-  clear(callback?: Callback<void>): Promise<void>;
+  clear(): Promise<void>;
 
   /**
    * Batch set items
    */
-  setItems<T>(
-    entries: BatchItems<T>,
-    callback?: Callback<BatchResponse<T>>
-  ): Promise<BatchResponse<T>>;
+  setItems<T>(entries: BatchItems<T>): Promise<BatchResponse<T>>;
 
   /**
    * Batch get items in order
    */
-  getItems<T>(
-    keys: string[],
-    callback?: Callback<BatchResponse<T>>
-  ): Promise<BatchResponse<T>>;
+  getItems<T>(keys: string[]): Promise<BatchResponse<T>>;
 
   /**
    * Batch remove items
    */
-  removeItems(keys: string[], callback?: Callback<void>): Promise<void>;
+  removeItems(keys: string[]): Promise<void>;
 
   /**
    * Run multiple operations in a single transaction when supported.
    */
   runTransaction<T>(
     mode: IDBTransactionMode,
-    runner: (scope: TransactionScope) => Promise<T> | T,
-    callback?: Callback<T>
+    runner: (scope: TransactionScope) => Promise<T> | T
   ): Promise<T>;
 
   /**
    * Get length
    */
-  length(callback?: Callback<number>): Promise<number>;
+  length(): Promise<number>;
 
   /**
    * Get key at index
    */
-  key(keyIndex: number, callback?: Callback<string>): Promise<string | null>;
+  key(keyIndex: number): Promise<string | null>;
 
   /**
    * Get all keys
    */
-  keys(callback?: Callback<string[]>): Promise<string[]>;
+  keys(): Promise<string[]>;
 
   /**
    * Drop instance
    */
-  dropInstance(
-    options?: LocalSpaceConfig,
-    callback?: Callback<void>
-  ): Promise<void>;
+  dropInstance(options?: LocalSpaceConfig): Promise<void>;
 
   /**
    * Internal properties

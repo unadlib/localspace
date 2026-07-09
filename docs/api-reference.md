@@ -4,7 +4,7 @@ Complete reference for all localspace methods with TypeScript signatures.
 
 ## Core Methods
 
-### `getItem<T>(key: string, callback?: Callback<T>): Promise<T | null>`
+### `getItem<T>(key: string): Promise<T | null>`
 
 Retrieves an item from storage.
 
@@ -12,17 +12,11 @@ Retrieves an item from storage.
 // Basic usage
 const user = await localspace.getItem<User>('user');
 
-// With callback
-localspace.getItem('user', (err, value) => {
-  if (err) return console.error(err);
-  console.log(value);
-});
-
 // Returns null for non-existent keys
 const missing = await localspace.getItem('nonexistent'); // null
 ```
 
-### `setItem<T>(key: string, value: T, callback?: Callback<T>): Promise<T>`
+### `setItem<T>(key: string, value: T): Promise<T>`
 
 Stores an item. Returns the stored value.
 
@@ -40,7 +34,7 @@ await localspace.setItem('config', null);
 await localspace.setItem('empty', undefined); // stored as null
 ```
 
-### `removeItem(key: string, callback?: Callback<void>): Promise<void>`
+### `removeItem(key: string): Promise<void>`
 
 Removes an item from storage.
 
@@ -48,7 +42,7 @@ Removes an item from storage.
 await localspace.removeItem('user');
 ```
 
-### `clear(callback?: Callback<void>): Promise<void>`
+### `clear(): Promise<void>`
 
 Removes all items from the current store.
 
@@ -56,7 +50,7 @@ Removes all items from the current store.
 await localspace.clear();
 ```
 
-### `length(callback?: Callback<number>): Promise<number>`
+### `length(): Promise<number>`
 
 Returns the number of items in the store.
 
@@ -65,7 +59,7 @@ const count = await localspace.length();
 console.log(`Store has ${count} items`);
 ```
 
-### `key(index: number, callback?: Callback<string>): Promise<string | null>`
+### `key(index: number): Promise<string | null>`
 
 Returns the key at the given index.
 
@@ -74,7 +68,7 @@ const firstKey = await localspace.key(0);
 const lastKey = await localspace.key((await localspace.length()) - 1);
 ```
 
-### `keys(callback?: Callback<string[]>): Promise<string[]>`
+### `keys(): Promise<string[]>`
 
 Returns all keys in the store.
 
@@ -83,7 +77,7 @@ const allKeys = await localspace.keys();
 console.log('Keys:', allKeys);
 ```
 
-### `iterate<T, U>(iterator: (value: T, key: string, index: number) => U, callback?: Callback<U>): Promise<U>`
+### `iterate<T, U>(iterator: (value: T, key: string, index: number) => U): Promise<U>`
 
 Iterates over all items. Return a non-undefined value to stop early.
 
@@ -109,7 +103,7 @@ Batch operations execute in a single transaction on IndexedDB for better
 performance. Other drivers expose the same API but may run grouped work
 sequentially.
 
-### `setItems<T>(entries: BatchItems<T>, callback?: Callback<BatchResponse<T>>): Promise<BatchResponse<T>>`
+### `setItems<T>(entries: BatchItems<T>): Promise<BatchResponse<T>>`
 
 Stores multiple items atomically on IndexedDB. On other drivers this is a
 grouped operation with driver-specific atomicity.
@@ -143,7 +137,7 @@ const result = await localspace.setItems([
 // [{ key: 'a', value: 1 }, { key: 'b', value: 2 }]
 ```
 
-### `getItems<T>(keys: string[], callback?: Callback<BatchResponse<T>>): Promise<BatchResponse<T>>`
+### `getItems<T>(keys: string[]): Promise<BatchResponse<T>>`
 
 Retrieves multiple items in order.
 
@@ -161,7 +155,7 @@ users.forEach(({ key, value }) => {
 });
 ```
 
-### `removeItems(keys: string[], callback?: Callback<void>): Promise<void>`
+### `removeItems(keys: string[]): Promise<void>`
 
 Removes multiple items atomically on IndexedDB. On other drivers this is a
 grouped operation with driver-specific atomicity.
@@ -174,7 +168,7 @@ await localspace.removeItems(['user:1', 'user:2', 'temp:session']);
 
 ## Transaction API
 
-### `runTransaction<T>(mode: 'readonly' | 'readwrite', runner: (scope: TransactionScope) => Promise<T> | T, callback?: Callback<T>): Promise<T>`
+### `runTransaction<T>(mode: 'readonly' | 'readwrite', runner: (scope: TransactionScope) => Promise<T> | T): Promise<T>`
 
 Executes multiple operations in a single transaction.
 IndexedDB provides native atomic transactions. The memory driver provides
@@ -253,7 +247,7 @@ const cache = localspace.createInstance({
 });
 ```
 
-### `ready(callback?: Callback<void>): Promise<void>`
+### `ready(): Promise<void>`
 
 Waits for driver initialization to complete.
 
@@ -275,7 +269,7 @@ const driverName = localspace.driver();
 // 'asyncStorage' | 'localStorageWrapper'
 ```
 
-### `setDriver(drivers: string | string[], callback?, errorCallback?): Promise<void>`
+### `setDriver(drivers: string | string[]): Promise<void>`
 
 Sets the driver(s) to use with fallback order.
 
@@ -336,7 +330,7 @@ await localspace.setDriver(localspace.REACTNATIVEASYNCSTORAGE);
 Integration smoke test harness (official AsyncStorage Jest mock) lives in `integration/react-native-jest/`.
 Real device-runtime template (Detox on simulator/emulator) lives in `integration/react-native-detox/` with CI workflow `.github/workflows/detox-mobile.yml`.
 
-### `defineDriver(driver: Driver, callback?, errorCallback?): Promise<void>`
+### `defineDriver(driver: Driver): Promise<void>`
 
 Registers a custom driver.
 
@@ -391,7 +385,7 @@ Built-in web driver exports are also available:
 import { indexedDBDriver, localStorageDriver, memoryDriver } from 'localspace';
 ```
 
-### `dropInstance(options?: LocalSpaceConfig, callback?: Callback<void>): Promise<void>`
+### `dropInstance(options?: LocalSpaceConfig): Promise<void>`
 
 Deletes the database or specific store.
 
@@ -467,9 +461,6 @@ interface LocalSpaceConfig {
 
   // Batch operations
   maxBatchSize?: number; // Split large batches into chunks
-
-  // Compatibility
-  compatibilityMode?: boolean; // Legacy callback style for driver methods
 
   // Plugin configuration
   pluginInitPolicy?: 'fail' | 'disable-and-continue';

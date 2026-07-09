@@ -1,6 +1,6 @@
 /**
  * Basic usage examples for localspace
- * Demonstrates 100% API compatibility with localForage
+ * Demonstrates the Promise-based storage API
  */
 
 import localspace from '../src/index';
@@ -22,8 +22,8 @@ async function basicUsageExamples() {
     email: 'bob@example.com',
     preferences: {
       theme: 'dark',
-      notifications: true
-    }
+      notifications: true,
+    },
   };
   await localspace.setItem('user', user);
   const retrievedUser = await localspace.getItem('user');
@@ -58,58 +58,58 @@ async function basicUsageExamples() {
   console.log('   Removed "todos"');
   console.log('   Remaining keys:', await localspace.keys());
 
-  // 8. Callback support (localForage compatibility)
-  console.log('\n8. Callback support:');
-  await new Promise<void>((resolve) => {
-    localspace.getItem('username', (err, value) => {
-      console.log('   Callback result:', value);
-      resolve();
-    });
-  });
-
-  // 9. Get current driver
-  console.log('\n9. Get current driver:');
+  // 8. Get current driver
+  console.log('\n8. Get current driver:');
   const driver = localspace.driver();
   console.log('   Current driver:', driver);
 
-  // 10. Check driver support
-  console.log('\n10. Check driver support:');
-  console.log('   Supports IndexedDB:', localspace.supports(localspace.INDEXEDDB));
-  console.log('   Supports localStorage:', localspace.supports(localspace.LOCALSTORAGE));
+  // 9. Check driver support
+  console.log('\n9. Check driver support:');
+  console.log(
+    '   Supports IndexedDB:',
+    localspace.supports(localspace.INDEXEDDB)
+  );
+  console.log(
+    '   Supports localStorage:',
+    localspace.supports(localspace.LOCALSTORAGE)
+  );
 
-  // 11. Configuration
-  console.log('\n11. Configuration:');
+  // 10. Configuration
+  console.log('\n10. Configuration:');
   const config = localspace.config();
   console.log('   Database name:', config.name);
   console.log('   Store name:', config.storeName);
   console.log('   Version:', config.version);
 
-  // 12. Create isolated instance
-  console.log('\n12. Create isolated instance:');
+  // 11. Create isolated instance
+  console.log('\n11. Create isolated instance:');
   const cache = localspace.createInstance({
     name: 'myCache',
-    storeName: 'items'
+    storeName: 'items',
   });
   await cache.setItem('cached-data', { timestamp: Date.now() });
   const cachedData = await cache.getItem('cached-data');
   console.log('   Cached data:', cachedData);
 
-  // 13. Store binary data (ArrayBuffer)
-  console.log('\n13. Store binary data:');
+  // 12. Store binary data (ArrayBuffer)
+  console.log('\n12. Store binary data:');
   const buffer = new Uint8Array([1, 2, 3, 4, 5]).buffer;
   await localspace.setItem('binary-data', buffer);
   const retrievedBuffer = await localspace.getItem('binary-data');
-  console.log('   Buffer length:', (retrievedBuffer as ArrayBuffer)?.byteLength);
+  console.log(
+    '   Buffer length:',
+    (retrievedBuffer as ArrayBuffer)?.byteLength
+  );
 
-  // 14. Store TypedArray
-  console.log('\n14. Store TypedArray:');
+  // 13. Store TypedArray
+  console.log('\n13. Store TypedArray:');
   const typedArray = new Float32Array([1.1, 2.2, 3.3]);
   await localspace.setItem('float-array', typedArray);
   const retrievedArray = await localspace.getItem('float-array');
   console.log('   TypedArray:', retrievedArray);
 
-  // 15. Clear all data
-  console.log('\n15. Clear all data:');
+  // 14. Clear all data
+  console.log('\n14. Clear all data:');
   await localspace.clear();
   console.log('   Storage cleared');
   console.log('   Length after clear:', await localspace.length());

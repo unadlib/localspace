@@ -2,7 +2,6 @@ import type {
   Driver,
   DbInfo,
   LocalSpaceConfig,
-  Callback,
   Serializer,
   LocalSpaceInstance,
   BatchItems,
@@ -12,7 +11,6 @@ import type {
 import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors';
 import { createLocalSpaceError, toLocalSpaceError } from '../errors';
 import {
-  executeCallback,
   normalizeBatchEntries,
   normalizeKey,
   chunkArray,
@@ -306,10 +304,7 @@ async function _initStorage(
   this._dbInfo = dbInfo;
 }
 
-function clear(
-  this: ReactNativeAsyncStorageDriverContext,
-  callback?: Callback<void>
-): Promise<void> {
+function clear(this: ReactNativeAsyncStorageDriverContext): Promise<void> {
   const promise = withAsyncStorageErrorContext(
     this.ready().then(async () => {
       const namespacedKeys = await getNamespacedKeys(this._dbInfo, 'clear');
@@ -318,14 +313,12 @@ function clear(
     'clear'
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function getItem<T>(
   this: ReactNativeAsyncStorageDriverContext,
-  key: string,
-  callback?: Callback<T>
+  key: string
 ): Promise<T | null> {
   const normalizedKey = normalizeKey(key);
 
@@ -345,17 +338,12 @@ function getItem<T>(
     { key: normalizedKey }
   );
 
-  executeCallback(
-    promise as Promise<T | null>,
-    callback as Callback<T | null> | undefined
-  );
   return promise;
 }
 
 function iterate<T, U>(
   this: ReactNativeAsyncStorageDriverContext,
-  iterator: (value: T, key: string, iterationNumber: number) => U,
-  callback?: Callback<U>
+  iterator: (value: T, key: string, iterationNumber: number) => U
 ): Promise<U> {
   const promise = withAsyncStorageErrorContext(
     this.ready().then(async () => {
@@ -387,14 +375,12 @@ function iterate<T, U>(
     'iterate'
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function key(
   this: ReactNativeAsyncStorageDriverContext,
-  n: number,
-  callback?: Callback<string>
+  n: number
 ): Promise<string | null> {
   const promise = withAsyncStorageErrorContext(
     keys.call(this).then((allKeys) => {
@@ -407,14 +393,10 @@ function key(
     { keyIndex: n }
   );
 
-  executeCallback(promise, callback as Callback<string | null> | undefined);
   return promise;
 }
 
-function keys(
-  this: ReactNativeAsyncStorageDriverContext,
-  callback?: Callback<string[]>
-): Promise<string[]> {
+function keys(this: ReactNativeAsyncStorageDriverContext): Promise<string[]> {
   const promise = withAsyncStorageErrorContext(
     this.ready().then(async () => {
       const namespacedKeys = await getNamespacedKeys(this._dbInfo, 'keys');
@@ -424,27 +406,21 @@ function keys(
     'keys'
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
-function length(
-  this: ReactNativeAsyncStorageDriverContext,
-  callback?: Callback<number>
-): Promise<number> {
+function length(this: ReactNativeAsyncStorageDriverContext): Promise<number> {
   const promise = withAsyncStorageErrorContext(
     keys.call(this).then((derivedKeys) => derivedKeys.length),
     'length'
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function removeItem(
   this: ReactNativeAsyncStorageDriverContext,
-  key: string,
-  callback?: Callback<void>
+  key: string
 ): Promise<void> {
   const normalizedKey = normalizeKey(key);
 
@@ -458,14 +434,12 @@ function removeItem(
     { key: normalizedKey }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function removeItems(
   this: ReactNativeAsyncStorageDriverContext,
-  keys: string[],
-  callback?: Callback<void>
+  keys: string[]
 ): Promise<void> {
   const normalizedKeys = keys.map((key) => normalizeKey(key));
 
@@ -480,15 +454,13 @@ function removeItems(
     { keys: normalizedKeys }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 async function setItem<T>(
   this: ReactNativeAsyncStorageDriverContext,
   key: string,
-  value: T,
-  callback?: Callback<T>
+  value: T
 ): Promise<T> {
   const normalizedKey = normalizeKey(key);
 
@@ -527,14 +499,12 @@ async function setItem<T>(
     { key: normalizedKey }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function setItems<T>(
   this: ReactNativeAsyncStorageDriverContext,
-  items: BatchItems<T>,
-  callback?: Callback<BatchResponse<T>>
+  items: BatchItems<T>
 ): Promise<BatchResponse<T>> {
   const normalized = normalizeBatchEntries(items);
   const itemKeys = normalized.map((entry) => entry.key);
@@ -590,14 +560,12 @@ function setItems<T>(
     { keys: itemKeys }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function getItems<T>(
   this: ReactNativeAsyncStorageDriverContext,
-  keys: string[],
-  callback?: Callback<BatchResponse<T>>
+  keys: string[]
 ): Promise<BatchResponse<T>> {
   const normalizedKeys = keys.map((key) => normalizeKey(key));
 
@@ -642,14 +610,12 @@ function getItems<T>(
     { keys: normalizedKeys }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function dropInstance(
   this: ReactNativeAsyncStorageDriverContext,
-  options?: LocalSpaceConfig,
-  callback?: Callback<void>
+  options?: LocalSpaceConfig
 ): Promise<void> {
   const effectiveOptions: LocalSpaceConfig = { ...(options || {}) };
 
@@ -686,7 +652,6 @@ function dropInstance(
     storeName: effectiveOptions.storeName ?? this._defaultConfig.storeName,
   });
 
-  executeCallback(wrapped, callback);
   return wrapped;
 }
 

@@ -1,7 +1,6 @@
 import type {
   BatchItems,
   BatchResponse,
-  Callback,
   DbInfo,
   Driver,
   KeyValuePair,
@@ -14,7 +13,6 @@ import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors';
 import { createLocalSpaceError, toLocalSpaceError } from '../errors';
 import {
   chunkArray,
-  executeCallback,
   normalizeBatchEntries,
   normalizeKey,
 } from '../utils/helpers';
@@ -121,10 +119,7 @@ async function _initStorage(
   };
 }
 
-function clear(
-  this: MemoryDriverContext,
-  callback?: Callback<void>
-): Promise<void> {
+function clear(this: MemoryDriverContext): Promise<void> {
   const promise = withMemoryErrorContext(
     this.ready().then(() => {
       this._dbInfo.store.clear();
@@ -132,15 +127,10 @@ function clear(
     'clear'
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
-function getItem<T>(
-  this: MemoryDriverContext,
-  key: string,
-  callback?: Callback<T>
-): Promise<T | null> {
+function getItem<T>(this: MemoryDriverContext, key: string): Promise<T | null> {
   const normalizedKey = normalizeKey(key);
 
   const promise = withMemoryErrorContext(
@@ -155,17 +145,12 @@ function getItem<T>(
     { key: normalizedKey }
   );
 
-  executeCallback(
-    promise as Promise<T | null>,
-    callback as Callback<T | null> | undefined
-  );
   return promise;
 }
 
 function getItems<T>(
   this: MemoryDriverContext,
-  keys: string[],
-  callback?: Callback<BatchResponse<T>>
+  keys: string[]
 ): Promise<BatchResponse<T>> {
   const normalizedKeys = keys.map((key) => normalizeKey(key));
 
@@ -192,14 +177,12 @@ function getItems<T>(
     { keys: normalizedKeys }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function iterate<T, U>(
   this: MemoryDriverContext,
-  iterator: (value: T, key: string, iterationNumber: number) => U,
-  callback?: Callback<U>
+  iterator: (value: T, key: string, iterationNumber: number) => U
 ): Promise<U> {
   const promise = withMemoryErrorContext(
     this.ready().then(async () => {
@@ -221,56 +204,38 @@ function iterate<T, U>(
     'iterate'
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
-function key(
-  this: MemoryDriverContext,
-  n: number,
-  callback?: Callback<string>
-): Promise<string | null> {
+function key(this: MemoryDriverContext, n: number): Promise<string | null> {
   const promise = withMemoryErrorContext(
     this.ready().then(() => Array.from(this._dbInfo.store.keys())[n] ?? null),
     'key',
     { keyIndex: n }
   );
 
-  executeCallback(promise, callback as Callback<string | null> | undefined);
   return promise;
 }
 
-function keys(
-  this: MemoryDriverContext,
-  callback?: Callback<string[]>
-): Promise<string[]> {
+function keys(this: MemoryDriverContext): Promise<string[]> {
   const promise = withMemoryErrorContext(
     this.ready().then(() => Array.from(this._dbInfo.store.keys())),
     'keys'
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
-function length(
-  this: MemoryDriverContext,
-  callback?: Callback<number>
-): Promise<number> {
+function length(this: MemoryDriverContext): Promise<number> {
   const promise = withMemoryErrorContext(
     this.ready().then(() => this._dbInfo.store.size),
     'length'
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
-function removeItem(
-  this: MemoryDriverContext,
-  key: string,
-  callback?: Callback<void>
-): Promise<void> {
+function removeItem(this: MemoryDriverContext, key: string): Promise<void> {
   const normalizedKey = normalizeKey(key);
 
   const promise = withMemoryErrorContext(
@@ -281,15 +246,10 @@ function removeItem(
     { key: normalizedKey }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
-function removeItems(
-  this: MemoryDriverContext,
-  keys: string[],
-  callback?: Callback<void>
-): Promise<void> {
+function removeItems(this: MemoryDriverContext, keys: string[]): Promise<void> {
   const normalizedKeys = keys.map((key) => normalizeKey(key));
 
   const promise = withMemoryErrorContext(
@@ -306,15 +266,13 @@ function removeItems(
     { keys: normalizedKeys }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function setItem<T>(
   this: MemoryDriverContext,
   key: string,
-  value: T,
-  callback?: Callback<T>
+  value: T
 ): Promise<T> {
   const normalizedKey = normalizeKey(key);
 
@@ -328,14 +286,12 @@ function setItem<T>(
     { key: normalizedKey }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function setItems<T>(
   this: MemoryDriverContext,
-  items: BatchItems<T>,
-  callback?: Callback<BatchResponse<T>>
+  items: BatchItems<T>
 ): Promise<BatchResponse<T>> {
   const normalized = normalizeBatchEntries(items);
   const itemKeys = normalized.map((entry) => entry.key);
@@ -367,14 +323,12 @@ function setItems<T>(
     { keys: itemKeys }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function dropInstance(
   this: MemoryDriverContext,
-  options?: LocalSpaceConfig,
-  callback?: Callback<void>
+  options?: LocalSpaceConfig
 ): Promise<void> {
   const promise = withMemoryErrorContext(
     this.ready().then(() => {
@@ -413,15 +367,13 @@ function dropInstance(
     }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function runTransaction<T>(
   this: MemoryDriverContext,
   mode: IDBTransactionMode,
-  runner: (scope: TransactionScope) => Promise<T> | T,
-  callback?: Callback<T>
+  runner: (scope: TransactionScope) => Promise<T> | T
 ): Promise<T> {
   const promise = withMemoryErrorContext(
     this.ready().then(async () => {
@@ -500,7 +452,6 @@ function runTransaction<T>(
     { transactionMode: mode }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 

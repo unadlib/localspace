@@ -2,7 +2,6 @@ import type {
   Driver,
   DbInfo,
   LocalSpaceConfig,
-  Callback,
   Serializer,
   LocalSpaceInstance,
   BatchItems,
@@ -11,7 +10,6 @@ import type {
 import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors';
 import { createLocalSpaceError, toLocalSpaceError } from '../errors';
 import {
-  executeCallback,
   normalizeBatchEntries,
   normalizeKey,
   chunkArray,
@@ -122,10 +120,7 @@ async function _initStorage(
   this._dbInfo = dbInfo;
 }
 
-function clear(
-  this: LocalStorageDriverContext,
-  callback?: Callback<void>
-): Promise<void> {
+function clear(this: LocalStorageDriverContext): Promise<void> {
   const promise = withLocalStorageErrorContext(
     this.ready().then(() => {
       const keyPrefix = this._dbInfo.keyPrefix;
@@ -140,14 +135,12 @@ function clear(
     'clear'
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function getItem<T>(
   this: LocalStorageDriverContext,
-  key: string,
-  callback?: Callback<T>
+  key: string
 ): Promise<T | null> {
   const normalizedKey = normalizeKey(key);
 
@@ -166,17 +159,12 @@ function getItem<T>(
     { key: normalizedKey }
   );
 
-  executeCallback(
-    promise as Promise<T | null>,
-    callback as Callback<T | null> | undefined
-  );
   return promise;
 }
 
 function iterate<T, U>(
   this: LocalStorageDriverContext,
-  iterator: (value: T, key: string, iterationNumber: number) => U,
-  callback?: Callback<U>
+  iterator: (value: T, key: string, iterationNumber: number) => U
 ): Promise<U> {
   const promise = withLocalStorageErrorContext(
     this.ready().then(() => {
@@ -214,14 +202,12 @@ function iterate<T, U>(
     'iterate'
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function key(
   this: LocalStorageDriverContext,
-  n: number,
-  callback?: Callback<string>
+  n: number
 ): Promise<string | null> {
   const promise = withLocalStorageErrorContext(
     this.ready().then(() => {
@@ -247,14 +233,10 @@ function key(
     { keyIndex: n }
   );
 
-  executeCallback(promise, callback as Callback<string | null> | undefined);
   return promise;
 }
 
-function keys(
-  this: LocalStorageDriverContext,
-  callback?: Callback<string[]>
-): Promise<string[]> {
+function keys(this: LocalStorageDriverContext): Promise<string[]> {
   const promise = withLocalStorageErrorContext(
     this.ready().then(() => {
       const dbInfo = this._dbInfo;
@@ -273,27 +255,21 @@ function keys(
     'keys'
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
-function length(
-  this: LocalStorageDriverContext,
-  callback?: Callback<number>
-): Promise<number> {
+function length(this: LocalStorageDriverContext): Promise<number> {
   const promise = withLocalStorageErrorContext(
     keys.call(this).then((derivedKeys) => derivedKeys.length),
     'length'
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function removeItem(
   this: LocalStorageDriverContext,
-  key: string,
-  callback?: Callback<void>
+  key: string
 ): Promise<void> {
   const normalizedKey = normalizeKey(key);
 
@@ -306,14 +282,12 @@ function removeItem(
     { key: normalizedKey }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function removeItems(
   this: LocalStorageDriverContext,
-  keys: string[],
-  callback?: Callback<void>
+  keys: string[]
 ): Promise<void> {
   const normalizedKeys = keys.map((key) => normalizeKey(key));
 
@@ -332,15 +306,13 @@ function removeItems(
     { keys: normalizedKeys }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 async function setItem<T>(
   this: LocalStorageDriverContext,
   key: string,
-  value: T,
-  callback?: Callback<T>
+  value: T
 ): Promise<T> {
   const normalizedKey = normalizeKey(key);
 
@@ -381,14 +353,12 @@ async function setItem<T>(
     { key: normalizedKey }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function setItems<T>(
   this: LocalStorageDriverContext,
-  items: BatchItems<T>,
-  callback?: Callback<BatchResponse<T>>
+  items: BatchItems<T>
 ): Promise<BatchResponse<T>> {
   const normalized = normalizeBatchEntries(items);
   const itemKeys = normalized.map((entry) => entry.key);
@@ -457,14 +427,12 @@ function setItems<T>(
     { keys: itemKeys }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function getItems<T>(
   this: LocalStorageDriverContext,
-  keys: string[],
-  callback?: Callback<BatchResponse<T>>
+  keys: string[]
 ): Promise<BatchResponse<T>> {
   const normalizedKeys = keys.map((key) => normalizeKey(key));
 
@@ -492,14 +460,12 @@ function getItems<T>(
     { keys: normalizedKeys }
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function dropInstance(
   this: LocalStorageDriverContext,
-  options?: LocalSpaceConfig,
-  callback?: Callback<void>
+  options?: LocalSpaceConfig
 ): Promise<void> {
   const effectiveOptions: LocalSpaceConfig = { ...(options || {}) };
 
@@ -535,7 +501,6 @@ function dropInstance(
     storeName: effectiveOptions.storeName ?? this._defaultConfig.storeName,
   });
 
-  executeCallback(wrapped, callback);
   return wrapped;
 }
 

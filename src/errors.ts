@@ -104,17 +104,3 @@ export const wrapPromiseWithLocalSpaceError = <T>(
   promise.catch((error) => {
     throw toLocalSpaceError(error, code, message, details);
   });
-
-export const normalizeUnknownError = (
-  error: unknown,
-  fallbackMessage = 'Unknown error'
-): LocalSpaceError | Error =>
-  error instanceof Error
-    ? error instanceof LocalSpaceError
-      ? error
-      : toLocalSpaceError(error, 'UNKNOWN', error.message || fallbackMessage)
-    : toLocalSpaceError(
-        error,
-        'UNKNOWN',
-        typeof error === 'string' ? error : fallbackMessage
-      );

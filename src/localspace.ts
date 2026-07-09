@@ -4,13 +4,10 @@ import type {
   LocalSpaceOptions,
   LocalSpacePlugin,
   Driver,
-  Callback,
   DbInfo,
   DefinedDriversMap,
   DriverSupportMap,
   Serializer,
-  CompatibilityErrorCallback,
-  CompatibilitySuccessCallback,
   BatchItems,
   BatchResponse,
   TransactionScope,
@@ -21,8 +18,6 @@ import {
   extend,
   isArray,
   includes,
-  executeTwoCallbacks,
-  executeCallback,
   normalizeBatchEntries,
 } from './utils/helpers';
 import { createLocalSpaceError, LocalSpaceError } from './errors';
@@ -91,7 +86,6 @@ const DefaultConfig: LocalSpaceConfig = {
   size: 4980736,
   storeName: 'keyvaluepairs',
   version: 1.0,
-  compatibilityMode: false,
   pluginInitPolicy: 'fail',
   pluginErrorPolicy: 'lenient',
 };
@@ -106,23 +100,6 @@ type DriverAugmentedInstance = ReadyAwareInstance &
   Partial<Driver> & {
     _initStorage?: (config: LocalSpaceConfig) => Promise<void>;
   };
-
-const asErrorHandler = (
-  callback?: Callback<unknown> | CompatibilityErrorCallback,
-  options?: { compatibilityMode?: boolean }
-): ((error: Error) => void) | undefined => {
-  if (!callback) {
-    return undefined;
-  }
-
-  return (error: Error) => {
-    if (options?.compatibilityMode) {
-      (callback as CompatibilityErrorCallback)(error);
-    } else {
-      (callback as Callback<unknown>)(error, undefined);
-    }
-  };
-};
 
 function callWhenReady(
   instance: ReadyAwareInstance,
@@ -319,11 +296,7 @@ export class LocalSpace implements LocalSpaceInstance {
     await this._pluginManager.destroy();
   }
 
-  async defineDriver(
-    driverObject: Driver,
-    callback?: Callback<void> | CompatibilitySuccessCallback<void>,
-    errorCallback?: Callback<Error> | CompatibilityErrorCallback
-  ): Promise<void> {
+  async defineDriver(driverObject: Driver): Promise<void> {
     const promise = new Promise<void>(async (resolve, reject) => {
       try {
         const driverName = driverObject._driver;
@@ -351,19 +324,12 @@ export class LocalSpace implements LocalSpaceInstance {
 
         const configureMissingMethods = () => {
           const methodNotImplementedFactory = (methodName: string) => {
-            return function (...callbackArgs: unknown[]) {
+            return function () {
               const error = createLocalSpaceError(
                 'UNSUPPORTED_OPERATION',
                 `Method ${methodName} is not implemented by the current driver`,
                 { operation: methodName }
               );
-              const maybeCallback =
-                methodName === 'runTransaction'
-                  ? callbackArgs[2]
-                  : callbackArgs[callbackArgs.length - 1];
-              if (typeof maybeCallback === 'function') {
-                (maybeCallback as Callback)(error);
-              }
               return Promise.reject(error);
             };
           };
@@ -405,19 +371,6 @@ export class LocalSpace implements LocalSpaceInstance {
       }
     });
 
-    const callbackOptions = this._getCallbackOptions();
-    executeTwoCallbacks(
-      promise,
-      callback,
-      asErrorHandler(
-        errorCallback as
-          | Callback<unknown>
-          | CompatibilityErrorCallback
-          | undefined,
-        callbackOptions
-      ),
-      callbackOptions
-    );
     return promise;
   }
 
@@ -425,11 +378,7 @@ export class LocalSpace implements LocalSpaceInstance {
     return this._driver || null;
   }
 
-  async getDriver(
-    driverName: string,
-    callback?: Callback<Driver>,
-    errorCallback?: Callback<Error>
-  ): Promise<Driver> {
+  async getDriver(driverName: string): Promise<Driver> {
     const getDriverPromise = DefinedDrivers[driverName]
       ? Promise.resolve(DefinedDrivers[driverName])
       : Promise.reject(
@@ -438,34 +387,14 @@ export class LocalSpace implements LocalSpaceInstance {
           })
         );
 
-    const callbackOptions = this._getCallbackOptions();
-    executeTwoCallbacks(
-      getDriverPromise,
-      callback,
-      asErrorHandler(
-        errorCallback as
-          | Callback<unknown>
-          | CompatibilityErrorCallback
-          | undefined,
-        callbackOptions
-      ),
-      callbackOptions
-    );
     return getDriverPromise;
   }
 
-  async getSerializer(callback?: Callback<Serializer>): Promise<Serializer> {
-    const serializerPromise = Promise.resolve(serializer);
-    executeTwoCallbacks(
-      serializerPromise,
-      callback,
-      undefined,
-      this._getCallbackOptions()
-    );
-    return serializerPromise;
+  async getSerializer(): Promise<Serializer> {
+    return serializer;
   }
 
-  async ready(callback?: Callback<void>): Promise<void> {
+  async ready(): Promise<void> {
     const driverInitialization =
       this._driverSet ?? this._pendingDriverInitialization ?? Promise.resolve();
 
@@ -476,24 +405,10 @@ export class LocalSpace implements LocalSpaceInstance {
       return this._ready!;
     });
 
-    const callbackOptions = this._getCallbackOptions();
-    executeTwoCallbacks(
-      promise,
-      callback,
-      asErrorHandler(
-        callback as Callback<unknown> | undefined,
-        callbackOptions
-      ),
-      callbackOptions
-    );
     return promise;
   }
 
-  async setDriver(
-    drivers: string | string[],
-    callback?: Callback<void> | CompatibilitySuccessCallback<void>,
-    errorCallback?: Callback<Error> | CompatibilityErrorCallback
-  ): Promise<void> {
+  async setDriver(drivers: string | string[]): Promise<void> {
     // Wait for driver initialization to complete before checking support
     // Skip waiting if this is being called from _runDefaultDriverSelection to avoid deadlock
     if (
@@ -514,8 +429,6 @@ export class LocalSpace implements LocalSpaceInstance {
     const requestedDrivers = drivers as string[];
     const supportedDrivers =
       await this._resolveSupportedDrivers(requestedDrivers);
-    const callbackOptions = this._getCallbackOptions();
-
     if (supportedDrivers.length === 0) {
       const error = createLocalSpaceError(
         'DRIVER_UNAVAILABLE',
@@ -526,18 +439,6 @@ export class LocalSpace implements LocalSpaceInstance {
         throw error;
       });
       this._driverSet = rejection;
-      executeTwoCallbacks(
-        rejection,
-        callback,
-        asErrorHandler(
-          errorCallback as
-            | Callback<unknown>
-            | CompatibilityErrorCallback
-            | undefined,
-          callbackOptions
-        ),
-        callbackOptions
-      );
       return rejection;
     }
 
@@ -622,18 +523,6 @@ export class LocalSpace implements LocalSpaceInstance {
         throw error;
       });
 
-    executeTwoCallbacks(
-      this._driverSet,
-      callback,
-      asErrorHandler(
-        errorCallback as
-          | Callback<unknown>
-          | CompatibilityErrorCallback
-          | undefined,
-        callbackOptions
-      ),
-      callbackOptions
-    );
     return this._driverSet;
   }
 
@@ -708,252 +597,224 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   private _createSetItemWrapper(original: RawDriverMethod) {
-    return ((key: string, value: unknown, callback?: Callback<unknown>) => {
-      const cb = typeof callback === 'function' ? callback : undefined;
-      const promise = (async () => {
-        await this._pluginManager.ensureInitialized();
-        const context = this._pluginManager.createContext('setItem');
-        context.operationState.originalValue = value;
-        const processedValue = await this._pluginManager.beforeSet(
-          key,
-          value,
-          context
-        );
-        const driverResult = await original(key, processedValue);
-        context.operationState.driverResult = driverResult;
-        await this._pluginManager.afterSet(key, processedValue, context);
-        const returnValue = (context.operationState.returnValue ??
-          context.operationState.originalValue ??
-          value) as unknown;
-        return returnValue;
-      })();
-      return executeCallback(promise, cb);
+    return (async (key: string, value: unknown) => {
+      await this._pluginManager.ensureInitialized();
+      const context = this._pluginManager.createContext('setItem');
+      context.operationState.originalValue = value;
+      const processedValue = await this._pluginManager.beforeSet(
+        key,
+        value,
+        context
+      );
+      const driverResult = await original(key, processedValue);
+      context.operationState.driverResult = driverResult;
+      await this._pluginManager.afterSet(key, processedValue, context);
+      const returnValue = (context.operationState.returnValue ??
+        context.operationState.originalValue ??
+        value) as unknown;
+      return returnValue;
     }) as typeof this.setItem;
   }
 
   private _createGetItemWrapper(original: RawDriverMethod) {
-    return ((key: string, callback?: Callback<unknown>) => {
-      const cb = typeof callback === 'function' ? callback : undefined;
-      const promise = (async () => {
-        await this._pluginManager.ensureInitialized();
-        const context = this._pluginManager.createContext('getItem');
-        const targetKey = await this._pluginManager.beforeGet(key, context);
-        const driverValue = await original(targetKey);
-        const finalValue = await this._pluginManager.afterGet(
-          targetKey,
-          driverValue as unknown,
-          context
-        );
-        return finalValue;
-      })();
-      return executeCallback(promise, cb);
+    return (async (key: string) => {
+      await this._pluginManager.ensureInitialized();
+      const context = this._pluginManager.createContext('getItem');
+      const targetKey = await this._pluginManager.beforeGet(key, context);
+      const driverValue = await original(targetKey);
+      const finalValue = await this._pluginManager.afterGet(
+        targetKey,
+        driverValue as unknown,
+        context
+      );
+      return finalValue;
     }) as typeof this.getItem;
   }
 
   private _createRemoveItemWrapper(original: RawDriverMethod) {
-    return ((key: string, callback?: Callback<void>) => {
-      const cb = typeof callback === 'function' ? callback : undefined;
-      const promise = (async () => {
-        await this._pluginManager.ensureInitialized();
-        const context = this._pluginManager.createContext('removeItem');
-        const targetKey = await this._pluginManager.beforeRemove(key, context);
-        await original(targetKey);
-        await this._pluginManager.afterRemove(targetKey, context);
-      })();
-      return executeCallback(promise, cb);
+    return (async (key: string) => {
+      await this._pluginManager.ensureInitialized();
+      const context = this._pluginManager.createContext('removeItem');
+      const targetKey = await this._pluginManager.beforeRemove(key, context);
+      await original(targetKey);
+      await this._pluginManager.afterRemove(targetKey, context);
     }) as typeof this.removeItem;
   }
 
   private _createSetItemsWrapper(original: RawDriverMethod) {
-    return ((
-      entries: BatchItems<unknown>,
-      callback?: Callback<BatchResponse<unknown>>
-    ) => {
-      const cb = typeof callback === 'function' ? callback : undefined;
-      const promise = (async () => {
-        await this._pluginManager.ensureInitialized();
-        const batchContext = this._pluginManager.createContext('setItems');
-        batchContext.operationState.isBatch = true;
-        const prepared = await this._pluginManager.beforeSetItems(
-          entries,
-          batchContext
+    return (async (entries: BatchItems<unknown>) => {
+      await this._pluginManager.ensureInitialized();
+      const batchContext = this._pluginManager.createContext('setItems');
+      batchContext.operationState.isBatch = true;
+      const prepared = await this._pluginManager.beforeSetItems(
+        entries,
+        batchContext
+      );
+      const normalized = this._pluginManager.normalizeBatch(prepared);
+      batchContext.operationState.batchSize = normalized.length;
+      const processedEntries: Array<{
+        key: string;
+        value: unknown;
+        context: PluginContext;
+      }> = [];
+      const contextByKey = new Map<
+        string,
+        { value: unknown; context: PluginContext }
+      >();
+
+      for (const entry of normalized) {
+        const entryContext = this._pluginManager.createContext('setItem');
+        entryContext.operationState.originalValue = entry.value;
+        entryContext.operationState.isBatch = true;
+        entryContext.operationState.batchSize = normalized.length;
+        const processedValue = await this._pluginManager.beforeSet(
+          entry.key,
+          entry.value,
+          entryContext
         );
-        const normalized = this._pluginManager.normalizeBatch(prepared);
-        batchContext.operationState.batchSize = normalized.length;
-        const processedEntries: Array<{
-          key: string;
-          value: unknown;
-          context: PluginContext;
-        }> = [];
-        const contextByKey = new Map<
-          string,
-          { value: unknown; context: PluginContext }
-        >();
-
-        for (const entry of normalized) {
-          const entryContext = this._pluginManager.createContext('setItem');
-          entryContext.operationState.originalValue = entry.value;
-          entryContext.operationState.isBatch = true;
-          entryContext.operationState.batchSize = normalized.length;
-          const processedValue = await this._pluginManager.beforeSet(
-            entry.key,
-            entry.value,
-            entryContext
-          );
-          const entryRecord = {
-            key: entry.key,
-            value: processedValue,
-            context: entryContext,
-          };
-          processedEntries.push(entryRecord);
-          contextByKey.set(entry.key, {
-            value: processedValue,
-            context: entryContext,
-          });
-        }
-
-        const driverResponse = (await original(
-          processedEntries as unknown as BatchItems<unknown>
-        )) as BatchResponse<unknown>;
-        const finalized = await this._pluginManager.afterSetItems(
-          driverResponse,
-          batchContext
-        );
-
-        for (const entry of processedEntries) {
-          await this._pluginManager.afterSet(
-            entry.key,
-            entry.value,
-            entry.context
-          );
-        }
-
-        const finalReturn = finalized.map((entry) => {
-          const entryContext = contextByKey.get(entry.key);
-          const contextualValue =
-            entryContext?.context.operationState.returnValue;
-          const value =
-            typeof contextualValue !== 'undefined'
-              ? contextualValue
-              : typeof entry.value !== 'undefined'
-                ? entry.value
-                : (entryContext?.context.operationState.originalValue ??
-                  entryContext?.value);
-          return { key: entry.key, value };
+        const entryRecord = {
+          key: entry.key,
+          value: processedValue,
+          context: entryContext,
+        };
+        processedEntries.push(entryRecord);
+        contextByKey.set(entry.key, {
+          value: processedValue,
+          context: entryContext,
         });
+      }
 
-        return finalReturn;
-      })();
-      return executeCallback(promise, cb);
+      const driverResponse = (await original(
+        processedEntries as unknown as BatchItems<unknown>
+      )) as BatchResponse<unknown>;
+      const finalized = await this._pluginManager.afterSetItems(
+        driverResponse,
+        batchContext
+      );
+
+      for (const entry of processedEntries) {
+        await this._pluginManager.afterSet(
+          entry.key,
+          entry.value,
+          entry.context
+        );
+      }
+
+      const finalReturn = finalized.map((entry) => {
+        const entryContext = contextByKey.get(entry.key);
+        const contextualValue =
+          entryContext?.context.operationState.returnValue;
+        const value =
+          typeof contextualValue !== 'undefined'
+            ? contextualValue
+            : typeof entry.value !== 'undefined'
+              ? entry.value
+              : (entryContext?.context.operationState.originalValue ??
+                entryContext?.value);
+        return { key: entry.key, value };
+      });
+
+      return finalReturn;
     }) as typeof this.setItems;
   }
 
   private _createGetItemsWrapper(original: RawDriverMethod) {
-    return ((keys: string[], callback?: Callback<BatchResponse<unknown>>) => {
-      const cb = typeof callback === 'function' ? callback : undefined;
-      const promise = (async () => {
-        await this._pluginManager.ensureInitialized();
-        const batchContext = this._pluginManager.createContext('getItems');
-        batchContext.operationState.isBatch = true;
-        batchContext.operationState.batchSize = keys.length;
-        const requestedKeys = await this._pluginManager.beforeGetItems(
-          keys,
-          batchContext
+    return (async (keys: string[]) => {
+      await this._pluginManager.ensureInitialized();
+      const batchContext = this._pluginManager.createContext('getItems');
+      batchContext.operationState.isBatch = true;
+      batchContext.operationState.batchSize = keys.length;
+      const requestedKeys = await this._pluginManager.beforeGetItems(
+        keys,
+        batchContext
+      );
+      const entryContexts: Array<{
+        requestedKey: string;
+        targetKey: string;
+        context: PluginContext;
+      }> = [];
+      const targetToRequested = new Map<string, string>();
+
+      for (const key of requestedKeys) {
+        const entryContext = this._pluginManager.createContext('getItem');
+        entryContext.operationState.isBatch = true;
+        entryContext.operationState.batchSize = requestedKeys.length;
+        const targetKey = await this._pluginManager.beforeGet(
+          key,
+          entryContext
         );
-        const entryContexts: Array<{
-          requestedKey: string;
-          targetKey: string;
-          context: PluginContext;
-        }> = [];
-        const targetToRequested = new Map<string, string>();
-
-        for (const key of requestedKeys) {
-          const entryContext = this._pluginManager.createContext('getItem');
-          entryContext.operationState.isBatch = true;
-          entryContext.operationState.batchSize = requestedKeys.length;
-          const targetKey = await this._pluginManager.beforeGet(
-            key,
-            entryContext
-          );
-          targetToRequested.set(targetKey, key);
-          entryContexts.push({
-            requestedKey: key,
-            targetKey,
-            context: entryContext,
-          });
-        }
-
-        const targetKeys = entryContexts.map((entry) => entry.targetKey);
-        const driverResponse = (await original(
-          targetKeys
-        )) as BatchResponse<unknown>;
-        const processedEntries: BatchResponse<unknown> = [];
-
-        for (let i = 0; i < driverResponse.length; i++) {
-          const entry = driverResponse[i];
-          const context =
-            entryContexts[i]?.context ??
-            entryContexts.find((candidate) => candidate.targetKey === entry.key)
-              ?.context ??
-            this._pluginManager.createContext('getItem');
-          context.operationState.isBatch = true;
-          context.operationState.batchSize = requestedKeys.length;
-          const processedValue = await this._pluginManager.afterGet(
-            entry.key,
-            entry.value,
-            context
-          );
-          processedEntries.push({ key: entry.key, value: processedValue });
-        }
-
-        const finalEntries = await this._pluginManager.afterGetItems(
-          processedEntries,
-          batchContext
-        );
-        return finalEntries.map((entry) => {
-          const requestedKey = targetToRequested.get(entry.key) ?? entry.key;
-          return { key: requestedKey, value: entry.value };
+        targetToRequested.set(targetKey, key);
+        entryContexts.push({
+          requestedKey: key,
+          targetKey,
+          context: entryContext,
         });
-      })();
-      return executeCallback(promise, cb);
+      }
+
+      const targetKeys = entryContexts.map((entry) => entry.targetKey);
+      const driverResponse = (await original(
+        targetKeys
+      )) as BatchResponse<unknown>;
+      const processedEntries: BatchResponse<unknown> = [];
+
+      for (let i = 0; i < driverResponse.length; i++) {
+        const entry = driverResponse[i];
+        const context =
+          entryContexts[i]?.context ??
+          entryContexts.find((candidate) => candidate.targetKey === entry.key)
+            ?.context ??
+          this._pluginManager.createContext('getItem');
+        context.operationState.isBatch = true;
+        context.operationState.batchSize = requestedKeys.length;
+        const processedValue = await this._pluginManager.afterGet(
+          entry.key,
+          entry.value,
+          context
+        );
+        processedEntries.push({ key: entry.key, value: processedValue });
+      }
+
+      const finalEntries = await this._pluginManager.afterGetItems(
+        processedEntries,
+        batchContext
+      );
+      return finalEntries.map((entry) => {
+        const requestedKey = targetToRequested.get(entry.key) ?? entry.key;
+        return { key: requestedKey, value: entry.value };
+      });
     }) as typeof this.getItems;
   }
 
   private _createRemoveItemsWrapper(original: RawDriverMethod) {
-    return ((keys: string[], callback?: Callback<void>) => {
-      const cb = typeof callback === 'function' ? callback : undefined;
-      const promise = (async () => {
-        await this._pluginManager.ensureInitialized();
-        const batchContext = this._pluginManager.createContext('removeItems');
-        batchContext.operationState.isBatch = true;
-        batchContext.operationState.batchSize = keys.length;
-        const requestedKeys = await this._pluginManager.beforeRemoveItems(
-          keys,
-          batchContext
+    return (async (keys: string[]) => {
+      await this._pluginManager.ensureInitialized();
+      const batchContext = this._pluginManager.createContext('removeItems');
+      batchContext.operationState.isBatch = true;
+      batchContext.operationState.batchSize = keys.length;
+      const requestedKeys = await this._pluginManager.beforeRemoveItems(
+        keys,
+        batchContext
+      );
+      const processedKeys: Array<{ key: string; context: PluginContext }> = [];
+
+      for (const key of requestedKeys) {
+        const entryContext = this._pluginManager.createContext('removeItem');
+        entryContext.operationState.isBatch = true;
+        entryContext.operationState.batchSize = requestedKeys.length;
+        const processedKey = await this._pluginManager.beforeRemove(
+          key,
+          entryContext
         );
-        const processedKeys: Array<{ key: string; context: PluginContext }> =
-          [];
+        processedKeys.push({ key: processedKey, context: entryContext });
+      }
 
-        for (const key of requestedKeys) {
-          const entryContext = this._pluginManager.createContext('removeItem');
-          entryContext.operationState.isBatch = true;
-          entryContext.operationState.batchSize = requestedKeys.length;
-          const processedKey = await this._pluginManager.beforeRemove(
-            key,
-            entryContext
-          );
-          processedKeys.push({ key: processedKey, context: entryContext });
-        }
+      const keyList = processedKeys.map((entry) => entry.key);
+      await original(keyList);
+      await this._pluginManager.afterRemoveItems(keyList, batchContext);
 
-        const keyList = processedKeys.map((entry) => entry.key);
-        await original(keyList);
-        await this._pluginManager.afterRemoveItems(keyList, batchContext);
-
-        for (const entry of processedKeys) {
-          await this._pluginManager.afterRemove(entry.key, entry.context);
-        }
-      })();
-      return executeCallback(promise, cb);
+      for (const entry of processedKeys) {
+        await this._pluginManager.afterRemove(entry.key, entry.context);
+      }
     }) as typeof this.removeItems;
   }
 
@@ -1027,14 +888,6 @@ export class LocalSpace implements LocalSpaceInstance {
     );
   }
 
-  private _getCallbackOptions() {
-    const compatibilityMode =
-      this._config && typeof this._config.compatibilityMode === 'boolean'
-        ? !!this._config.compatibilityMode
-        : false;
-    return { compatibilityMode };
-  }
-
   private _notInitializedError(operation: string): LocalSpaceError {
     return createLocalSpaceError(
       'DRIVER_NOT_INITIALIZED',
@@ -1045,73 +898,59 @@ export class LocalSpace implements LocalSpaceInstance {
 
   // Driver methods (will be replaced by actual driver implementations)
   async iterate<T, U>(
-    iteratorCallback: (value: T, key: string, iterationNumber: number) => U,
-    successCallback?: Callback<U>
+    iteratorCallback: (value: T, key: string, iterationNumber: number) => U
   ): Promise<U> {
     throw this._notInitializedError('iterate');
   }
 
-  async getItems<T>(
-    keys: string[],
-    callback?: Callback<BatchResponse<T>>
-  ): Promise<BatchResponse<T>> {
+  async getItems<T>(keys: string[]): Promise<BatchResponse<T>> {
     throw this._notInitializedError('getItems');
   }
 
-  async getItem<T>(key: string, callback?: Callback<T>): Promise<T | null> {
+  async getItem<T>(key: string): Promise<T | null> {
     throw this._notInitializedError('getItem');
   }
 
-  async setItem<T>(key: string, value: T, callback?: Callback<T>): Promise<T> {
+  async setItem<T>(key: string, value: T): Promise<T> {
     throw this._notInitializedError('setItem');
   }
 
-  async setItems<T>(
-    entries: BatchItems<T>,
-    callback?: Callback<BatchResponse<T>>
-  ): Promise<BatchResponse<T>> {
+  async setItems<T>(entries: BatchItems<T>): Promise<BatchResponse<T>> {
     throw this._notInitializedError('setItems');
   }
 
-  async removeItem(key: string, callback?: Callback<void>): Promise<void> {
+  async removeItem(key: string): Promise<void> {
     throw this._notInitializedError('removeItem');
   }
 
-  async removeItems(keys: string[], callback?: Callback<void>): Promise<void> {
+  async removeItems(keys: string[]): Promise<void> {
     throw this._notInitializedError('removeItems');
   }
 
   async runTransaction<T>(
     mode: IDBTransactionMode,
-    runner: (scope: TransactionScope) => Promise<T> | T,
-    callback?: Callback<T>
+    runner: (scope: TransactionScope) => Promise<T> | T
   ): Promise<T> {
     throw this._notInitializedError('runTransaction');
   }
 
-  async clear(callback?: Callback<void>): Promise<void> {
+  async clear(): Promise<void> {
     throw this._notInitializedError('clear');
   }
 
-  async length(callback?: Callback<number>): Promise<number> {
+  async length(): Promise<number> {
     throw this._notInitializedError('length');
   }
 
-  async key(
-    keyIndex: number,
-    callback?: Callback<string>
-  ): Promise<string | null> {
+  async key(keyIndex: number): Promise<string | null> {
     throw this._notInitializedError('key');
   }
 
-  async keys(callback?: Callback<string[]>): Promise<string[]> {
+  async keys(): Promise<string[]> {
     throw this._notInitializedError('keys');
   }
 
-  async dropInstance(
-    options?: LocalSpaceConfig,
-    callback?: Callback<void>
-  ): Promise<void> {
+  async dropInstance(options?: LocalSpaceConfig): Promise<void> {
     throw this._notInitializedError('dropInstance');
   }
 }

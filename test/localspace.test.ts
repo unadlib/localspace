@@ -122,17 +122,6 @@ describe('LocalSpace class tests', () => {
       expect(serializer.deserialize).toBeDefined();
     });
 
-    it('should get serializer with callback', async () => {
-      const instance = new LocalSpace();
-      await new Promise<void>((resolve) => {
-        instance.getSerializer((err, serializer) => {
-          expect(err).toBeNull();
-          expect(serializer).toBeDefined();
-          resolve();
-        });
-      });
-    });
-
     it('should handle setDriver with no available drivers', async () => {
       const instance = new LocalSpace();
 
@@ -303,36 +292,6 @@ describe('LocalSpace class tests', () => {
       consoleInfoSpy.mockRestore();
     });
 
-    it('should handle defineDriver with callbacks in compatibility mode', async () => {
-      const customDriver = {
-        _driver: 'callbackDriver',
-        _initStorage: vi.fn().mockResolvedValue(undefined),
-        _support: true,
-        getItem: vi.fn(),
-        setItem: vi.fn(),
-        removeItem: vi.fn(),
-        clear: vi.fn(),
-        length: vi.fn(),
-        key: vi.fn(),
-        keys: vi.fn(),
-        iterate: vi.fn(),
-      };
-
-      const instance = new LocalSpace({ compatibilityMode: true });
-
-      await new Promise<void>((resolve) => {
-        instance.defineDriver(
-          customDriver,
-          () => {
-            expect(instance.supports('callbackDriver')).toBe(true);
-            resolve();
-          },
-          (err) => {
-            throw err;
-          }
-        );
-      });
-    });
   });
 
   describe('Ready and initialization', () => {
@@ -347,27 +306,6 @@ describe('LocalSpace class tests', () => {
       expect(driverName).toBeTruthy();
     });
 
-    it('should handle ready with callback', async () => {
-      const instance = localspace.createInstance();
-
-      await new Promise<void>((resolve) => {
-        instance.ready((err) => {
-          expect(err).toBeNull();
-          resolve();
-        });
-      });
-    });
-
-    it('should handle ready in compatibility mode', async () => {
-      const instance = localspace.createInstance({ compatibilityMode: true });
-
-      await new Promise<void>((resolve) => {
-        instance.ready((err) => {
-          expect(err).toBeUndefined();
-          resolve();
-        });
-      });
-    });
   });
 
   describe('Error handling', () => {

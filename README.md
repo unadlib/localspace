@@ -4,13 +4,19 @@
 [![npm](https://img.shields.io/npm/v/localspace.svg)](https://www.npmjs.com/package/localspace)
 ![license](https://img.shields.io/npm/l/localspace)
 
-localspace — modern storage toolkit that keeps localForage compatibility while using async/await, TypeScript, and zero legacy baggage.
+localspace is a Promise-first storage toolkit for IndexedDB, localStorage, and
+React Native AsyncStorage, with TypeScript types and a focused plugin system.
 
 ## Motivation
 
-The industry still leans on localForage's familiar API, yet modern apps crave stronger typing, async ergonomics, and multi-platform reliability without a painful rewrite. localspace exists to bridge that gap: it honors the old contract while delivering first-class TypeScript types, native async/await, reliable IndexedDB cleanup, and a clean driver architecture.
+localspace keeps the familiar key-value shape of localForage while making
+Promise semantics, explicit batching, and driver capabilities the actual
+contract. It adds first-class TypeScript types, IndexedDB transactions,
+multi-platform drivers, and a plugin architecture.
 
-**Why rebuild instead of fork?** Starting fresh let us eliminate technical debt while maintaining API compatibility. Teams can migrate from localForage without changing application code, then unlock better developer experience and future extensibility.
+It is not a callback-compatible drop-in replacement. Existing Promise-based
+localForage usage is usually straightforward to migrate; callback-based code
+must be converted to `await` or `.then()`.
 
 ## Quick Start
 
@@ -132,15 +138,6 @@ const keys = await localspace.keys();
 // Iterate
 await localspace.iterate<T, void>((value, key, index) => {
   console.log(key, value);
-});
-```
-
-### Callbacks (Legacy Support)
-
-```ts
-localspace.getItem('user', (error, value) => {
-  if (error) return console.error(error);
-  console.log(value);
 });
 ```
 
@@ -381,7 +378,7 @@ const mobileStore = await createReactNativeInstance(localspace, {
 | [API Reference](./docs/api-reference.md)     | Complete method documentation         |
 | [Plugin System](./docs/plugins.md)           | Built-in plugins & custom development |
 | [Real-World Examples](./docs/examples.md)    | Production-ready code patterns        |
-| [Migration Guide](./docs/migration-guide.md) | Upgrading from localForage            |
+| [Migration Guide](./docs/migration-guide.md) | Migrating from localForage and 1.x    |
 
 ---
 
@@ -392,7 +389,7 @@ const mobileStore = await createReactNativeInstance(localspace, {
 - [x] IndexedDB and localStorage drivers
 - [x] Opt-in memory fallback driver
 - [x] React Native AsyncStorage driver
-- [x] Full localForage API parity
+- [x] Familiar Promise-based key-value API
 - [x] TypeScript-first implementation
 - [x] Explicit batch operations
 - [x] Plugin system (TTL, Encryption, Compression)

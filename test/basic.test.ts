@@ -106,21 +106,6 @@ describe('localspace basic API', () => {
     expect(items).toEqual({ key1: 'value1', key2: 'value2' });
   });
 
-  it('should support callbacks', async () => {
-    await new Promise<void>((resolve) => {
-      localspace.setItem('callbackKey', 'callbackValue', (err, value) => {
-        expect(err).toBe(null);
-        expect(value).toBe('callbackValue');
-
-        localspace.getItem('callbackKey', (err, value) => {
-          expect(err).toBe(null);
-          expect(value).toBe('callbackValue');
-          resolve();
-        });
-      });
-    });
-  });
-
   it('should get driver name', () => {
     const driver = localspace.driver();
     expect(driver).toBeTruthy();

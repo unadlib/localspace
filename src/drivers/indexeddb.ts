@@ -2,7 +2,6 @@ import type {
   Driver,
   DbInfo,
   LocalSpaceConfig,
-  Callback,
   LocalSpaceInstance,
   BatchItems,
   BatchResponse,
@@ -12,7 +11,6 @@ import type {
 import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors';
 import { createLocalSpaceError, toLocalSpaceError } from '../errors';
 import {
-  executeCallback,
   normalizeBatchEntries,
   normalizeKey,
   createBlob,
@@ -789,10 +787,7 @@ async function _initStorage(
   }
 }
 
-function fullyReady(
-  this: IndexedDBDriverContext,
-  callback?: Callback<void>
-): Promise<void> {
+function fullyReady(this: IndexedDBDriverContext): Promise<void> {
   const self = this;
   const initReady = (self._initReady ?? self.ready).bind(self);
   const promise = withIdbErrorContext(
@@ -807,14 +802,12 @@ function fullyReady(
     'ready'
   );
 
-  executeCallback(promise, callback);
   return promise;
 }
 
 function getItem<T>(
   this: IndexedDBDriverContext,
-  key: string,
-  callback?: Callback<T>
+  key: string
 ): Promise<T | null> {
   const self = this;
   key = normalizeKey(key);
@@ -862,14 +855,12 @@ function getItem<T>(
     'OPERATION_FAILED'
   );
 
-  executeCallback(wrappedPromise, callback as Callback<T | null>);
   return wrappedPromise;
 }
 
 function getItems<T>(
   this: IndexedDBDriverContext,
-  keys: string[],
-  callback?: Callback<BatchResponse<T>>
+  keys: string[]
 ): Promise<BatchResponse<T>> {
   const self = this;
   const normalizedKeys = keys.map((key) => normalizeKey(key));
@@ -957,14 +948,12 @@ function getItems<T>(
     'OPERATION_FAILED'
   );
 
-  executeCallback(wrappedPromise, callback);
   return wrappedPromise;
 }
 
 function iterate<T, U>(
   this: IndexedDBDriverContext,
-  iterator: (value: T, key: string, iterationNumber: number) => U,
-  callback?: Callback<U>
+  iterator: (value: T, key: string, iterationNumber: number) => U
 ): Promise<U> {
   const self = this;
 
@@ -1021,14 +1010,12 @@ function iterate<T, U>(
 
   const wrappedPromise = withIdbErrorContext(promise, 'iterate');
 
-  executeCallback(wrappedPromise, callback);
   return wrappedPromise;
 }
 
 function setItems<T>(
   this: IndexedDBDriverContext,
-  items: BatchItems<T>,
-  callback?: Callback<BatchResponse<T>>
+  items: BatchItems<T>
 ): Promise<BatchResponse<T>> {
   const self = this;
   const normalized = normalizeBatchEntries(items);
@@ -1133,15 +1120,13 @@ function setItems<T>(
     'OPERATION_FAILED'
   );
 
-  executeCallback(wrappedPromise, callback);
   return wrappedPromise;
 }
 
 async function setItem<T>(
   this: IndexedDBDriverContext,
   key: string,
-  value: T,
-  callback?: Callback<T>
+  value: T
 ): Promise<T> {
   const self = this;
   key = normalizeKey(key);
@@ -1197,15 +1182,10 @@ async function setItem<T>(
     key,
   });
 
-  executeCallback(wrappedPromise, callback);
   return wrappedPromise as Promise<T>;
 }
 
-function removeItem(
-  this: IndexedDBDriverContext,
-  key: string,
-  callback?: Callback<void>
-): Promise<void> {
+function removeItem(this: IndexedDBDriverContext, key: string): Promise<void> {
   const self = this;
   key = normalizeKey(key);
 
@@ -1244,14 +1224,12 @@ function removeItem(
 
   const wrappedPromise = withIdbErrorContext(promise, 'removeItem', { key });
 
-  executeCallback(wrappedPromise, callback);
   return wrappedPromise;
 }
 
 function removeItems(
   this: IndexedDBDriverContext,
-  keys: string[],
-  callback?: Callback<void>
+  keys: string[]
 ): Promise<void> {
   const self = this;
   const normalizedKeys = keys.map((key) => normalizeKey(key));
@@ -1318,15 +1296,13 @@ function removeItems(
     keys: normalizedKeys,
   });
 
-  executeCallback(wrappedPromise, callback);
   return wrappedPromise;
 }
 
 function runTransaction<T>(
   this: IndexedDBDriverContext,
   mode: IDBTransactionMode,
-  runner: (scope: TransactionScope) => Promise<T> | T,
-  callback?: Callback<T>
+  runner: (scope: TransactionScope) => Promise<T> | T
 ): Promise<T> {
   const self = this;
 
@@ -1527,14 +1503,10 @@ function runTransaction<T>(
     transactionMode: mode,
   });
 
-  executeCallback(wrappedPromise, callback);
   return wrappedPromise;
 }
 
-function clear(
-  this: IndexedDBDriverContext,
-  callback?: Callback<void>
-): Promise<void> {
+function clear(this: IndexedDBDriverContext): Promise<void> {
   const self = this;
 
   const promise = new Promise<void>((resolve, reject) => {
@@ -1568,14 +1540,10 @@ function clear(
 
   const wrappedPromise = withIdbErrorContext(promise, 'clear');
 
-  executeCallback(wrappedPromise, callback);
   return wrappedPromise;
 }
 
-function length(
-  this: IndexedDBDriverContext,
-  callback?: Callback<number>
-): Promise<number> {
+function length(this: IndexedDBDriverContext): Promise<number> {
   const self = this;
 
   const promise = new Promise<number>((resolve, reject) => {
@@ -1606,15 +1574,10 @@ function length(
 
   const wrappedPromise = withIdbErrorContext(promise, 'length');
 
-  executeCallback(wrappedPromise, callback);
   return wrappedPromise;
 }
 
-function key(
-  this: IndexedDBDriverContext,
-  n: number,
-  callback?: Callback<string>
-): Promise<string | null> {
+function key(this: IndexedDBDriverContext, n: number): Promise<string | null> {
   const self = this;
 
   const promise = new Promise<string | null>((resolve, reject) => {
@@ -1669,14 +1632,10 @@ function key(
 
   const wrappedPromise = withIdbErrorContext(promise, 'key', { keyIndex: n });
 
-  executeCallback(wrappedPromise, callback as Callback<string | null>);
   return wrappedPromise;
 }
 
-function keys(
-  this: IndexedDBDriverContext,
-  callback?: Callback<string[]>
-): Promise<string[]> {
+function keys(this: IndexedDBDriverContext): Promise<string[]> {
   const self = this;
 
   const promise = new Promise<string[]>((resolve, reject) => {
@@ -1717,14 +1676,12 @@ function keys(
 
   const wrappedPromise = withIdbErrorContext(promise, 'keys');
 
-  executeCallback(wrappedPromise, callback);
   return wrappedPromise;
 }
 
 function dropInstance(
   this: IndexedDBDriverContext,
-  options?: LocalSpaceConfig,
-  callback?: Callback<void>
+  options?: LocalSpaceConfig
 ): Promise<void> {
   const self = this;
   const currentConfig = self.config();
@@ -1753,7 +1710,6 @@ function dropInstance(
       name: effectiveOptions.name,
       storeName: effectiveOptions.storeName,
     });
-    executeCallback(wrappedInvalid, callback);
     return wrappedInvalid;
   }
 
@@ -1935,7 +1891,6 @@ function dropInstance(
     storeName: effectiveOptions.storeName,
   });
 
-  executeCallback(wrappedPromise, callback);
   return wrappedPromise;
 }
 

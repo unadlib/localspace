@@ -237,104 +237,6 @@ describe('IndexedDB driver tests', () => {
     });
   });
 
-  describe('Callback support', () => {
-    it('should support callbacks for setItem', async () => {
-      await new Promise<void>((resolve) => {
-        instance.setItem('callbackKey', 'callbackValue', (err, value) => {
-          expect(err).toBe(null);
-          expect(value).toBe('callbackValue');
-          resolve();
-        });
-      });
-    });
-
-    it('should support callbacks for getItem', async () => {
-      await instance.setItem('test', 'value');
-
-      await new Promise<void>((resolve) => {
-        instance.getItem('test', (err, value) => {
-          expect(err).toBe(null);
-          expect(value).toBe('value');
-          resolve();
-        });
-      });
-    });
-
-    it('should support callbacks for removeItem', async () => {
-      await instance.setItem('test', 'value');
-
-      await new Promise<void>((resolve) => {
-        instance.removeItem('test', (err) => {
-          expect(err).toBe(null);
-          resolve();
-        });
-      });
-    });
-
-    it('should support callbacks for clear', async () => {
-      await instance.setItem('test', 'value');
-
-      await new Promise<void>((resolve) => {
-        instance.clear((err) => {
-          expect(err).toBe(null);
-          resolve();
-        });
-      });
-    });
-
-    it('should support callbacks for length', async () => {
-      await instance.setItem('test', 'value');
-
-      await new Promise<void>((resolve) => {
-        instance.length((err, length) => {
-          expect(err).toBe(null);
-          expect(length).toBeGreaterThan(0);
-          resolve();
-        });
-      });
-    });
-
-    it('should support callbacks for keys', async () => {
-      await instance.setItem('test', 'value');
-
-      await new Promise<void>((resolve) => {
-        instance.keys((err, keys) => {
-          expect(err).toBe(null);
-          expect(keys).toContain('test');
-          resolve();
-        });
-      });
-    });
-
-    it('should support callbacks for key', async () => {
-      await instance.setItem('test', 'value');
-
-      await new Promise<void>((resolve) => {
-        instance.key(0, (err, key) => {
-          expect(err).toBe(null);
-          expect(key).toBeTruthy();
-          resolve();
-        });
-      });
-    });
-
-    it('should support callbacks for iterate', async () => {
-      await instance.setItem('test', 'value');
-
-      await new Promise<void>((resolve) => {
-        instance.iterate(
-          (value, key) => {
-            // iteration callback
-          },
-          (err) => {
-            expect(err).toBe(null);
-            resolve();
-          }
-        );
-      });
-    });
-  });
-
   describe('Blob handling', () => {
     it('should store and retrieve Blobs', async () => {
       const blob = new Blob(['test content'], { type: 'text/plain' });
@@ -460,25 +362,6 @@ describe('IndexedDB driver tests', () => {
 
       const value = await newInstance.getItem('key');
       expect(value).toBe(null);
-    });
-
-    it('should handle dropInstance with callback', async () => {
-      const dbName = `drop-callback-test-${Math.random().toString(36).slice(2)}`;
-      const testInstance = localspace.createInstance({
-        name: dbName,
-        storeName: 'store1',
-      });
-
-      await testInstance.setDriver([testInstance.INDEXEDDB]);
-      await testInstance.ready();
-      await testInstance.setItem('key', 'value');
-
-      await new Promise<void>((resolve) => {
-        testInstance.dropInstance(undefined, (err) => {
-          expect(err).toBe(null);
-          resolve();
-        });
-      });
     });
 
     it('should handle dropInstance with only storeName', async () => {

@@ -10,11 +10,8 @@ import type {
   PluginStage,
   PluginEnabledPredicate,
   Driver,
-  Callback,
   Serializer,
   ReactNativeAsyncStorage,
-  CompatibilitySuccessCallback,
-  CompatibilityErrorCallback,
 } from './types';
 
 // Create default instance
@@ -35,11 +32,8 @@ export type {
   PluginStage,
   PluginEnabledPredicate,
   Driver,
-  Callback,
   Serializer,
   ReactNativeAsyncStorage,
-  CompatibilitySuccessCallback,
-  CompatibilityErrorCallback,
 };
 export type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from './errors';
 export { LocalSpaceError } from './errors';

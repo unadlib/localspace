@@ -18,6 +18,9 @@
   React Native AsyncStorage. Those drivers now reject the method with
   `UNSUPPORTED_OPERATION` instead of presenting non-atomic work as a
   transaction.
+- Removed completion callbacks, callback helper exports, and
+  `compatibilityMode`. All public storage and driver-management operations are
+  Promise-only.
 
 ### Fixed
 

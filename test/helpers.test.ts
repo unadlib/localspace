@@ -1,74 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
-  executeTwoCallbacks,
   extend,
   includes,
   normalizeKey,
   isArray,
-  getCallback,
   createBlob,
-  executeCallback,
 } from '../src/utils/helpers';
-import { LocalSpaceError } from '../src/errors';
-
-describe('executeTwoCallbacks', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('invokes node-style callback on success', async () => {
-    const callback = vi.fn();
-    await executeTwoCallbacks(Promise.resolve('value'), callback);
-
-    expect(callback).toHaveBeenCalledWith(null, 'value');
-  });
-
-  it('invokes node-style callback with error when promise rejects', async () => {
-    const callback = vi.fn();
-    const error = new Error('boom');
-    const rejectingPromise = Promise.resolve().then(() => {
-      throw error;
-    });
-    await executeTwoCallbacks(rejectingPromise, callback).catch(() => undefined);
-
-    const [errArg, value] = callback.mock.calls[0];
-    expect(errArg).toBeInstanceOf(LocalSpaceError);
-    expect((errArg as LocalSpaceError).message).toBe(error.message);
-    expect((errArg as LocalSpaceError).cause).toBe(error);
-    expect(value).toBeUndefined();
-  });
-
-  it('supports legacy success/error callbacks in compatibility mode', async () => {
-    const success = vi.fn();
-    const failure = vi.fn();
-    await executeTwoCallbacks(
-      Promise.resolve('ok'),
-      success,
-      failure,
-      { compatibilityMode: true }
-    );
-    expect(success).toHaveBeenCalledWith('ok');
-    expect(failure).not.toHaveBeenCalled();
-
-    const rejection = new Error('fail');
-    const handlers: { onCatch?: (error: Error) => void } = {};
-    const fakePromise = {
-      then: vi.fn().mockReturnThis(),
-      catch: vi.fn().mockImplementation((handler: (error: Error) => void) => {
-        handlers.onCatch = handler;
-        return fakePromise;
-      }),
-    } as unknown as Promise<never>;
-
-    executeTwoCallbacks(fakePromise, success, failure, { compatibilityMode: true });
-    handlers.onCatch?.(rejection);
-    expect(failure).toHaveBeenCalledTimes(1);
-    const errArg = failure.mock.calls[0][0] as LocalSpaceError;
-    expect(errArg).toBeInstanceOf(LocalSpaceError);
-    expect(errArg.message).toBe(rejection.message);
-    expect(errArg.cause).toBe(rejection);
-  });
-});
 
 describe('helper utilities', () => {
   afterEach(() => {
@@ -99,27 +36,6 @@ describe('helper utilities', () => {
   it('isArray detects arrays', () => {
     expect(isArray([])).toBe(true);
     expect(isArray('not array' as unknown as string[])).toBe(false);
-  });
-
-  describe('getCallback', () => {
-    it('returns callback when last argument is a function', () => {
-      const cb = () => {};
-      const args = ['arg1', 'arg2', cb];
-      const result = getCallback(args);
-      expect(result).toBe(cb);
-    });
-
-    it('returns undefined when last argument is not a function', () => {
-      const args = ['arg1', 'arg2', 'arg3'];
-      const result = getCallback(args);
-      expect(result).toBeUndefined();
-    });
-
-    it('returns undefined when args array is empty', () => {
-      const args: any[] = [];
-      const result = getCallback(args);
-      expect(result).toBeUndefined();
-    });
   });
 
   describe('createBlob', () => {
@@ -235,62 +151,4 @@ describe('helper utilities', () => {
     });
   });
 
-  describe('executeCallback', () => {
-    it('invokes callback on promise success', async () => {
-      const callback = vi.fn();
-      await executeCallback(Promise.resolve('value'), callback);
-      expect(callback).toHaveBeenCalledWith(null, 'value');
-    });
-
-    it('invokes callback with error on promise rejection', async () => {
-      const callback = vi.fn();
-      const error = new Error('test error');
-      await executeCallback(Promise.reject(error), callback).catch(() => {});
-      const [errArg, valueArg] = callback.mock.calls[0];
-      expect(errArg).toBeInstanceOf(LocalSpaceError);
-      expect((errArg as LocalSpaceError).cause).toBe(error);
-      expect((errArg as LocalSpaceError).message).toBe(error.message);
-      expect(valueArg).toBeUndefined();
-    });
-
-    it('returns promise even when callback is provided', async () => {
-      const callback = vi.fn();
-      const promise = executeCallback(Promise.resolve('value'), callback);
-      expect(promise).toBeInstanceOf(Promise);
-      await promise;
-    });
-
-    it('works without callback', async () => {
-      const promise = executeCallback(Promise.resolve('value'));
-      const result = await promise;
-      expect(result).toBe('value');
-    });
-  });
-
-  describe('executeTwoCallbacks - error handling', () => {
-    it('calls errorCallback when provided separately', async () => {
-      const errorCallback = vi.fn();
-      const error = new Error('test error');
-      await executeTwoCallbacks(Promise.reject(error), undefined, errorCallback).catch(() => {});
-      const [errArg] = errorCallback.mock.calls[0];
-      expect(errArg).toBeInstanceOf(LocalSpaceError);
-      expect((errArg as LocalSpaceError).cause).toBe(error);
-      expect((errArg as LocalSpaceError).message).toBe(error.message);
-    });
-
-    it('normalizes non-Error objects to Error', async () => {
-      const callback = vi.fn();
-      await executeTwoCallbacks(Promise.reject('string error'), callback).catch(() => {});
-      expect(callback).toHaveBeenCalled();
-      const callArg = callback.mock.calls[0][0];
-      expect(callArg).toBeInstanceOf(LocalSpaceError);
-      expect(callArg.message).toBe('string error');
-    });
-
-    it('works without any callbacks', async () => {
-      const promise = executeTwoCallbacks(Promise.resolve('value'));
-      const result = await promise;
-      expect(result).toBe('value');
-    });
-  });
 });

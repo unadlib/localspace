@@ -1,28 +1,31 @@
 # Migration Guide
 
-How to migrate from localForage to localspace.
+How to migrate Promise-based and callback-based localForage code to localspace.
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Differences from localForage](#differences-from-localforage)
-- [Enable Compatibility Mode](#enable-compatibility-mode)
-- [Callback Style Differences](#callback-style-differences)
+- [Convert Callback Code](#convert-callback-code)
+- [Recommended Migration Steps](#recommended-migration-steps)
 
 ---
 
 ## Overview
 
-localspace is designed as a drop-in replacement for localForage. In most cases, you can simply change your import statement:
+localspace retains the familiar key-value API, but it is Promise-only. Existing
+localForage code that already awaits operations can usually start with an import
+change:
 
 ```diff
 -import localforage from 'localforage';
 +import localspace from 'localspace';
 
-// Your existing code works unchanged
 await localspace.setItem('key', value);
 const data = await localspace.getItem('key');
 ```
+
+Code that passes completion callbacks must be converted before migration.
 
 ---
 
@@ -74,93 +77,43 @@ default.
 
 ---
 
-## Enable Compatibility Mode
+## Convert Callback Code
 
-If you maintain older code that expects separate _success_ and _error_ callbacks for driver setup methods (`setDriver`, `defineDriver`), enable `compatibilityMode` when creating an instance.
+Replace completion callbacks with `await` and `try`/`catch`:
 
-> [!WARNING]
-> Use compatibility mode only for migrations. Prefer native Promises going forward.
-
-```ts
-const legacy = localspace.createInstance({
-  name: 'legacy-store',
-  storeName: 'pairs',
-  compatibilityMode: true,
-});
-
-legacy.setDriver(
-  [legacy.LOCALSTORAGE],
-  () => {
-    // Success callback receives no arguments.
-  },
-  (error) => {
-    // Error callback receives the Error object only.
-  }
-);
+```diff
+-localforage.getItem('key', (error, value) => {
+-  if (error) {
+-    report(error);
+-    return;
+-  }
+-  render(value);
+-});
++try {
++  const value = await localspace.getItem('key');
++  render(value);
++} catch (error) {
++  report(error);
++}
 ```
 
----
+Driver setup is Promise-only as well:
 
-## Callback Style Differences
-
-### Storage Methods
-
-Storage methods like `setItem`, `getItem`, `removeItem`, etc. **always** use Node-style `(error, value)` callbacks regardless of `compatibilityMode`. This matches localForage's original behavior.
-
-```ts
-localspace.setItem('key', 'value', (err, value) => {
-  if (err) {
-    console.error('Error:', err);
-  } else {
-    console.log('Saved:', value);
-  }
-});
-
-localspace.getItem('key', (err, value) => {
-  if (err) {
-    console.error('Error:', err);
-  } else {
-    console.log('Retrieved:', value);
-  }
-});
+```diff
+-localforage.setDriver([localforage.INDEXEDDB], onSuccess, onError);
++await localspace.setDriver([localspace.INDEXEDDB]);
 ```
 
-### Driver Methods (Compatibility Mode Off)
-
-When `compatibilityMode` is off (default), driver setup methods also use Node-style callbacks:
-
-```ts
-localspace.setDriver([localspace.INDEXEDDB], (err) => {
-  if (err) {
-    console.error('Driver setup failed:', err);
-  } else {
-    console.log('Driver ready');
-  }
-});
-```
-
-### Driver Methods (Compatibility Mode On)
-
-When `compatibilityMode` is on, driver setup methods use separate success/error callbacks (localForage style):
-
-```ts
-const legacy = localspace.createInstance({
-  compatibilityMode: true,
-});
-
-legacy.setDriver(
-  [legacy.INDEXEDDB],
-  () => console.log('Success!'),
-  (err) => console.error('Error:', err)
-);
-```
+There is no `compatibilityMode`; unsupported callback arguments are not part of
+the TypeScript or runtime contract.
 
 ---
 
 ## Recommended Migration Steps
 
-1. **Update imports**: Change `localforage` to `localspace`
-2. **Run tests**: Your existing test suite should pass without changes
-3. **Update error handling**: Check for `Error` instances instead of string comparisons
-4. **Remove WebSQL**: If you were using WebSQL driver, migrate to IndexedDB
-5. **Adopt new features**: Gradually adopt plugins, batch operations, and other new features
+1. **Convert callbacks**: Replace completion callbacks with Promises.
+2. **Remove WebSQL**: Move WebSQL-only data and driver selection to IndexedDB.
+3. **Update imports**: Change `localforage` to `localspace`.
+4. **Update error handling**: Handle `LocalSpaceError` codes where relevant.
+5. **Run migration tests**: Verify driver selection, persistence, and data shape.
+6. **Adopt extensions explicitly**: Add batch APIs or plugins only where needed.
