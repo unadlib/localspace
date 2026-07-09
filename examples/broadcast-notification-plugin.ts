@@ -13,6 +13,7 @@ export interface BroadcastNotificationOptions {
     message: StorageNotification,
     context: PluginContext
   ) => Promise<void> | void;
+  onError?: (error: unknown, context: PluginContext) => Promise<void> | void;
 }
 
 type NotificationMetadata = {
@@ -49,6 +50,31 @@ export const broadcastNotificationPlugin = (
 ): LocalSpacePlugin => {
   const channelName = options.channelName ?? 'localspace-notifications';
 
+  const receive = async (
+    message: StorageNotification,
+    context: PluginContext
+  ): Promise<void> => {
+    try {
+      await options.onMessage?.(message, context);
+    } catch (error) {
+      try {
+        if (options.onError) {
+          await options.onError(error, context);
+        } else {
+          console.error(
+            '[localspace example] broadcast notification handler failed',
+            error
+          );
+        }
+      } catch (reportingError) {
+        console.error(
+          '[localspace example] broadcast notification error handler failed',
+          reportingError
+        );
+      }
+    }
+  };
+
   const send = (
     context: PluginContext,
     key: string,
@@ -75,7 +101,7 @@ export const broadcastNotificationPlugin = (
       channel.onmessage = (event) => {
         const message = event.data as StorageNotification;
         if (message.source !== metadata.source) {
-          void options.onMessage?.(message, context);
+          void receive(message, context);
         }
       };
       metadata.channel = channel;
