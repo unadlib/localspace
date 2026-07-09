@@ -111,6 +111,11 @@ browser quota enforcement.
   not browser quota management, does not evict data, and cannot enforce a limit
   atomically across concurrent writers.
 
+The 1.x `syncPlugin` persisted conflict-version maps in localStorage under keys
+prefixed with `__localspace_sync_versions__:`. Version 2.0 ignores those keys.
+After every 1.x tab or process has been retired, applications may remove them as
+obsolete plugin metadata.
+
 Copy and adapt those examples only when their limitations match the
 application's policy.
 
