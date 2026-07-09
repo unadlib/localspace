@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import localspace, { LocalSpace } from '../src/index';
 import { LocalSpaceError } from '../src/errors';
+import type { Driver } from '../src/types';
 
 describe('LocalSpace class tests', () => {
   describe('Configuration', () => {
@@ -196,6 +197,50 @@ describe('LocalSpace class tests', () => {
   });
 
   describe('Custom driver', () => {
+    it('supports a typed minimal driver and rejects omitted capabilities', async () => {
+      const values = new Map<string, unknown>();
+      const driverName = `minimal-${Math.random().toString(36).slice(2)}`;
+      const customDriver: Driver = {
+        _driver: driverName,
+        _initStorage: async () => undefined,
+        iterate: async <T, U>(
+          iterator: (value: T, key: string, n: number) => U
+        ) => {
+          let iteration = 1;
+          for (const [key, value] of values) {
+            const result = iterator(value as T, key, iteration++);
+            if (result !== undefined) return result;
+          }
+          return undefined as U;
+        },
+        getItem: async <T>(key: string) =>
+          values.has(key) ? (values.get(key) as T) : null,
+        setItem: async <T>(key: string, value: T) => {
+          values.set(key, value);
+          return value;
+        },
+        removeItem: async (key: string) => {
+          values.delete(key);
+        },
+        clear: async () => {
+          values.clear();
+        },
+        length: async () => values.size,
+        key: async (index: number) => [...values.keys()][index] ?? null,
+        keys: async () => [...values.keys()],
+      };
+
+      const instance = new LocalSpace();
+      await instance.defineDriver(customDriver);
+      await instance.setDriver(driverName);
+
+      await expect(instance.setItem('key', 'value')).resolves.toBe('value');
+      await expect(instance.getItem('key')).resolves.toBe('value');
+      await expect(
+        instance.setItems([{ key: 'batch', value: true }])
+      ).rejects.toMatchObject({ code: 'UNSUPPORTED_OPERATION' });
+    });
+
     it('should define custom driver', async () => {
       const customDriver = {
         _driver: 'customDriver',
@@ -291,7 +336,6 @@ describe('LocalSpace class tests', () => {
 
       consoleInfoSpy.mockRestore();
     });
-
   });
 
   describe('Ready and initialization', () => {
@@ -305,7 +349,6 @@ describe('LocalSpace class tests', () => {
       const driverName = instance.driver();
       expect(driverName).toBeTruthy();
     });
-
   });
 
   describe('Error handling', () => {

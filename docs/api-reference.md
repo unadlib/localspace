@@ -337,7 +337,6 @@ Registers a custom driver.
 ```ts
 const customDriver: Driver = {
   _driver: 'customDriver',
-  _support: true,
   _initStorage: async (config) => {
     /* ... */
   },
@@ -370,6 +369,10 @@ const customDriver: Driver = {
 await localspace.defineDriver(customDriver);
 await localspace.setDriver('customDriver');
 ```
+
+`_support`, batch methods, `runTransaction()`, and `dropInstance()` are optional
+driver capabilities. Calling an omitted capability through a selected instance
+rejects with `UNSUPPORTED_OPERATION`.
 
 ### `getDriver(driverName: string): Promise<Driver>`
 

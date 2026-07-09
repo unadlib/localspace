@@ -132,7 +132,7 @@ export interface Driver {
   /**
    * Check if driver is supported (can be boolean or function)
    */
-  _support: boolean | (() => Promise<boolean>);
+  _support?: boolean | (() => Promise<boolean>);
 
   /**
    * Iterate through all items
@@ -159,17 +159,17 @@ export interface Driver {
   /**
    * Batch set multiple items atomically when supported by the driver.
    */
-  setItems<T>(entries: BatchItems<T>): Promise<BatchResponse<T>>;
+  setItems?<T>(entries: BatchItems<T>): Promise<BatchResponse<T>>;
 
   /**
    * Batch get multiple items in order.
    */
-  getItems<T>(keys: string[]): Promise<BatchResponse<T>>;
+  getItems?<T>(keys: string[]): Promise<BatchResponse<T>>;
 
   /**
    * Batch remove multiple items.
    */
-  removeItems(keys: string[]): Promise<void>;
+  removeItems?(keys: string[]): Promise<void>;
 
   /**
    * Execute multiple operations within a driver-level transaction.
