@@ -102,6 +102,7 @@ describe('broadcast notification plugin example', () => {
     vi.stubGlobal('BroadcastChannel', BroadcastChannelMock);
     const first = createContext();
     const sameNamespace = createContext();
+    sameNamespace.driver = 'localStorageWrapper';
     const otherStore = createContext();
     otherStore.config.storeName = 'other';
 

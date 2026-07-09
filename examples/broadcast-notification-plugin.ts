@@ -25,7 +25,6 @@ const METADATA_KEY = '__broadcast_notification_plugin';
 
 const defaultChannelName = (context: PluginContext): string =>
   `localspace-notifications:${JSON.stringify([
-    context.driver,
     context.config.bucket?.name ?? null,
     context.config.name ?? 'localforage',
     context.config.storeName ?? 'keyvaluepairs',
