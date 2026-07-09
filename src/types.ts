@@ -199,11 +199,10 @@ export interface Driver {
   removeItems(keys: string[], callback?: Callback<void>): Promise<void>;
 
   /**
-   * Execute multiple operations within a single driver-level transaction
-   * when supported. Drivers without transactional support should still
-   * run the callback sequentially.
+   * Execute multiple operations within a driver-level transaction.
+   * Non-transactional drivers must omit this method.
    */
-  runTransaction<T>(
+  runTransaction?<T>(
     mode: IDBTransactionMode,
     runner: (scope: TransactionScope) => Promise<T> | T,
     callback?: Callback<T>

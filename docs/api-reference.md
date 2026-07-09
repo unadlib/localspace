@@ -177,10 +177,10 @@ await localspace.removeItems(['user:1', 'user:2', 'temp:session']);
 ### `runTransaction<T>(mode: 'readonly' | 'readwrite', runner: (scope: TransactionScope) => Promise<T> | T, callback?: Callback<T>): Promise<T>`
 
 Executes multiple operations in a single transaction.
-Atomic transaction semantics are provided by the IndexedDB driver. The
-localStorage and React Native AsyncStorage drivers keep the 1.x API compatible
-by running grouped work sequentially; they are not atomic and emit a 2.0
-migration warning.
+IndexedDB provides native atomic transactions. The memory driver provides
+snapshot rollback semantics. localStorage and React Native AsyncStorage reject
+this method with `UNSUPPORTED_OPERATION` because they cannot provide a real
+transaction.
 
 ```ts
 // Atomic counter increment on IndexedDB

@@ -249,8 +249,9 @@ await localspace.runTransaction('readwrite', async (tx) => {
 });
 ```
 
-The localStorage and React Native AsyncStorage drivers keep this API for
-compatibility, but grouped operations run sequentially and are not atomic.
+`runTransaction()` is supported by the IndexedDB and memory drivers. On
+localStorage and React Native AsyncStorage it rejects with
+`UNSUPPORTED_OPERATION`; use explicit operations when atomicity is unnecessary.
 
 ---
 
@@ -344,9 +345,9 @@ const mobileStore = await createReactNativeInstance(localspace, {
 ## Performance Notes
 
 - **Batch APIs outperform loops:** `setItems()` ~6x faster, `getItems()` ~7.7x faster than per-item loops
-- **Transaction helpers:** `runTransaction()` is atomic on IndexedDB
+- **Transaction helpers:** `runTransaction()` is atomic on IndexedDB and rolls back on the memory driver
 - **IndexedDB durability:** Chrome 121+ uses relaxed durability by default
-- **Non-IndexedDB grouped work is non-atomic:** Prefer IndexedDB for atomic operations
+- **Non-transactional drivers:** localStorage and React Native AsyncStorage reject `runTransaction()`
 
 ---
 

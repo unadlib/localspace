@@ -14,6 +14,10 @@
 - Removed `quotaPlugin` from the package surface. Application-level size policy
   does not represent browser storage quota and cannot be enforced atomically;
   a deliberately limited example remains in `examples/size-limit-plugin.ts`.
+- Removed sequential `runTransaction()` implementations from localStorage and
+  React Native AsyncStorage. Those drivers now reject the method with
+  `UNSUPPORTED_OPERATION` instead of presenting non-atomic work as a
+  transaction.
 
 ### Fixed
 

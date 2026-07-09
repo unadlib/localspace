@@ -320,29 +320,16 @@ describe('LocalStorage driver tests', () => {
       await batchInstance.dropInstance();
     });
 
-    it('should support runTransaction for grouped work', async () => {
-      await instance.runTransaction('readwrite', async (tx) => {
-        await tx.set('a', '1');
-        await tx.set('b', '2');
-        const aVal = await tx.get('a');
-        await tx.set('c', `${aVal}-c`);
-      });
-
-      expect(await instance.getItem('a')).toBe('1');
-      expect(await instance.getItem('b')).toBe('2');
-      expect(await instance.getItem('c')).toBe('1-c');
-    });
-
-    it('should reject writes in readonly transactions', async () => {
-      await instance.setItem('ro-key', 'stay');
+    it('should reject runTransaction without invoking the runner', async () => {
+      const runner = vi.fn();
 
       await expect(
-        instance.runTransaction('readonly', async (tx) => {
-          await tx.set('ro-key', 'mutated');
-        })
-      ).rejects.toBeInstanceOf(Error);
-
-      expect(await instance.getItem('ro-key')).toBe('stay');
+        instance.runTransaction('readwrite', runner)
+      ).rejects.toMatchObject({
+        code: 'UNSUPPORTED_OPERATION',
+        details: { operation: 'runTransaction' },
+      });
+      expect(runner).not.toHaveBeenCalled();
     });
   });
 });

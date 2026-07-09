@@ -7,7 +7,6 @@ import type {
   LocalSpaceInstance,
   BatchItems,
   BatchResponse,
-  TransactionScope,
   ReactNativeAsyncStorage,
 } from '../types';
 import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors';
@@ -18,7 +17,6 @@ import {
   normalizeKey,
   chunkArray,
 } from '../utils/helpers';
-import { warnOnce } from '../utils/warnings';
 import serializer from '../utils/serializer';
 
 type ReactNativeAsyncStorageDbInfo = DbInfo & {
@@ -710,66 +708,6 @@ const reactNativeAsyncStorageWrapper: Driver = {
   length,
   key,
   keys,
-  runTransaction<T>(
-    this: ReactNativeAsyncStorageDriverContext,
-    mode: IDBTransactionMode,
-    runner: (scope: TransactionScope) => Promise<T> | T,
-    callback?: Callback<T>
-  ): Promise<T> {
-    warnOnce(
-      'react-native-runtransaction-non-atomic',
-      '[localspace] React Native AsyncStorage runTransaction executes grouped operations sequentially and is not atomic. In v2.0 this will no longer be documented as transaction semantics; prefer a transactional storage driver for atomic work.'
-    );
-
-    const makeReadOnlyGuard = () => {
-      if (mode === 'readonly') {
-        throw createLocalSpaceError(
-          'TRANSACTION_READONLY',
-          'Transaction is readonly',
-          {
-            driver: DRIVER_NAME,
-            operation: 'runTransaction',
-            transactionMode: mode,
-          }
-        );
-      }
-    };
-
-    const scope: TransactionScope = {
-      get: <V>(key: string) => getItem.call(this, key) as Promise<V | null>,
-      set: <V>(key: string, value: V) => {
-        makeReadOnlyGuard();
-        return setItem.call(this, key, value) as Promise<V>;
-      },
-      remove: (key: string) => {
-        makeReadOnlyGuard();
-        return removeItem.call(this, key);
-      },
-      keys: () => keys.call(this),
-      iterate: <V, U>(fn: (value: V, key: string, iteration: number) => U) =>
-        iterate.call(
-          this,
-          fn as (value: unknown, key: string, iteration: number) => unknown
-        ) as Promise<U>,
-      clear: () => {
-        makeReadOnlyGuard();
-        return clear.call(this);
-      },
-    };
-
-    const promise = withAsyncStorageErrorContext(
-      Promise.resolve()
-        .then(() => runner(scope))
-        .catch((err) => {
-          throw err;
-        }),
-      'runTransaction',
-      { transactionMode: mode }
-    );
-
-    executeCallback(promise, callback);
-    return promise;
-  },
   dropInstance,
 };
 

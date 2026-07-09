@@ -357,7 +357,10 @@ export class LocalSpace implements LocalSpaceInstance {
                 `Method ${methodName} is not implemented by the current driver`,
                 { operation: methodName }
               );
-              const maybeCallback = callbackArgs[callbackArgs.length - 1];
+              const maybeCallback =
+                methodName === 'runTransaction'
+                  ? callbackArgs[2]
+                  : callbackArgs[callbackArgs.length - 1];
               if (typeof maybeCallback === 'function') {
                 (maybeCallback as Callback)(error);
               }

@@ -164,6 +164,25 @@ describe('react native async storage driver', () => {
     expect(await instance.length()).toBe(0);
   });
 
+  it('rejects runTransaction without invoking the runner', async () => {
+    const instance = new LocalSpace({
+      name: 'rn-no-transaction',
+      storeName: 'rn_no_transaction',
+      reactNativeAsyncStorage: asyncStorage,
+    });
+    await withReactNativeDriver(instance);
+    await instance.ready();
+    const runner = vi.fn();
+
+    await expect(
+      instance.runTransaction('readwrite', runner)
+    ).rejects.toMatchObject({
+      code: 'UNSUPPORTED_OPERATION',
+      details: { operation: 'runTransaction' },
+    });
+    expect(runner).not.toHaveBeenCalled();
+  });
+
   it('dropInstance keeps data isolated by database name', async () => {
     const primary = new LocalSpace({
       name: 'rn-shared',

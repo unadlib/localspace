@@ -7,7 +7,6 @@ import type {
   LocalSpaceInstance,
   BatchItems,
   BatchResponse,
-  TransactionScope,
 } from '../types';
 import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors';
 import { createLocalSpaceError, toLocalSpaceError } from '../errors';
@@ -17,7 +16,6 @@ import {
   normalizeKey,
   chunkArray,
 } from '../utils/helpers';
-import { warnOnce } from '../utils/warnings';
 import serializer from '../utils/serializer';
 
 type LocalStorageDbInfo = DbInfo & {
@@ -556,66 +554,6 @@ const localStorageWrapper: Driver = {
   length,
   key,
   keys,
-  runTransaction<T>(
-    this: LocalStorageDriverContext,
-    mode: IDBTransactionMode,
-    runner: (scope: TransactionScope) => Promise<T> | T,
-    callback?: Callback<T>
-  ): Promise<T> {
-    warnOnce(
-      'localstorage-runtransaction-non-atomic',
-      '[localspace] localStorage runTransaction executes grouped operations sequentially and is not atomic. In v2.0 this will no longer be documented as transaction semantics; prefer IndexedDB for atomic work.'
-    );
-
-    const makeReadOnlyGuard = () => {
-      if (mode === 'readonly') {
-        throw createLocalSpaceError(
-          'TRANSACTION_READONLY',
-          'Transaction is readonly',
-          {
-            driver: DRIVER_NAME,
-            operation: 'runTransaction',
-            transactionMode: mode,
-          }
-        );
-      }
-    };
-
-    const scope: TransactionScope = {
-      get: <V>(key: string) => getItem.call(this, key) as Promise<V | null>,
-      set: <V>(key: string, value: V) => {
-        makeReadOnlyGuard();
-        return setItem.call(this, key, value) as Promise<V>;
-      },
-      remove: (key: string) => {
-        makeReadOnlyGuard();
-        return removeItem.call(this, key);
-      },
-      keys: () => keys.call(this),
-      iterate: <V, U>(fn: (value: V, key: string, iteration: number) => U) =>
-        iterate.call(
-          this,
-          fn as (value: unknown, key: string, iteration: number) => unknown
-        ) as Promise<U>,
-      clear: () => {
-        makeReadOnlyGuard();
-        return clear.call(this);
-      },
-    };
-
-    const promise = withLocalStorageErrorContext(
-      Promise.resolve()
-        .then(() => runner(scope))
-        .catch((err) => {
-          throw err;
-        }),
-      'runTransaction',
-      { transactionMode: mode }
-    );
-
-    executeCallback(promise, callback);
-    return promise;
-  },
   dropInstance,
 };
 
