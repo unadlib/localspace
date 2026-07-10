@@ -495,7 +495,10 @@ interface LocalSpaceConfig {
 ```
 
 > **Default database name.** When `name`/`storeName` are omitted, localspace
-> uses `'localforage'` / `'keyvaluepairs'`. This is intentional: it lets an app
-> migrating from localForage read its existing data with no rewrite (the
-> serializer and key layout are compatible). Set `name` and `storeName`
-> explicitly for a fresh, app-owned namespace.
+> uses `'localforage'` / `'keyvaluepairs'`. This lets an app migrating from
+> localForage reuse data without rewriting it when both libraries select the
+> same IndexedDB or localStorage backend (their serializer and key layout are
+> compatible). localspace does not support WebSQL, so migrate WebSQL data first
+> and confirm the selected driver as described in the
+> [migration guide](./migration-guide.md#migrate-from-localforage). Set `name`
+> and `storeName` explicitly for a fresh, app-owned namespace.

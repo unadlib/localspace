@@ -73,9 +73,10 @@ export interface LocalSpaceConfig {
   reactNativeAsyncStorage?: ReactNativeAsyncStorage;
 
   /**
-   * Database name. Defaults to `'localforage'` — intentionally matching
-   * localForage so existing data migrates without a rewrite. Set explicitly
-   * for a fresh, app-owned namespace.
+   * Database name. Defaults to `'localforage'` so data stored by localForage
+   * can be reused when the same supported IndexedDB or localStorage driver is
+   * selected. WebSQL data must be migrated first. Set explicitly for a fresh,
+   * app-owned namespace.
    */
   name?: string;
 
