@@ -466,7 +466,6 @@ interface LocalSpaceConfig {
   storeName?: string; // Store/table name (default: 'keyvaluepairs')
   version?: number; // Database version (default: 1.0)
   description?: string; // Database description
-  size?: number; // Database size hint
 
   // Driver configuration
   driver?: string | string[]; // Driver(s) to use
