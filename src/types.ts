@@ -80,6 +80,14 @@ export interface LocalSpaceConfig {
   name?: string;
 
   /**
+   * Legacy WebSQL database size hint. Defaults to `4980736` for localForage
+   * and localspace v2 compatibility. Built-in drivers ignore this value;
+   * it does not set or enforce a storage quota.
+   * @deprecated Retained for compatibility only. Do not use for quota enforcement.
+   */
+  size?: number;
+
+  /**
    * Store/table name. Defaults to `'keyvaluepairs'` (localForage-compatible).
    */
   storeName?: string;

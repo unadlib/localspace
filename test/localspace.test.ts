@@ -191,6 +191,7 @@ describe('LocalSpace class tests', () => {
       const config = instance.config();
 
       expect(config.name).toBe('localforage');
+      expect(config.size).toBe(4980736);
       expect(config.storeName).toBe('keyvaluepairs');
       expect(config.version).toBe(1.0);
     });
