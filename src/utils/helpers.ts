@@ -18,11 +18,18 @@ export function isArray<T>(value: T | T[]): value is T[] {
 /**
  * Normalize key (convert to string)
  */
+const warnedNonStringKeyTypes = new Set<string>();
+
 export function normalizeKey(key: unknown): string {
   if (typeof key !== 'string') {
-    console.warn(
-      `key passed to LocalSpace API is not a string (got ${typeof key}). Using String() to convert.`
-    );
+    const keyType = typeof key;
+    // Warn once per offending type; batch/loop misuse should not flood the console.
+    if (!warnedNonStringKeyTypes.has(keyType)) {
+      warnedNonStringKeyTypes.add(keyType);
+      console.warn(
+        `key passed to LocalSpace API is not a string (got ${keyType}). Using String() to convert. Further ${keyType} keys are converted silently.`
+      );
+    }
     return String(key);
   }
   return key;
