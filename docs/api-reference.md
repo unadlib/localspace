@@ -492,3 +492,9 @@ interface LocalSpaceConfig {
   pluginErrorPolicy?: 'strict' | 'lenient';
 }
 ```
+
+> **Default database name.** When `name`/`storeName` are omitted, localspace
+> uses `'localforage'` / `'keyvaluepairs'`. This is intentional: it lets an app
+> migrating from localForage read its existing data with no rewrite (the
+> serializer and key layout are compatible). Set `name` and `storeName`
+> explicitly for a fresh, app-owned namespace.
