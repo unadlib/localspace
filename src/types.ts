@@ -78,11 +78,6 @@ export interface LocalSpaceConfig {
   name?: string;
 
   /**
-   * Database size
-   */
-  size?: number;
-
-  /**
    * Store/table name
    */
   storeName?: string;

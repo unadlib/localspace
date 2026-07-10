@@ -84,7 +84,6 @@ const DefaultConfig: LocalSpaceConfig = {
   description: '',
   driver: DefaultDriverOrder.slice(),
   name: 'localforage',
-  size: 4980736,
   storeName: 'keyvaluepairs',
   version: 1.0,
   pluginInitPolicy: 'fail',
