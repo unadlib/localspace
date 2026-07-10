@@ -38,6 +38,8 @@ const store = localspace.createInstance({
 
 - **Per-call state** – plugins can stash data on `context.operationState` (e.g., capture the original value in `beforeSet` and reuse it in `afterSet`). For batch operations, `context.operationState.isBatch` is `true` and `context.operationState.batchSize` provides the total count.
 
+- **Batch vs single hooks (important)** – a batch call such as `setItems()` invokes **both** the batch hook (`beforeSetItems`) **and** the per-entry single hook (`beforeSet`, once per entry). On the per-entry single hook, `context.operationState.isBatch` is `true`. A plugin that implements **both** the batch and the single form of a hook must guard the single form with `if (context.operationState.isBatch) return value;` to avoid processing each entry twice (e.g. double-encrypting). The built-in TTL, encryption, and compression plugins all follow this convention. A plugin that implements **only** the single hook (no batch form) does not need the guard: its `beforeSet`/`afterGet` still runs for every entry of a batch, with `isBatch` set so it can adapt if needed.
+
 - **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (validation failures, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'lenient'` reports and continues; use `strict` for encryption/compression/ttl or any correctness-critical plugin.
 
 ---

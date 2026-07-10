@@ -486,6 +486,13 @@ export interface LocalSpacePlugin {
   beforeRemove?(key: string, context: PluginContext): Promise<string> | string;
   afterRemove?(key: string, context: PluginContext): Promise<void> | void;
 
+  /**
+   * Batch hooks. A batch call (e.g. `setItems`) runs BOTH the batch hook and
+   * the per-entry single hook (with `context.operationState.isBatch === true`).
+   * If a plugin implements both forms, guard the single form with
+   * `if (context.operationState.isBatch) return value;` so entries are not
+   * processed twice. See docs/plugins.md "Batch vs single hooks".
+   */
   beforeSetItems?<T>(
     entries: BatchItems<T>,
     context: PluginContext
