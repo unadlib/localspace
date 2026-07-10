@@ -12,15 +12,9 @@ import type {
   BatchResponse,
   TransactionMode,
   TransactionScope,
-  PluginOperation,
   PluginContext,
 } from './types.js';
-import {
-  extend,
-  isArray,
-  includes,
-  normalizeBatchEntries,
-} from './utils/helpers.js';
+import { extend, isArray, includes } from './utils/helpers.js';
 import { createLocalSpaceError, LocalSpaceError } from './errors.js';
 import serializer from './utils/serializer.js';
 import idbDriver from './drivers/indexeddb.js';
@@ -898,38 +892,38 @@ export class LocalSpace implements LocalSpaceInstance {
 
   // Driver methods (will be replaced by actual driver implementations)
   async iterate<T, U>(
-    iteratorCallback: (value: T, key: string, iterationNumber: number) => U
+    _iteratorCallback: (value: T, key: string, iterationNumber: number) => U
   ): Promise<U> {
     throw this._notInitializedError('iterate');
   }
 
-  async getItems<T>(keys: string[]): Promise<BatchResponse<T>> {
+  async getItems<T>(_keys: string[]): Promise<BatchResponse<T>> {
     throw this._notInitializedError('getItems');
   }
 
-  async getItem<T>(key: string): Promise<T | null> {
+  async getItem<T>(_key: string): Promise<T | null> {
     throw this._notInitializedError('getItem');
   }
 
-  async setItem<T>(key: string, value: T): Promise<T> {
+  async setItem<T>(_key: string, _value: T): Promise<T> {
     throw this._notInitializedError('setItem');
   }
 
-  async setItems<T>(entries: BatchItems<T>): Promise<BatchResponse<T>> {
+  async setItems<T>(_entries: BatchItems<T>): Promise<BatchResponse<T>> {
     throw this._notInitializedError('setItems');
   }
 
-  async removeItem(key: string): Promise<void> {
+  async removeItem(_key: string): Promise<void> {
     throw this._notInitializedError('removeItem');
   }
 
-  async removeItems(keys: string[]): Promise<void> {
+  async removeItems(_keys: string[]): Promise<void> {
     throw this._notInitializedError('removeItems');
   }
 
   async runTransaction<T>(
-    mode: TransactionMode,
-    runner: (scope: TransactionScope) => Promise<T> | T
+    _mode: TransactionMode,
+    _runner: (scope: TransactionScope) => Promise<T> | T
   ): Promise<T> {
     throw this._notInitializedError('runTransaction');
   }
@@ -942,7 +936,7 @@ export class LocalSpace implements LocalSpaceInstance {
     throw this._notInitializedError('length');
   }
 
-  async key(keyIndex: number): Promise<string | null> {
+  async key(_keyIndex: number): Promise<string | null> {
     throw this._notInitializedError('key');
   }
 
@@ -950,7 +944,7 @@ export class LocalSpace implements LocalSpaceInstance {
     throw this._notInitializedError('keys');
   }
 
-  async dropInstance(options?: LocalSpaceConfig): Promise<void> {
+  async dropInstance(_options?: LocalSpaceConfig): Promise<void> {
     throw this._notInitializedError('dropInstance');
   }
 }

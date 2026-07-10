@@ -375,6 +375,8 @@ function advanceReadiness(dbInfo: DbInfo): Promise<void> | undefined {
     deferredOperation.resolve();
     return deferredOperation.promise;
   }
+
+  return undefined;
 }
 
 function rejectReadiness(
@@ -389,6 +391,8 @@ function rejectReadiness(
     deferredOperation.reject(err);
     return deferredOperation.promise;
   }
+
+  return undefined;
 }
 
 function getConnection(
@@ -504,6 +508,7 @@ function getTransactionOptions(
   if (mode === READ_WRITE && dbInfo.durability) {
     return { durability: dbInfo.durability };
   }
+  return undefined;
 }
 
 function maybePrewarmTransaction(
@@ -601,6 +606,7 @@ function createTransaction(
             }
             return getConnection(dbInfo, true);
           }
+          return undefined;
         })
         .then(() => {
           return tryReconnect(dbInfo).then(() => {
@@ -732,9 +738,9 @@ async function _initStorage(
     );
   }
 
-  const dbName = requireDbName(dbInfo);
-  const contextKey = getDbContextKey(dbInfo);
-  let dbContext = ensureDbContext(dbInfo);
+  // Validates that a database name is configured (throws otherwise).
+  requireDbName(dbInfo);
+  const dbContext = ensureDbContext(dbInfo);
 
   dbContext.forages.push(self);
 
@@ -799,6 +805,7 @@ function fullyReady(this: IndexedDBDriverContext): Promise<void> {
           return dbContext.dbReady;
         }
       }
+      return undefined;
     }),
     'ready'
   );
