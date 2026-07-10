@@ -50,11 +50,6 @@ export default defineConfig([
         format: 'umd',
         name: globalName,
         file: pkg.unpkg,
-        globals: {
-          mutative: 'Mutative',
-          zustand: 'Zustand',
-          travels: 'Travels',
-        },
         exports: 'named',
       },
     ],
