@@ -232,6 +232,13 @@ Configuration without `driver` returns synchronously. Supplying `driver`
 returns the `setDriver()` promise, while invalid or locked configuration is
 returned as an `Error` value.
 
+> **Note:** validation and lock errors are **returned, not thrown or
+> rejected** (a localForage-compatible contract). This means
+> `await localspace.config({ version: 'bad' })` resolves to an `Error`
+> object rather than rejecting, so a `try/catch` will not catch it. Inspect
+> the return value when you pass options that can fail. Only the `driver`
+> form returns a real promise.
+
 ```ts
 localspace.config({
   name: 'myapp',
@@ -239,6 +246,13 @@ localspace.config({
   version: 2,
 });
 
+// Non-driver config: check the return value, do not rely on try/catch.
+const result = localspace.config({ version: 2 });
+if (result instanceof Error) {
+  // handle invalid/locked configuration
+}
+
+// Only the driver form returns a promise you can await.
 await localspace.config({
   driver: [localspace.INDEXEDDB, localspace.LOCALSTORAGE],
 });

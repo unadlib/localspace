@@ -250,7 +250,13 @@ export interface LocalSpaceInstance {
   readonly REACTNATIVEASYNCSTORAGE: string;
 
   /**
-   * Configure localspace
+   * Configure localspace. Must be called before the first storage operation.
+   *
+   * Returns `true` on success for non-driver options. Validation and lock
+   * failures are **returned as an `Error` value, not thrown or rejected**
+   * (a localForage-compatible contract) — so `await config({ version: 'bad' })`
+   * resolves to an `Error` rather than rejecting. Inspect the return value.
+   * Only the `driver` form returns the `setDriver()` promise.
    */
   config(options: LocalSpaceConfig): true | Error | Promise<void>;
   config<K extends keyof LocalSpaceConfig>(
