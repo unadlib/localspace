@@ -1,5 +1,49 @@
 # Changelog
 
+## [2.0.1] - 2026-07-11
+
+### Fixed
+
+- Runtime plugin error policy now falls back to `lenient` (matching
+  `DefaultConfig` and the documented default) instead of silently switching to
+  `strict` when `pluginErrorPolicy` is explicitly `undefined`.
+- `normalizeKey` warns once per non-string key type instead of on every call,
+  preventing console flooding when non-string keys are passed in loops or
+  batches. The warning notes that further keys of that type are converted
+  silently.
+
+### Deprecated
+
+- The `size` configuration option is now explicitly deprecated. It is a legacy
+  WebSQL-era hint retained only for localForage and localspace v2
+  compatibility (default `4980736`); every built-in driver ignores it and it
+  neither sets nor enforces a storage quota.
+
+### Documentation
+
+- Documented that a batch call (e.g. `setItems`) invokes both the batch hook
+  and the per-entry single hook (with `context.operationState.isBatch === true`)
+  and how to guard the single form to avoid processing each entry twice.
+- Clarified that `config()` returns validation and lock failures as an `Error`
+  value synchronously (a localForage-compatible contract) rather than throwing
+  or rejecting, so `try/catch` will not catch them.
+- Explained the localForage-compatible default `name`/`storeName`, when
+  localForage data can be reused, and the requirement to migrate WebSQL data
+  first.
+
+### Changed
+
+- Enabled `noUnusedLocals`, `noUnusedParameters`, and `noImplicitReturns` in the
+  TypeScript configuration and cleaned up the affected source.
+- Dropped unused UMD global externals from the Rolldown build configuration.
+
+### Tests
+
+- Added coverage for non-string key warning throttling and type-level coverage
+  for the deprecated `size` option in the packaged consumer tests.
+
+---
+
 ## [2.0.0] - 2026-07-10
 
 ### Fixed
