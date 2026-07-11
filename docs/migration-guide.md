@@ -106,7 +106,9 @@ browser quota enforcement.
 
 - `examples/broadcast-notification-plugin.ts` demonstrates best-effort
   single-item notifications. It does not replicate values or guarantee
-  delivery, ordering, or batch coverage.
+  delivery, ordering, or batch coverage. Its default channel isolates different
+  storage drivers because identically named IndexedDB and localStorage stores
+  do not share data.
 - `examples/size-limit-plugin.ts` demonstrates a serialized-value guard. It is
   not browser quota management, does not evict data, and cannot enforce a limit
   atomically across concurrent writers.

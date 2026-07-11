@@ -1,6 +1,7 @@
 import type { LocalSpacePlugin, PluginContext } from '../src';
 
 export interface StorageNotification {
+  driver: string | null;
   key: string;
   operation: 'set' | 'remove';
   source: string;
@@ -25,6 +26,7 @@ const METADATA_KEY = '__broadcast_notification_plugin';
 
 const defaultChannelName = (context: PluginContext): string =>
   `localspace-notifications:${JSON.stringify([
+    context.driver,
     context.config.bucket?.name ?? null,
     context.config.name ?? 'localforage',
     context.config.storeName ?? 'keyvaluepairs',
@@ -42,6 +44,7 @@ const isStorageNotification = (
   }
   const candidate = value as Partial<StorageNotification>;
   return (
+    (candidate.driver === null || typeof candidate.driver === 'string') &&
     typeof candidate.key === 'string' &&
     (candidate.operation === 'set' || candidate.operation === 'remove') &&
     typeof candidate.source === 'string' &&
@@ -71,6 +74,8 @@ const getMetadata = (context: PluginContext): NotificationMetadata => {
 /**
  * Example only: broadcasts best-effort single-item change notifications.
  * It does not replicate values, guarantee delivery/order, or handle batches.
+ * Default channels are isolated by driver and storage namespace. A custom
+ * shared channel can use message.driver to filter notifications by backend.
  */
 export const broadcastNotificationPlugin = (
   options: BroadcastNotificationOptions = {}
@@ -117,6 +122,7 @@ export const broadcastNotificationPlugin = (
     const metadata = getMetadata(context);
     try {
       metadata.channel?.postMessage({
+        driver: context.driver,
         key,
         operation,
         source: metadata.source,

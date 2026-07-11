@@ -9,14 +9,17 @@ class BroadcastChannelMock {
 
   onmessage: ((event: MessageEvent) => void) | null = null;
 
+  readonly messages: unknown[] = [];
+
   constructor(readonly name: string) {
     BroadcastChannelMock.instances.push(this);
   }
 
-  postMessage() {
+  postMessage(message: unknown) {
     if (BroadcastChannelMock.postMessageError) {
       throw BroadcastChannelMock.postMessageError;
     }
+    this.messages.push(message);
   }
 
   close() {}
@@ -66,6 +69,7 @@ describe('broadcast notification plugin example', () => {
     const channel = BroadcastChannelMock.instances[0];
     channel.onmessage?.({
       data: {
+        driver: 'memoryStorageWrapper',
         key: 'key',
         operation: 'set',
         source: 'remote',
@@ -98,16 +102,18 @@ describe('broadcast notification plugin example', () => {
     expect(onMessage).not.toHaveBeenCalled();
   });
 
-  it('isolates the default channel by storage namespace', async () => {
+  it('isolates the default channel by driver and storage namespace', async () => {
     vi.stubGlobal('BroadcastChannel', BroadcastChannelMock);
     const first = createContext();
     const sameNamespace = createContext();
-    sameNamespace.driver = 'localStorageWrapper';
+    const otherDriver = createContext();
+    otherDriver.driver = 'localStorageWrapper';
     const otherStore = createContext();
     otherStore.config.storeName = 'other';
 
     await broadcastNotificationPlugin().onInit?.(first);
     await broadcastNotificationPlugin().onInit?.(sameNamespace);
+    await broadcastNotificationPlugin().onInit?.(otherDriver);
     await broadcastNotificationPlugin().onInit?.(otherStore);
 
     expect(BroadcastChannelMock.instances[0].name).toBe(
@@ -116,6 +122,26 @@ describe('broadcast notification plugin example', () => {
     expect(BroadcastChannelMock.instances[2].name).not.toBe(
       BroadcastChannelMock.instances[0].name
     );
+    expect(BroadcastChannelMock.instances[3].name).not.toBe(
+      BroadcastChannelMock.instances[0].name
+    );
+  });
+
+  it('includes the active driver in outbound notifications', async () => {
+    vi.stubGlobal('BroadcastChannel', BroadcastChannelMock);
+    const plugin = broadcastNotificationPlugin();
+    const context = createContext();
+
+    await plugin.onInit?.(context);
+    await plugin.afterSet?.('key', 'value', context);
+
+    expect(BroadcastChannelMock.instances[0].messages).toEqual([
+      expect.objectContaining({
+        driver: 'memoryStorageWrapper',
+        key: 'key',
+        operation: 'set',
+      }),
+    ]);
   });
 
   it('does not fail plugin initialization when channel creation fails', async () => {

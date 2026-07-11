@@ -221,7 +221,9 @@ const pakoStore = localspace.createInstance({
 
 Cross-context synchronization is application policy, not a built-in plugin.
 See `examples/broadcast-notification-plugin.ts` for a deliberately limited
-best-effort notification example.
+best-effort notification example. Its default channel is isolated by active
+driver and storage namespace; notifications also include the driver so custom
+shared channels can filter messages from different physical backends.
 
 Application-level serialized-size limits are likewise not browser quota
 management and cannot be enforced atomically by a plugin. See
