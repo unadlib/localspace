@@ -247,6 +247,13 @@ Configuration without `driver` returns synchronously. Supplying `driver`
 returns the `setDriver()` promise, while invalid or locked configuration is
 returned as an `Error` value.
 
+The constructor and `config(options)` use the same normalization rules.
+Database/store names must be non-empty strings; `version`, `maxBatchSize`,
+`connectionIdleMs`, and `maxConcurrentTransactions`, when supplied, must be
+finite positive integers. Invalid constructor options throw
+`LocalSpaceError(INVALID_CONFIG)` before driver selection begins.
+`storeName` characters are preserved in both configuration paths.
+
 > **Note:** validation and lock errors are **returned, not thrown or
 > rejected** (a localForage-compatible contract). This means
 > `await localspace.config({ version: 'bad' })` resolves to an `Error`
@@ -276,6 +283,9 @@ await localspace.config({
 ### `createInstance(options?: LocalSpaceOptions): LocalSpaceInstance`
 
 Creates a new independent instance.
+
+Invalid initial configuration throws `LocalSpaceError(INVALID_CONFIG)`
+synchronously; it is not converted into a later `DRIVER_UNAVAILABLE` error.
 
 ```ts
 const cache = localspace.createInstance({

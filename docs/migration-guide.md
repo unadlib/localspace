@@ -1,5 +1,21 @@
 # Migration Guide
 
+## Upgrade From 2.0.x To 2.1
+
+### Validate Configuration Before Driver Selection
+
+The constructor and `config(options)` now share one validation path. Invalid
+initial `version`, `maxBatchSize`, `connectionIdleMs`,
+`maxConcurrentTransactions`, `name`, or `storeName` values fail with
+`INVALID_CONFIG` before driver initialization. The constructor throws this
+error synchronously; the legacy `config(options)` setter continues returning
+the error value.
+
+`storeName` is preserved exactly in both paths. In 2.0, only the setter replaced
+non-word characters with `_`, while the constructor preserved them. If an app
+used the setter and must reopen the old namespace, pass the already-normalized
+name explicitly (for example `my_store_name`) before upgrading.
+
 ## Upgrade From 1.x To 2.0
 
 Install the new major version:

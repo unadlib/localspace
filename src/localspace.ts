@@ -21,6 +21,7 @@ import idbDriver from './drivers/indexeddb.js';
 import localstorageDriver from './drivers/localstorage.js';
 import memoryDriver from './drivers/memory.js';
 import { PluginManager } from './core/plugin-manager.js';
+import { normalizeConfigOptions } from './core/config.js';
 
 // Shared drivers across all instances
 const DefinedDrivers: DefinedDriversMap = {};
@@ -158,6 +159,7 @@ export class LocalSpace implements LocalSpaceInstance {
   constructor(options?: LocalSpaceOptions) {
     const driverInitializationPromises: Promise<void>[] = [];
     const { plugins = [], ...configOverrides } = options ?? {};
+    const normalizedOverrides = normalizeConfigOptions(configOverrides);
 
     // Define default drivers
     for (const driverTypeKey in DefaultDrivers) {
@@ -179,11 +181,7 @@ export class LocalSpace implements LocalSpaceInstance {
     }
 
     this._defaultConfig = extend({}, DefaultConfig);
-    this._config = extend(
-      {},
-      this._defaultConfig,
-      configOverrides as LocalSpaceConfig
-    );
+    this._config = extend({}, this._defaultConfig, normalizedOverrides);
     this._pluginManager = new PluginManager(
       this as LocalSpaceInstance & {
         _config: LocalSpaceConfig;
@@ -229,40 +227,31 @@ export class LocalSpace implements LocalSpaceInstance {
       }
 
       const suppliedOptions = optionsOrKey as Partial<LocalSpaceConfig>;
-
-      // Validate all options before applying any changes
-      for (const key of Object.keys(suppliedOptions) as Array<
-        keyof LocalSpaceConfig
-      >) {
-        const value = suppliedOptions[key];
-
-        if (key === 'version' && typeof value !== 'number') {
-          return createLocalSpaceError(
-            'INVALID_CONFIG',
-            'Database version must be a number.',
-            { configKey: 'version', providedType: typeof value }
-          );
-        }
+      let normalizedOptions: Partial<LocalSpaceConfig>;
+      try {
+        normalizedOptions = normalizeConfigOptions(suppliedOptions);
+      } catch (error) {
+        return error instanceof Error
+          ? error
+          : createLocalSpaceError(
+              'INVALID_CONFIG',
+              'Invalid LocalSpace configuration.'
+            );
       }
 
       // All validations passed, now apply changes
       const configRecord = this._config as LocalSpaceConfig &
         Record<string, unknown>;
 
-      for (const key of Object.keys(suppliedOptions) as Array<
+      for (const key of Object.keys(normalizedOptions) as Array<
         keyof LocalSpaceConfig
       >) {
-        const value = suppliedOptions[key];
-
-        if (key === 'storeName' && typeof value === 'string') {
-          configRecord.storeName = value.replace(/\W/g, '_');
-          continue;
-        }
+        const value = normalizedOptions[key];
 
         configRecord[key as string] = value as unknown;
       }
 
-      if (suppliedOptions.driver) {
+      if (normalizedOptions.driver) {
         return this.setDriver(this._config.driver!);
       }
 
