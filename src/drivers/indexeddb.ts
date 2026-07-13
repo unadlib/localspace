@@ -10,7 +10,11 @@ import type {
   TransactionScope,
 } from '../types.js';
 import type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from '../errors.js';
-import { createLocalSpaceError, toLocalSpaceError } from '../errors.js';
+import {
+  createLocalSpaceError,
+  LocalSpaceError,
+  toLocalSpaceError,
+} from '../errors.js';
 import {
   normalizeBatchEntries,
   normalizeKey,
@@ -38,6 +42,53 @@ const READ_ONLY = 'readonly';
 const READ_WRITE = 'readwrite';
 let detectBlobSupportPromise: Promise<boolean> | null = null;
 
+const IDB_DOM_EXCEPTION_NAMES = new Set([
+  'AbortError',
+  'ConstraintError',
+  'DataCloneError',
+  'DataError',
+  'InvalidAccessError',
+  'InvalidStateError',
+  'NotFoundError',
+  'QuotaExceededError',
+  'ReadOnlyError',
+  'TransactionInactiveError',
+  'UnknownError',
+  'VersionError',
+]);
+
+const isQuotaExceededError = (error: unknown): boolean => {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as {
+      name?: string;
+      code?: number | string;
+      cause?: unknown;
+    };
+    if (
+      candidate.name === 'QuotaExceededError' ||
+      candidate.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+      candidate.code === 22
+    ) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+
+  return false;
+};
+
+const isIdbDomException = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  if (typeof DOMException !== 'undefined' && error instanceof DOMException) {
+    return true;
+  }
+  return IDB_DOM_EXCEPTION_NAMES.has((error as { name?: string }).name ?? '');
+};
+
 const withIdbErrorContext = <T>(
   promise: Promise<T>,
   operation: string,
@@ -45,15 +96,41 @@ const withIdbErrorContext = <T>(
   code: LocalSpaceErrorCode = 'OPERATION_FAILED'
 ): Promise<T> =>
   promise.catch((error) => {
+    const quotaExceeded = isQuotaExceededError(error);
+    const effectiveCode: LocalSpaceErrorCode = quotaExceeded
+      ? 'QUOTA_EXCEEDED'
+      : code;
+    const stableMessage = quotaExceeded
+      ? `IndexedDB quota exceeded during ${operation}.`
+      : `IndexedDB ${operation} failed.`;
     const message =
-      error instanceof Error && error.message
+      !isIdbDomException(error) && error instanceof Error && error.message
         ? error.message
-        : `IndexedDB ${operation} failed`;
-    throw toLocalSpaceError(error, code, message, {
+        : stableMessage;
+    const enrichedDetails = {
       driver: DRIVER_NAME,
       operation,
       ...(details ?? {}),
-    });
+    };
+
+    if (
+      quotaExceeded &&
+      error instanceof LocalSpaceError &&
+      error.code !== 'QUOTA_EXCEEDED'
+    ) {
+      throw new LocalSpaceError(
+        effectiveCode,
+        stableMessage,
+        {
+          ...enrichedDetails,
+          causeName: error.name,
+          causeMessage: error.message,
+        },
+        error
+      );
+    }
+
+    throw toLocalSpaceError(error, effectiveCode, message, enrichedDetails);
   });
 
 const getNavigatorObject = (): Navigator | undefined => {

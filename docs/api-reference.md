@@ -287,6 +287,12 @@ Creates a new independent instance.
 Invalid initial configuration throws `LocalSpaceError(INVALID_CONFIG)`
 synchronously; it is not converted into a later `DRIVER_UNAVAILABLE` error.
 
+If every configured driver fails initialization, `DRIVER_UNAVAILABLE.details`
+contains an ordered `driverErrors` entry for each attempted driver and the
+original errors remain available through `cause`. IndexedDB quota failures use
+`QUOTA_EXCEEDED`; browser-specific `DOMException` text is retained in
+`details.causeMessage` rather than used as the public error message.
+
 ```ts
 const cache = localspace.createInstance({
   name: 'cache',

@@ -15,7 +15,11 @@ import type {
   PluginContext,
 } from './types.js';
 import { extend, isArray, includes } from './utils/helpers.js';
-import { createLocalSpaceError, LocalSpaceError } from './errors.js';
+import {
+  createLocalSpaceError,
+  describeError,
+  LocalSpaceError,
+} from './errors.js';
 import serializer from './utils/serializer.js';
 import idbDriver from './drivers/indexeddb.js';
 import localstorageDriver from './drivers/localstorage.js';
@@ -76,6 +80,36 @@ const PluginAwareMethods = [
 
 type PluginAwareMethod = (typeof PluginAwareMethods)[number];
 type RawDriverMethod = (...args: unknown[]) => Promise<unknown>;
+
+type DriverInitializationFailure = {
+  driver: string;
+  error: unknown;
+};
+
+function createDriverUnavailableError(
+  attemptedDrivers: string[],
+  failures: DriverInitializationFailure[] = []
+): LocalSpaceError {
+  const driverErrors = failures.map(({ driver, error }) => {
+    const summary = describeError(error);
+    return {
+      driver,
+      name: summary.name,
+      message: summary.message,
+      ...(error instanceof LocalSpaceError ? { code: error.code } : {}),
+    };
+  });
+
+  return new LocalSpaceError(
+    'DRIVER_UNAVAILABLE',
+    'No available storage method found.',
+    {
+      attemptedDrivers,
+      ...(driverErrors.length > 0 ? { driverErrors } : {}),
+    },
+    failures.length > 0 ? failures.map(({ error }) => error) : undefined
+  );
+}
 
 const DefaultConfig: LocalSpaceConfig = {
   description: '',
@@ -416,11 +450,7 @@ export class LocalSpace implements LocalSpaceInstance {
     const supportedDrivers =
       await this._resolveSupportedDrivers(requestedDrivers);
     if (supportedDrivers.length === 0) {
-      const error = createLocalSpaceError(
-        'DRIVER_UNAVAILABLE',
-        'No available storage method found.',
-        { attemptedDrivers: requestedDrivers }
-      );
+      const error = createDriverUnavailableError(requestedDrivers);
       const rejection = Promise.resolve().then<never>(() => {
         throw error;
       });
@@ -451,6 +481,7 @@ export class LocalSpace implements LocalSpaceInstance {
     const initDriver = (supportedDrivers: string[]) => {
       return async () => {
         let currentDriverIndex = 0;
+        const failures: DriverInitializationFailure[] = [];
 
         const driverPromiseLoop = async (): Promise<void> => {
           while (currentDriverIndex < supportedDrivers.length) {
@@ -464,16 +495,15 @@ export class LocalSpace implements LocalSpaceInstance {
               const driver = await this.getDriver(driverName);
               await extendSelfWithDriver(driver);
               return;
-            } catch (e) {
-              // Continue to next driver
+            } catch (error) {
+              failures.push({ driver: driverName, error });
             }
           }
 
           setDriverToConfig();
-          const error = createLocalSpaceError(
-            'DRIVER_UNAVAILABLE',
-            'No available storage method found.',
-            { attemptedDrivers: supportedDrivers }
+          const error = createDriverUnavailableError(
+            supportedDrivers,
+            failures
           );
           throw error;
         };
@@ -499,13 +529,14 @@ export class LocalSpace implements LocalSpaceInstance {
         this._wrapLibraryMethodsWithReady();
         this._initDriver = initDriver(supportedDrivers);
       })
-      .catch(() => {
+      .catch((cause) => {
         setDriverToConfig();
-        const error = createLocalSpaceError(
-          'DRIVER_UNAVAILABLE',
-          'No available storage method found.',
-          { attemptedDrivers: supportedDrivers }
-        );
+        const error = createDriverUnavailableError(supportedDrivers, [
+          {
+            driver: supportedDrivers[0] ?? 'unknown',
+            error: cause,
+          },
+        ]);
         throw error;
       });
 

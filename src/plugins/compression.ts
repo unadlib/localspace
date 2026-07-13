@@ -75,16 +75,26 @@ export const compressionPlugin = (
       if (value == null) {
         return value;
       }
-
-      const serialized = await serializer.serialize(value);
-      const encoded = new TextEncoder().encode(serialized);
-      if (encoded.byteLength < threshold) {
-        return value;
-      }
-
-      let compressed: Uint8Array;
       try {
-        compressed = toUint8Array(await codec.compress(serialized));
+        const serialized = await serializer.serialize(value);
+        const encoded = new TextEncoder().encode(serialized);
+        if (encoded.byteLength < threshold) {
+          return value;
+        }
+
+        const compressed = toUint8Array(await codec.compress(serialized));
+        const payload: CompressionPayload = {
+          __ls_compressed: true,
+          algorithm,
+          originalSize: encoded.byteLength,
+          data: serializer.bufferToString(
+            compressed.buffer.slice(
+              compressed.byteOffset,
+              compressed.byteOffset + compressed.byteLength
+            ) as ArrayBuffer
+          ),
+        };
+        return payload as unknown as T;
       } catch (error) {
         throw toLocalSpaceError(
           error,
@@ -92,19 +102,6 @@ export const compressionPlugin = (
           'Failed to compress payload'
         );
       }
-
-      const payload: CompressionPayload = {
-        __ls_compressed: true,
-        algorithm,
-        originalSize: encoded.byteLength,
-        data: serializer.bufferToString(
-          compressed.buffer.slice(
-            compressed.byteOffset,
-            compressed.byteOffset + compressed.byteLength
-          ) as ArrayBuffer
-        ),
-      };
-      return payload as unknown as T;
     },
     afterGet: async <T>(
       _key: string,
@@ -141,16 +138,28 @@ export const compressionPlugin = (
           if (value == null) {
             return { key, value };
           }
-
-          const serialized = await serializer.serialize(value);
-          const encoded = new TextEncoder().encode(serialized);
-          if (encoded.byteLength < threshold) {
-            return { key, value };
-          }
-
-          let compressedData: Uint8Array;
           try {
-            compressedData = toUint8Array(await codec.compress(serialized));
+            const serialized = await serializer.serialize(value);
+            const encoded = new TextEncoder().encode(serialized);
+            if (encoded.byteLength < threshold) {
+              return { key, value };
+            }
+
+            const compressedData = toUint8Array(
+              await codec.compress(serialized)
+            );
+            const payload: CompressionPayload = {
+              __ls_compressed: true,
+              algorithm,
+              originalSize: encoded.byteLength,
+              data: serializer.bufferToString(
+                compressedData.buffer.slice(
+                  compressedData.byteOffset,
+                  compressedData.byteOffset + compressedData.byteLength
+                ) as ArrayBuffer
+              ),
+            };
+            return { key, value: payload as unknown as T };
           } catch (error) {
             throw toLocalSpaceError(
               error,
@@ -158,19 +167,6 @@ export const compressionPlugin = (
               `Failed to compress payload for key "${key}"`
             );
           }
-
-          const payload: CompressionPayload = {
-            __ls_compressed: true,
-            algorithm,
-            originalSize: encoded.byteLength,
-            data: serializer.bufferToString(
-              compressedData.buffer.slice(
-                compressedData.byteOffset,
-                compressedData.byteOffset + compressedData.byteLength
-              ) as ArrayBuffer
-            ),
-          };
-          return { key, value: payload as unknown as T };
         })
       );
 

@@ -26,6 +26,12 @@ export type LocalSpaceErrorDetails = {
   transactionMode?: string;
   causeName?: string;
   causeMessage?: string;
+  driverErrors?: Array<{
+    driver: string;
+    name: string;
+    message: string;
+    code?: LocalSpaceErrorCode;
+  }>;
   [key: string]: unknown;
 };
 
@@ -60,6 +66,30 @@ export class LocalSpaceError extends Error {
   }
 }
 
+export const describeError = (
+  error: unknown
+): { name: string; message: string } => {
+  if (error && typeof error === 'object') {
+    const candidate = error as { name?: unknown; message?: unknown };
+    if (
+      typeof candidate.name === 'string' &&
+      typeof candidate.message === 'string'
+    ) {
+      return {
+        name: candidate.name,
+        message: candidate.message,
+      };
+    }
+  }
+
+  const normalizedError =
+    error instanceof Error ? error : new Error(String(error));
+  return {
+    name: normalizedError.name,
+    message: normalizedError.message,
+  };
+};
+
 export const createLocalSpaceError = (
   code: LocalSpaceErrorCode,
   message: string,
@@ -76,20 +106,23 @@ export const toLocalSpaceError = (
     return details ? error.withDetails(details) : error;
   }
 
-  const normalizedError =
-    error instanceof Error ? error : new Error(String(error));
+  const summary = describeError(error);
+  const cause =
+    error && (typeof error === 'object' || typeof error === 'function')
+      ? error
+      : new Error(summary.message);
 
   const enrichedDetails: LocalSpaceErrorDetails = {
     ...(details ?? {}),
-    causeName: normalizedError.name,
-    causeMessage: normalizedError.message,
+    causeName: summary.name,
+    causeMessage: summary.message,
   };
 
   const structuredError = new LocalSpaceError(
     code,
     message,
     enrichedDetails,
-    normalizedError
+    cause
   );
 
   return structuredError;
