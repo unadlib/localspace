@@ -69,7 +69,7 @@ describe('2.1 deprecation warnings', () => {
 
   it('warns once for matching batch and single hooks on custom plugins', () => {
     const plugin: LocalSpacePlugin = {
-      name: 'legacy-combined-hooks',
+      name: 'ttl',
       beforeSet: (_key, value) => value,
       beforeSetItems: (entries) => entries,
     };
@@ -78,21 +78,24 @@ describe('2.1 deprecation warnings', () => {
     new LocalSpace({ plugins: [plugin] });
 
     expect(warnings()).toEqual([
-      '[localspace] Deprecation: plugin "legacy-combined-hooks" defines matching batch and single hooks; define one form per phase before 3.0.',
+      '[localspace] Deprecation: plugin "ttl" defines matching batch and single hooks; define one form per phase before 3.0.',
     ]);
   });
 
-  it('warns once before rejecting AES-CBC and AES-CTR', () => {
+  it('warns once for AES-CBC and AES-CTR migration readers', () => {
     const createLegacyPlugin = (name: 'AES-CBC' | 'AES-CTR') =>
       encryptionPlugin({
         key: '0123456789abcdef0123456789abcdef',
-        algorithm: { name } as AesGcmParams,
+        algorithm:
+          name === 'AES-CBC'
+            ? { name, iv: new Uint8Array(16) }
+            : { name, counter: new Uint8Array(16), length: 64 },
       });
 
-    expect(() => createLegacyPlugin('AES-CBC')).toThrow(/AES-GCM/);
-    expect(() => createLegacyPlugin('AES-CTR')).toThrow(/AES-GCM/);
+    expect(() => createLegacyPlugin('AES-CBC')).not.toThrow();
+    expect(() => createLegacyPlugin('AES-CTR')).not.toThrow();
     expect(warnings()).toEqual([
-      '[localspace] Deprecation: AES-CBC encryption is deprecated and unsupported; migrate to AES-GCM.',
+      '[localspace] Deprecation: AES-CBC encryption is deprecated and read-only; migrate data to AES-GCM.',
     ]);
   });
 

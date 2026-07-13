@@ -135,13 +135,17 @@ In LocalSpace 2.1, built-in storage transformations cover single and batch item
 operations. `iterate()` and `runTransaction()` reject before invoking the
 driver when encryption, compression, or TTL is active; use `keys()` with
 `getItems()` for processed iteration. Plugin-aware transaction scopes are
-planned for 3.0.
+planned for 3.0. This protection follows an internal capability attached by
+the built-in factories; custom plugins may use the names `encryption`,
+`compression`, or `ttl` without being treated as built-ins.
 
 **Options:**
 
 - Provide a `key` (CryptoKey/ArrayBuffer/string) or `keyDerivation` block (PBKDF2)
 - Customize AES-GCM parameters, `ivLength`, `ivGenerator`, or `randomSource`.
-  AES-CBC and AES-CTR are deprecated and rejected in 2.1.
+  AES-CBC and AES-CTR are deprecated read-only migration modes in 2.1: they
+  decrypt matching 2.0 payloads but reject every new write. AES-CTR readers
+  must receive the original `counter` and `length` parameters.
 - Works in browsers and modern Node runtimes (pass your own `subtle` when needed)
 
 ```ts

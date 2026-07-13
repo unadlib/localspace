@@ -13,6 +13,10 @@ import type {
 import { createLocalSpaceError, LocalSpaceError } from '../errors.js';
 import { normalizeBatchEntries } from '../utils/helpers.js';
 import { warnDeprecation } from '../utils/deprecations.js';
+import {
+  getBuiltInStorageTransformKind,
+  type BuiltInStorageTransformKind,
+} from './plugin-capabilities.js';
 
 export class PluginAbortError extends Error {
   constructor(message = 'Plugin aborted the operation') {
@@ -32,11 +36,6 @@ type RegisteredPlugin = {
 };
 
 const sharedMetadataFor = (): Record<string, unknown> => Object.create(null);
-const BUILT_IN_STORAGE_TRANSFORM_PLUGINS = new Set([
-  'encryption',
-  'compression',
-  'ttl',
-]);
 const COMBINED_PLUGIN_HOOK_PAIRS: Array<
   [keyof LocalSpacePlugin, keyof LocalSpacePlugin]
 > = [
@@ -57,7 +56,9 @@ const PLUGIN_WARNINGS = {
       plugins: LocalSpacePlugin[],
       config: PluginHost['_config']
     ): boolean => {
-      const hasCompression = plugins.some((p) => p.name === 'compression');
+      const hasCompression = plugins.some(
+        (plugin) => getBuiltInStorageTransformKind(plugin) === 'compression'
+      );
       return hasCompression && config.pluginErrorPolicy === 'lenient';
     },
     message:
@@ -65,8 +66,12 @@ const PLUGIN_WARNINGS = {
   },
   ENCRYPTION_BEFORE_COMPRESSION: {
     condition: (plugins: LocalSpacePlugin[]): boolean => {
-      const encIdx = plugins.findIndex((p) => p.name === 'encryption');
-      const compIdx = plugins.findIndex((p) => p.name === 'compression');
+      const encIdx = plugins.findIndex(
+        (plugin) => getBuiltInStorageTransformKind(plugin) === 'encryption'
+      );
+      const compIdx = plugins.findIndex(
+        (plugin) => getBuiltInStorageTransformKind(plugin) === 'compression'
+      );
       if (encIdx === -1 || compIdx === -1) return false;
       // Check priority - encryption should have lower priority than compression
       // to run after compression in beforeSet
@@ -140,8 +145,8 @@ export class PluginManager {
     const pluginNames = [
       ...new Set(
         this.getActivePlugins()
-          .map((plugin) => plugin.name)
-          .filter((name) => BUILT_IN_STORAGE_TRANSFORM_PLUGINS.has(name))
+          .map((plugin) => getBuiltInStorageTransformKind(plugin))
+          .filter((kind): kind is BuiltInStorageTransformKind => kind !== null)
       ),
     ];
 
@@ -164,7 +169,7 @@ export class PluginManager {
     for (const plugin of plugins) {
       if (!plugin) continue;
       if (
-        !BUILT_IN_STORAGE_TRANSFORM_PLUGINS.has(plugin.name) &&
+        getBuiltInStorageTransformKind(plugin) === null &&
         COMBINED_PLUGIN_HOOK_PAIRS.some(
           ([batchHook, singleHook]) =>
             typeof plugin[batchHook] === 'function' &&

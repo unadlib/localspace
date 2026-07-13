@@ -17,16 +17,22 @@
 
 - Made encryption fail closed for invalid algorithms, serialization failures,
   Web Crypto failures, and malformed or unknown-version encrypted payloads.
+- Kept AES-CBC/AES-CTR legacy payloads available through read-only migration
+  configurations while rejecting every new write with those algorithms.
 - Prevented built-in transformation plugins from being silently bypassed by
   `runTransaction()` or from exposing raw envelopes through `iterate()`.
 - Removed expired TTL values before reporting `onExpire` failures so plugin
   callback errors cannot leak internal wrappers or resurrect stale data.
-- Kept IndexedDB transactions alive until async runners settle, aborting
-  earlier writes when a runner rejects, and avoided readonly blob probes.
-- Reworked memory transactions around a private copy and store-level write
-  coordination so rollback cannot overwrite successful concurrent writes.
-- Unified constructor and setter configuration normalization, including stable
-  `INVALID_CONFIG` failures and consistent `storeName` handling.
+- Avoided unnecessary blob capability detection for readonly IndexedDB
+  transactions while preserving the permissive 2.x runner contract.
+- Unified constructor and setter configuration validation while preserving the
+  legacy setter's `storeName` namespace mapping.
+- Rejected operations on closed instances before lazy plugin initialization,
+  operation hooks, or transformation bypass checks can run.
+- Preserved zero-valued operational limits as the 2.x disabled/unbounded
+  settings while continuing to reject negative or non-integer values.
+- Identified built-in transformation plugins by an internal capability marker
+  so same-named custom plugins no longer trigger guards or built-in warnings.
 - Stabilized `LocalSpaceError` classification and retained original driver,
   quota, plugin, and browser errors through `cause` and structured details.
 - Keyed shared IndexedDB contexts by the resolved backend, deduplicated

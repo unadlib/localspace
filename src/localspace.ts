@@ -13,6 +13,7 @@ import type {
   TransactionMode,
   TransactionScope,
   PluginContext,
+  PluginOperation,
 } from './types.js';
 import { extend, isArray, includes } from './utils/helpers.js';
 import {
@@ -292,6 +293,15 @@ export class LocalSpace implements LocalSpaceInstance {
               'Invalid LocalSpace configuration.'
             );
       }
+      if (typeof normalizedOptions.storeName === 'string') {
+        // Preserve the 2.x setter namespace so an unchanged application keeps
+        // opening data written before 2.1. Constructor behavior stays as-is;
+        // the two entry points are unified only in 3.0 with migration tooling.
+        normalizedOptions.storeName = normalizedOptions.storeName.replace(
+          /\W/g,
+          '_'
+        );
+      }
 
       // All validations passed, now apply changes
       const configRecord = this._config as LocalSpaceConfig &
@@ -342,13 +352,19 @@ export class LocalSpace implements LocalSpaceInstance {
 
     this._closed = true;
     const initializationInProgress = this._ready;
+    const driverSelectionInProgress = this._pendingDriverInitialization;
+    const driverChangeInProgress = this._driverSet;
 
     this._closePromise = (async () => {
       let cleanupError: LocalSpaceError | undefined;
 
-      if (initializationInProgress) {
-        await initializationInProgress.catch(() => undefined);
-      }
+      await Promise.allSettled(
+        [
+          driverSelectionInProgress,
+          driverChangeInProgress,
+          initializationInProgress,
+        ].filter((promise): promise is Promise<void> => promise !== null)
+      );
 
       try {
         await this._pluginManager.destroyInitialized();
@@ -496,6 +512,7 @@ export class LocalSpace implements LocalSpaceInstance {
       this._driverSet ?? this._pendingDriverInitialization ?? Promise.resolve();
 
     const promise = driverInitialization.then(() => {
+      this._assertOpen('ready');
       if (this._ready === null) {
         this._ready = this._initDriver ? this._initDriver() : Promise.resolve();
       }
@@ -514,6 +531,7 @@ export class LocalSpace implements LocalSpaceInstance {
       !this._isRunningDefaultDriverSelection
     ) {
       await this._pendingDriverInitialization.catch(() => undefined);
+      this._assertOpen('setDriver');
     }
 
     if (!this._isRunningDefaultDriverSelection) {
@@ -527,6 +545,7 @@ export class LocalSpace implements LocalSpaceInstance {
     const requestedDrivers = drivers as string[];
     const supportedDrivers =
       await this._resolveSupportedDrivers(requestedDrivers);
+    this._assertOpen('setDriver');
     if (supportedDrivers.length === 0) {
       const error = createDriverUnavailableError(requestedDrivers);
       const rejection = Promise.resolve().then<never>(() => {
@@ -635,6 +654,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
     this._driverSet = Promise.all([oldDriverSetDone, previousDriverRelease])
       .then(async () => {
+        this._assertOpen('setDriver');
         const driverName = supportedDrivers[0];
         this._dbInfo = null;
         this._ready = null;
@@ -760,7 +780,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
   private _createSetItemWrapper(original: RawDriverMethod) {
     return (async (key: string, value: unknown) => {
-      await this._pluginManager.ensureInitialized();
+      await this._ensurePluginsInitialized('setItem');
       const context = this._pluginManager.createContext('setItem');
       context.operationState.originalValue = value;
       const processedValue = await this._pluginManager.beforeSet(
@@ -780,7 +800,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
   private _createGetItemWrapper(original: RawDriverMethod) {
     return (async (key: string) => {
-      await this._pluginManager.ensureInitialized();
+      await this._ensurePluginsInitialized('getItem');
       const context = this._pluginManager.createContext('getItem');
       const targetKey = await this._pluginManager.beforeGet(key, context);
       const driverValue = await original(targetKey);
@@ -795,7 +815,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
   private _createRemoveItemWrapper(original: RawDriverMethod) {
     return (async (key: string) => {
-      await this._pluginManager.ensureInitialized();
+      await this._ensurePluginsInitialized('removeItem');
       const context = this._pluginManager.createContext('removeItem');
       const targetKey = await this._pluginManager.beforeRemove(key, context);
       await original(targetKey);
@@ -805,7 +825,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
   private _createSetItemsWrapper(original: RawDriverMethod) {
     return (async (entries: BatchItems<unknown>) => {
-      await this._pluginManager.ensureInitialized();
+      await this._ensurePluginsInitialized('setItems');
       const batchContext = this._pluginManager.createContext('setItems');
       batchContext.operationState.isBatch = true;
       const prepared = await this._pluginManager.beforeSetItems(
@@ -882,7 +902,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
   private _createGetItemsWrapper(original: RawDriverMethod) {
     return (async (keys: string[]) => {
-      await this._pluginManager.ensureInitialized();
+      await this._ensurePluginsInitialized('getItems');
       const batchContext = this._pluginManager.createContext('getItems');
       batchContext.operationState.isBatch = true;
       batchContext.operationState.batchSize = keys.length;
@@ -949,7 +969,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
   private _createRemoveItemsWrapper(original: RawDriverMethod) {
     return (async (keys: string[]) => {
-      await this._pluginManager.ensureInitialized();
+      await this._ensurePluginsInitialized('removeItems');
       const batchContext = this._pluginManager.createContext('removeItems');
       batchContext.operationState.isBatch = true;
       batchContext.operationState.batchSize = keys.length;
@@ -985,9 +1005,18 @@ export class LocalSpace implements LocalSpaceInstance {
     operation: 'iterate' | 'runTransaction'
   ): RawDriverMethod {
     return async (...args: unknown[]) => {
+      this._assertOpen(operation);
       this._pluginManager.assertNoStorageTransformBypass(operation);
       return original(...args);
     };
+  }
+
+  private async _ensurePluginsInitialized(
+    operation: PluginOperation
+  ): Promise<void> {
+    this._assertOpen(operation);
+    await this._pluginManager.ensureInitialized();
+    this._assertOpen(operation);
   }
 
   _getSupportedDrivers(drivers: string[]): string[] {

@@ -15,10 +15,17 @@ initial `version`, `maxBatchSize`, `connectionIdleMs`,
 error synchronously; the legacy `config(options)` setter continues returning
 the error value.
 
-`storeName` is preserved exactly in both paths. In 2.0, only the setter replaced
-non-word characters with `_`, while the constructor preserved them. If an app
-used the setter and must reopen the old namespace, pass the already-normalized
-name explicitly (for example `my_store_name`) before upgrading.
+`version` must be a positive safe integer. The operational limits
+`maxBatchSize`, `connectionIdleMs`, and `maxConcurrentTransactions` are
+non-negative safe integers; `0` continues to mean no batch split, no idle
+close, and no transaction cap, respectively.
+
+The 2.0 namespace behavior is retained: `config(options)` replaces non-word
+`storeName` characters with `_`, while the constructor preserves them. This
+ensures unchanged setter-based applications reopen their existing data. When
+moving from the setter to constructor options, pass the already-normalized name
+explicitly (for example `my_store_name`). Full normalization unification is a
+3.0 migration.
 
 Driver and storage failures now use stable `LocalSpaceError` codes. In
 particular, all-driver initialization failure is `DRIVER_UNAVAILABLE`, quota
@@ -39,15 +46,15 @@ import { setDeprecationWarnings } from 'localspace';
 setDeprecationWarnings(false);
 ```
 
-| Deprecated 2.x behavior                              | Conservative migration                                                              |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| AES-CBC or AES-CTR configuration                     | Re-encrypt through an authenticated AES-GCM migration; 2.1 rejects these algorithms |
-| `size` configuration                                 | Remove it; built-in drivers have always ignored it as a quota control               |
-| `destroy()`                                          | Use idempotent, non-destructive `close()`                                           |
-| Mutating the object returned by `config()`           | Treat configuration as readonly and pass options to `createInstance()`              |
-| Matching batch and single hooks in one custom plugin | Define one hook form per phase; retain the 2.x `isBatch` guard until migrated       |
-| React Native adapter auto-detection                  | Import `localspace/react-native` and inject `reactNativeAsyncStorage` explicitly    |
-| Package deep imports                                 | Import only `localspace` or `localspace/react-native`                               |
+| Deprecated 2.x behavior                              | Conservative migration                                                                 |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| AES-CBC or AES-CTR configuration                     | Use the matching read-only 2.1 reader to migrate data to AES-GCM; legacy writes reject |
+| `size` configuration                                 | Remove it; built-in drivers have always ignored it as a quota control                  |
+| `destroy()`                                          | Use idempotent, non-destructive `close()`                                              |
+| Mutating the object returned by `config()`           | Treat configuration as readonly and pass options to `createInstance()`                 |
+| Matching batch and single hooks in one custom plugin | Define one hook form per phase; retain the 2.x `isBatch` guard until migrated          |
+| React Native adapter auto-detection                  | Import `localspace/react-native` and inject `reactNativeAsyncStorage` explicitly       |
+| Package deep imports                                 | Import only `localspace` or `localspace/react-native`                                  |
 
 Package deep imports have no executable compatibility entry on which a runtime
 warning could be attached: the `exports` map rejects them immediately. The
@@ -59,8 +66,8 @@ entry that would expand the supported package surface.
 Use `await instance.close()` when an instance is no longer needed. The method
 is idempotent, cleans only initialized plugins, releases the active driver
 connection, and leaves stored data intact. A closed instance is terminal and
-later operations reject with `INSTANCE_CLOSED`; create a new instance to access
-the same persisted namespace again.
+later operations reject with `INSTANCE_CLOSED` before plugin initialization or
+hooks; create a new instance to access the same persisted namespace again.
 
 `destroy()` remains available during 2.x with its historical plugin-only
 cleanup behavior, but is deprecated. Use `clear()` or `dropInstance()` only
@@ -155,17 +162,13 @@ atomic.
 
 ### Use Transactions Only On Capable Drivers
 
-IndexedDB provides native transactions. Starting in 2.1, the memory driver uses
-a private copy plus a shared store-level write lock: ordinary readers see only
-committed values, and concurrent writers are serialized without rollback
-overwriting a successful external write. Memory data remains runtime-only.
-localStorage and React Native AsyncStorage reject `runTransaction()` with
-`UNSUPPORTED_OPERATION`.
-
-Starting in 2.1, IndexedDB keeps the native transaction open until an async
-runner settles. A runner that rejects after awaiting application work now
-aborts its earlier writes; 2.0 could reject after the browser had already
-committed them.
+LocalSpace 2.1 retains the 2.0 transaction runner contract. IndexedDB provides
+a native transaction while the runner is issuing transaction-scope requests.
+The memory driver restores a snapshot after a failed readwrite transaction but
+does not isolate concurrent callers. Ordinary instance operations awaited by a
+runner remain outside the transaction. The transaction-bound runner and
+cross-driver isolation contract are deferred to 3.0. localStorage and React
+Native AsyncStorage reject `runTransaction()` with `UNSUPPORTED_OPERATION`.
 
 LocalSpace 2.1 also rejects `runTransaction()` and `iterate()` while a built-in
 encryption, compression, or TTL plugin is active. Earlier 2.x releases exposed

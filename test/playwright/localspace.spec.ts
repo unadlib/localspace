@@ -58,7 +58,7 @@ test.describe('localspace browser interoperability', () => {
     expect(result.iterated[1]?.iteration).toBe(2);
   });
 
-  test('IndexedDB transaction rolls back after a delayed runner failure', async ({
+  test('IndexedDB transaction runner can await an ordinary instance operation', async ({
     page,
   }) => {
     await ensureFixtureReady(page);
@@ -73,27 +73,27 @@ test.describe('localspace browser interoperability', () => {
 
       await instance.setDriver([instance.INDEXEDDB]);
       await instance.ready();
-      await instance.setItem('value', 'original');
-
-      let errorMessage = '';
-      try {
-        await instance.runTransaction('readwrite', async (scope: any) => {
-          await scope.set('value', 'modified');
-          await new Promise((resolve) => setTimeout(resolve, 20));
-          throw new Error('late runner failure');
-        });
-      } catch (error) {
-        errorMessage = error instanceof Error ? error.message : String(error);
-      }
+      const runnerResult = await Promise.race([
+        instance.runTransaction('readwrite', async () => {
+          await instance.setItem('ordinary-operation', 'completed');
+          return 'runner-completed';
+        }),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error('transaction runner timed out')),
+            500
+          )
+        ),
+      ]);
 
       return {
-        errorMessage,
-        storedValue: await instance.getItem('value'),
+        runnerResult,
+        storedValue: await instance.getItem('ordinary-operation'),
       };
-    }, randomStoreName('transaction-rollback'));
+    }, randomStoreName('transaction-runner-compatibility'));
 
-    expect(result.errorMessage).toContain('late runner failure');
-    expect(result.storedValue).toBe('original');
+    expect(result.runnerResult).toBe('runner-completed');
+    expect(result.storedValue).toBe('completed');
   });
 
   test('close releases an IndexedDB instance without deleting its data', async ({

@@ -53,10 +53,10 @@ describe('LocalSpace class tests', () => {
       expect(config.name).toBe('test-db');
     });
 
-    it('should preserve storeName', () => {
+    it('should preserve legacy setter storeName normalization', () => {
       const instance = new LocalSpace();
       instance.config({ storeName: 'store&name-v1' });
-      expect(instance.config('storeName')).toBe('store&name-v1');
+      expect(instance.config('storeName')).toBe('store_name_v1');
     });
 
     it('should handle driver config update', async () => {

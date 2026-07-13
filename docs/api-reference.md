@@ -212,16 +212,15 @@ await localspace.removeItems(['user:1', 'user:2', 'temp:session']);
 
 ### `runTransaction<T>(mode: 'readonly' | 'readwrite', runner: (scope: TransactionScope) => Promise<T> | T): Promise<T>`
 
-Executes multiple operations in a single transaction. In LocalSpace 2.1,
-IndexedDB keeps the native transaction active until the runner settles, so an
-asynchronous runner rejection aborts earlier writes instead of reporting an
-error after they have committed.
-IndexedDB provides native atomic transactions. The memory driver provides
-copy-on-write transactions with store-level write isolation. Ordinary readers
-see only committed memory values, while regular writes and other transactions
-wait for the active transaction. localStorage and React Native AsyncStorage
-reject this method with `UNSUPPORTED_OPERATION` because they cannot provide a
-real transaction.
+Executes multiple operations using the selected driver's 2.x transaction
+behavior. IndexedDB provides a native transaction while the runner is issuing
+transaction-scope requests. The memory driver provides snapshot rollback but
+does not isolate concurrent callers. localStorage and React Native AsyncStorage
+reject this method with `UNSUPPORTED_OPERATION`.
+
+The permissive 2.x runner may await ordinary instance operations, but those
+operations are not part of the transaction. A stricter transaction-bound
+runner and cross-driver isolation contract are planned for 3.0.
 
 When the built-in encryption, compression, or TTL plugin is active, LocalSpace
 2.1 rejects `runTransaction()` with `UNSUPPORTED_OPERATION` before creating a
@@ -286,12 +285,16 @@ Configuration without `driver` returns synchronously. Supplying `driver`
 returns the `setDriver()` promise, while invalid or locked configuration is
 returned as an `Error` value.
 
-The constructor and `config(options)` use the same normalization rules.
-Database/store names must be non-empty strings; `version`, `maxBatchSize`,
-`connectionIdleMs`, and `maxConcurrentTransactions`, when supplied, must be
-finite positive integers. Invalid constructor options throw
+The constructor and `config(options)` use the same validation rules.
+Database/store names must be non-empty strings. `version` must be a positive
+safe integer; `maxBatchSize`, `connectionIdleMs`, and
+`maxConcurrentTransactions` must be non-negative safe integers. Zero preserves
+the 2.x disabled/unbounded behavior: no batch split, no idle close, and no
+transaction cap, respectively. Invalid constructor options throw
 `LocalSpaceError(INVALID_CONFIG)` before driver selection begins.
-`storeName` characters are preserved in both configuration paths.
+For 2.x data compatibility, the legacy `config(options)` setter still replaces
+non-word `storeName` characters with `_`; constructor names are preserved.
+Pass the exact stored namespace when moving between the two entry points.
 
 > **Note:** validation and lock errors are **returned, not thrown or
 > rejected** (a localForage-compatible contract). This means
@@ -521,7 +524,8 @@ store.use([compressionPlugin(), encryptionPlugin({ key: myKey })]);
 Closes the instance without deleting stored data. Calls cleanup hooks only for
 plugins that were initialized, releases the active driver connection, and is
 safe to call more than once. A closed instance rejects later storage operations
-with `LocalSpaceError(INSTANCE_CLOSED)`.
+with `LocalSpaceError(INSTANCE_CLOSED)` before initializing plugins or invoking
+their operation hooks.
 
 ```ts
 await store.close();

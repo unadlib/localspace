@@ -3,6 +3,7 @@ import localspace, {
   indexedDBDriver,
   LocalSpace,
   memoryDriver,
+  ttlPlugin,
   type Driver,
   type LocalSpacePlugin,
 } from '../src';
@@ -110,6 +111,7 @@ describe('LocalSpace.close', () => {
       markInitializationStarted = resolve;
     });
     const onDestroy = vi.fn();
+    const beforeSet = vi.fn((_key: string, value: unknown) => value);
     const instance = localspace.createInstance({
       name: uniqueName('close-during-plugin-init'),
       plugins: [
@@ -119,6 +121,7 @@ describe('LocalSpace.close', () => {
             markInitializationStarted();
             await initializationGate;
           },
+          beforeSet,
           onDestroy,
         },
       ],
@@ -132,7 +135,147 @@ describe('LocalSpace.close', () => {
 
     await expect(operation).rejects.toBeInstanceOf(LocalSpaceError);
     await closing;
+    expect(beforeSet).not.toHaveBeenCalled();
     expect(onDestroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not initialize plugins or run hooks after close', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onInit = vi.fn();
+    const onDestroy = vi.fn();
+    const beforeSet = vi.fn((_key: string, value: unknown) => value);
+    const beforeGet = vi.fn((key: string) => key);
+    const beforeRemove = vi.fn((key: string) => key);
+    const beforeSetItems = vi.fn((entries) => entries);
+    const beforeGetItems = vi.fn((keys: string[]) => keys);
+    const beforeRemoveItems = vi.fn((keys: string[]) => keys);
+    const instance = localspace.createInstance({
+      name: uniqueName('closed-plugin-entrypoints'),
+      plugins: [
+        {
+          name: 'closed-plugin-entrypoints',
+          onInit,
+          onDestroy,
+          beforeSet,
+          beforeGet,
+          beforeRemove,
+          beforeSetItems,
+          beforeGetItems,
+          beforeRemoveItems,
+        },
+      ],
+    });
+    await instance.setDriver([instance.MEMORY]);
+    await instance.ready();
+    await instance.close();
+
+    const operations: Array<[string, () => Promise<unknown>]> = [
+      ['setItem', () => instance.setItem('key', 'value')],
+      ['getItem', () => instance.getItem('key')],
+      ['removeItem', () => instance.removeItem('key')],
+      ['setItems', () => instance.setItems([{ key: 'key', value: 'value' }])],
+      ['getItems', () => instance.getItems(['key'])],
+      ['removeItems', () => instance.removeItems(['key'])],
+    ];
+
+    for (const [operation, invoke] of operations) {
+      await expect(invoke()).rejects.toMatchObject({
+        code: 'INSTANCE_CLOSED',
+        details: { operation },
+      });
+    }
+    expect(onInit).not.toHaveBeenCalled();
+    expect(onDestroy).not.toHaveBeenCalled();
+    expect(beforeSet).not.toHaveBeenCalled();
+    expect(beforeGet).not.toHaveBeenCalled();
+    expect(beforeRemove).not.toHaveBeenCalled();
+    expect(beforeSetItems).not.toHaveBeenCalled();
+    expect(beforeGetItems).not.toHaveBeenCalled();
+    expect(beforeRemoveItems).not.toHaveBeenCalled();
+  });
+
+  it('reports closed before transformation bypass guards', async () => {
+    const instance = localspace.createInstance({
+      name: uniqueName('closed-transform-guard'),
+      plugins: [ttlPlugin({ defaultTTL: 60_000 })],
+    });
+    await instance.setDriver([instance.MEMORY]);
+    await instance.ready();
+    await instance.close();
+
+    await expect(instance.iterate(vi.fn())).rejects.toMatchObject({
+      code: 'INSTANCE_CLOSED',
+      details: { operation: 'iterate' },
+    });
+    await expect(
+      instance.runTransaction('readonly', vi.fn())
+    ).rejects.toMatchObject({
+      code: 'INSTANCE_CLOSED',
+      details: { operation: 'runTransaction' },
+    });
+  });
+
+  it('waits for an in-flight driver switch without initializing after close', async () => {
+    let releaseOldDriverClose!: () => void;
+    let markOldDriverCloseStarted!: () => void;
+    const oldDriverCloseGate = new Promise<void>((resolve) => {
+      releaseOldDriverClose = resolve;
+    });
+    const oldDriverCloseStarted = new Promise<void>((resolve) => {
+      markOldDriverCloseStarted = resolve;
+    });
+    const oldDriverClose = vi.fn(async () => {
+      markOldDriverCloseStarted();
+      await oldDriverCloseGate;
+    });
+    const newDriverInit = vi.fn(memoryDriver._initStorage);
+    const newDriverClose = vi.fn(async () => undefined);
+    const oldDriver = createClosableMemoryDriver(
+      uniqueName('close-switch-old'),
+      oldDriverClose
+    );
+    const newDriver: Driver = {
+      ...memoryDriver,
+      _driver: uniqueName('close-switch-new'),
+      _support: true,
+      _initStorage: newDriverInit,
+      _closeStorage: newDriverClose,
+    };
+    const instance = new LocalSpace({
+      name: uniqueName('close-during-driver-switch'),
+      storeName: 'store',
+    });
+    await instance.defineDriver(oldDriver);
+    await instance.defineDriver(newDriver);
+    await instance.setDriver([oldDriver._driver]);
+    await instance.ready();
+
+    const switching = instance.setDriver([newDriver._driver]);
+    await oldDriverCloseStarted;
+    const inFlightReady = instance.ready();
+    const closing = instance.close();
+
+    let closeSettled = false;
+    void closing.finally(() => {
+      closeSettled = true;
+    });
+    await Promise.resolve();
+    expect(closeSettled).toBe(false);
+
+    releaseOldDriverClose();
+
+    await expect(switching).rejects.toMatchObject({
+      code: 'INSTANCE_CLOSED',
+      details: { operation: 'setDriver' },
+    });
+    await expect(inFlightReady).rejects.toMatchObject({
+      code: 'INSTANCE_CLOSED',
+    });
+    await closing;
+
+    expect(oldDriverClose).toHaveBeenCalledTimes(1);
+    expect(newDriverInit).not.toHaveBeenCalled();
+    expect(newDriverClose).not.toHaveBeenCalled();
   });
 
   it('continues initialized plugin cleanup after a hook failure', async () => {

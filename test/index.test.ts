@@ -41,14 +41,14 @@ describe('localspace localStorage parity checks', () => {
 });
 
 describe('localspace config compatibility snapshots', () => {
-  it('preserves storeName', () => {
+  it('preserves legacy setter storeName normalization', () => {
     const instance = new LocalSpace();
     instance.config({
       name: 'My Cool App',
       storeName: 'my store&name-v1',
     });
 
-    expect(instance.config('storeName')).toBe('my store&name-v1');
+    expect(instance.config('storeName')).toBe('my_store_name_v1');
   });
 
   it('blocks config calls once the instance is in use', async () => {

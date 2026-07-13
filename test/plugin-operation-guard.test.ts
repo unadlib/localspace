@@ -112,4 +112,41 @@ describe('plugin operation bypass guard scope', () => {
     await expect(store.iterate(callback)).resolves.toBeUndefined();
     expect(callback).toHaveBeenCalledWith(1, 'value', 1);
   });
+
+  it('does not infer built-in capabilities from custom plugin names', async () => {
+    const warning = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const afterSet = vi.fn();
+    const store = await createMemoryStore('guard-custom-name-collisions', [
+      { name: 'encryption' },
+      { name: 'compression' },
+      { name: 'ttl', afterSet },
+    ]);
+
+    await store.setItem('value', 1);
+    await expect(
+      store.runTransaction('readonly', (scope) => scope.get('value'))
+    ).resolves.toBe(1);
+
+    const values: number[] = [];
+    await store.iterate<number, void>((value) => {
+      values.push(value);
+    });
+    expect(values).toEqual([1]);
+    expect(afterSet).toHaveBeenCalledTimes(1);
+    expect(warning).not.toHaveBeenCalled();
+  });
+
+  it('retains the guard when a built-in plugin is shallow-cloned', async () => {
+    const plugin = { ...ttlPlugin({ defaultTTL: 60_000 }) };
+    const store = await createMemoryStore('guard-cloned-transform', [plugin]);
+
+    await expect(
+      store.runTransaction('readonly', (scope) => scope.get('value'))
+    ).rejects.toMatchObject({
+      code: 'UNSUPPORTED_OPERATION',
+      details: { plugins: ['ttl'] },
+    });
+  });
 });

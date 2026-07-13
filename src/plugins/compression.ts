@@ -12,6 +12,7 @@ import {
   hasOwnPayloadField,
   readPluginEnvelope,
 } from '../core/plugin-envelope.js';
+import { markBuiltInStorageTransformPlugin } from '../core/plugin-capabilities.js';
 
 export interface CompressionCodec {
   compress(data: string): Promise<Uint8Array | string> | Uint8Array | string;
@@ -102,7 +103,7 @@ const toUint8Array = (value: Uint8Array | string): Uint8Array => {
   return value;
 };
 
-export const compressionPlugin = (
+const createCompressionPlugin = (
   options: CompressionPluginOptions = {}
 ): LocalSpacePlugin => {
   const threshold = options.threshold ?? 1024;
@@ -255,5 +256,13 @@ export const compressionPlugin = (
     },
   };
 };
+
+export const compressionPlugin = (
+  options: CompressionPluginOptions = {}
+): LocalSpacePlugin =>
+  markBuiltInStorageTransformPlugin(
+    createCompressionPlugin(options),
+    'compression'
+  );
 
 export default compressionPlugin;

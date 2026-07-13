@@ -10,6 +10,7 @@ import {
   hasOwnPayloadField,
   readPluginEnvelope,
 } from '../core/plugin-envelope.js';
+import { markBuiltInStorageTransformPlugin } from '../core/plugin-capabilities.js';
 
 export interface TTLPluginOptions {
   /** Default TTL in milliseconds applied when key-specific TTL is not defined */
@@ -201,9 +202,7 @@ const cleanupExpired = async (
   }
 };
 
-export const ttlPlugin = (
-  options: TTLPluginOptions = {}
-): LocalSpacePlugin => ({
+const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
   name: 'ttl',
   priority: 10,
   onInit: async (context) => {
@@ -313,5 +312,8 @@ export const ttlPlugin = (
     return result;
   },
 });
+
+export const ttlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin =>
+  markBuiltInStorageTransformPlugin(createTtlPlugin(options), 'ttl');
 
 export default ttlPlugin;

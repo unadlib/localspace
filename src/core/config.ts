@@ -1,15 +1,15 @@
 import type { LocalSpaceConfig } from '../types.js';
 import { createLocalSpaceError } from '../errors.js';
 
-const POSITIVE_INTEGER_OPTIONS = [
+const INTEGER_OPTIONS = [
   'version',
   'maxBatchSize',
   'connectionIdleMs',
   'maxConcurrentTransactions',
 ] as const satisfies ReadonlyArray<keyof LocalSpaceConfig>;
 
-const validatePositiveInteger = (
-  key: (typeof POSITIVE_INTEGER_OPTIONS)[number],
+const validateIntegerOption = (
+  key: (typeof INTEGER_OPTIONS)[number],
   value: unknown
 ): void => {
   if (key === 'version' && typeof value !== 'number') {
@@ -20,10 +20,16 @@ const validatePositiveInteger = (
     );
   }
 
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+  const minimum = key === 'version' ? 1 : 0;
+  if (
+    typeof value !== 'number' ||
+    !Number.isSafeInteger(value) ||
+    value < minimum
+  ) {
+    const range = key === 'version' ? 'a positive' : 'a non-negative';
     throw createLocalSpaceError(
       'INVALID_CONFIG',
-      `Configuration option "${key}" must be a positive integer.`,
+      `Configuration option "${key}" must be ${range} integer.`,
       {
         configKey: key,
         providedType: typeof value,
@@ -38,10 +44,10 @@ export function normalizeConfigOptions(
 ): Partial<LocalSpaceConfig> {
   const normalized: Partial<LocalSpaceConfig> = { ...options };
 
-  for (const key of POSITIVE_INTEGER_OPTIONS) {
+  for (const key of INTEGER_OPTIONS) {
     const value = options[key];
     if (value !== undefined) {
-      validatePositiveInteger(key, value);
+      validateIntegerOption(key, value);
     }
   }
 

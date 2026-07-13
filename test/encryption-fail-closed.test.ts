@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import localspace, { encryptionPlugin } from '../src';
+import localspace, { encryptionPlugin, serializer } from '../src';
 import { LocalSpaceError } from '../src/errors';
 
 const VALID_KEY = '0123456789abcdef0123456789abcdef';
@@ -21,6 +21,31 @@ const createMemoryStores = async (
   ]);
 
   return { secure, raw };
+};
+
+const createLegacyPayload = async (
+  algorithm: AlgorithmIdentifier,
+  key: CryptoKey,
+  value: unknown,
+  payloadIv: Uint8Array
+) => {
+  const serialized = await serializer.serialize(value);
+  const encrypted = await crypto.subtle.encrypt(
+    algorithm,
+    key,
+    new TextEncoder().encode(serialized)
+  );
+  const ivBuffer = payloadIv.buffer.slice(
+    payloadIv.byteOffset,
+    payloadIv.byteOffset + payloadIv.byteLength
+  ) as ArrayBuffer;
+
+  return {
+    __ls_encrypted: true as const,
+    algorithm: algorithm.name,
+    iv: serializer.bufferToString(ivBuffer),
+    data: serializer.bufferToString(encrypted),
+  };
 };
 
 afterEach(() => {
@@ -135,17 +160,72 @@ describe('encryption plugin fail-closed behavior', () => {
     expect((error as LocalSpaceError).message).toContain('decrypt');
   });
 
-  it('rejects algorithms that cannot satisfy the AES-GCM contract', () => {
-    expect(() =>
+  it('reads AES-CBC legacy payloads but rejects new writes', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const fixtureKey = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(VALID_KEY),
+      { name: 'AES-CBC' },
+      false,
+      ['encrypt']
+    );
+    const iv = Uint8Array.from({ length: 16 }, (_, index) => index + 1);
+    const { secure, raw } = await createMemoryStores(
+      'encryption-legacy-cbc-reader',
       encryptionPlugin({
         key: VALID_KEY,
-        algorithm: { name: 'AES-CBC' } as AesGcmParams,
-      })
-    ).toThrowError(
-      expect.objectContaining<Partial<LocalSpaceError>>({
-        code: 'INVALID_CONFIG',
+        algorithm: { name: 'AES-CBC', iv },
       })
     );
+    await raw.setItem(
+      'legacy',
+      await createLegacyPayload(
+        { name: 'AES-CBC', iv },
+        fixtureKey,
+        {
+          secret: 'legacy-cbc',
+        },
+        iv
+      )
+    );
+
+    await expect(secure.getItem('legacy')).resolves.toEqual({
+      secret: 'legacy-cbc',
+    });
+    await expect(secure.setItem('new', 'plaintext')).rejects.toMatchObject({
+      code: 'UNSUPPORTED_OPERATION',
+    });
+    await expect(raw.getItem('new')).resolves.toBeNull();
+  });
+
+  it('reads AES-CTR legacy payloads with the original counter', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const key = (await crypto.subtle.generateKey(
+      { name: 'AES-CTR', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    )) as CryptoKey;
+    const counter = Uint8Array.from({ length: 16 }, (_, index) => index + 1);
+    const payloadIv = new Uint8Array(12);
+    const algorithm: AesCtrParams = {
+      name: 'AES-CTR',
+      counter,
+      length: 64,
+    };
+    const { secure, raw } = await createMemoryStores(
+      'encryption-legacy-ctr-reader',
+      encryptionPlugin({ key, algorithm })
+    );
+    await raw.setItem(
+      'legacy',
+      await createLegacyPayload(algorithm, key, 'legacy-ctr', payloadIv)
+    );
+
+    await expect(secure.getItem('legacy')).resolves.toBe('legacy-ctr');
+    await expect(
+      secure.setItems([{ key: 'new', value: 'plaintext' }])
+    ).rejects.toMatchObject({ code: 'UNSUPPORTED_OPERATION' });
+    await expect(raw.getItem('new')).resolves.toBeNull();
   });
 
   it('rejects a CryptoKey whose algorithm does not match the plugin', async () => {

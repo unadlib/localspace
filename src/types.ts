@@ -37,7 +37,7 @@ export interface LocalSpaceConfig {
 
   /**
    * Optional max batch size for bulk operations. When set, large batches
-   * will be split into multiple transactions/chunks.
+   * will be split into multiple transactions/chunks. Set to 0 for no split.
    */
   maxBatchSize?: number;
 
@@ -50,13 +50,13 @@ export interface LocalSpaceConfig {
   /**
    * Optional idle timeout (ms) for IndexedDB connections. When set,
    * connections will be closed after a period of inactivity and reopened
-   * automatically on the next operation.
+   * automatically on the next operation. Set to 0 to disable idle closing.
    */
   connectionIdleMs?: number;
 
   /**
    * Optional cap on concurrent transactions. When exceeded, new transactions
-   * are queued until one finishes.
+   * are queued until one finishes. Set to 0 for no limit.
    */
   maxConcurrentTransactions?: number;
 
