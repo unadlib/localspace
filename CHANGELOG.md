@@ -29,10 +29,18 @@
   legacy setter's `storeName` namespace mapping.
 - Rejected operations on closed instances before lazy plugin initialization,
   operation hooks, or transformation bypass checks can run.
+- Waited for in-flight operations before closing or switching drivers so active
+  driver resources are not released early.
 - Preserved zero-valued operational limits as the 2.x disabled/unbounded
   settings while continuing to reject negative or non-integer values.
 - Identified built-in transformation plugins by an internal capability marker
   so same-named custom plugins no longer trigger guards or built-in warnings.
+- Kept TTL, compression, and encryption envelopes internal when `setItems()`
+  returns, while preserving logical-value customization in `afterSetItems`.
+- Serialized overlapping `destroy()` and `close()` plugin teardown so each
+  initialized plugin receives exactly one `onDestroy` call.
+- Attempted cleanup when custom `_initStorage()` throws synchronously and kept
+  that initialization failure even if `_closeStorage()` also throws.
 - Stabilized `LocalSpaceError` classification and retained original driver,
   quota, plugin, and browser errors through `cause` and structured details.
 - Keyed shared IndexedDB contexts by the resolved backend, deduplicated

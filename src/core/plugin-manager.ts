@@ -106,6 +106,11 @@ export class PluginManager {
 
   private readonly destroyed = new WeakSet<LocalSpacePlugin>();
 
+  private readonly destroyPromises = new WeakMap<
+    LocalSpacePlugin,
+    Promise<void>
+  >();
+
   private readonly disabled = new WeakSet<LocalSpacePlugin>();
 
   private orderCounter = 0;
@@ -137,6 +142,12 @@ export class PluginManager {
 
   hasPlugins(): boolean {
     return this.pluginRegistry.length > 0;
+  }
+
+  hasActiveStorageTransforms(): boolean {
+    return this.getActivePlugins().some(
+      (plugin) => getBuiltInStorageTransformKind(plugin) !== null
+    );
   }
 
   assertNoStorageTransformBypass(
@@ -534,25 +545,34 @@ export class PluginManager {
       if (this.destroyed.has(plugin) || this.disabled.has(plugin)) {
         continue;
       }
+      const pendingDestroy = this.destroyPromises.get(plugin);
+      if (pendingDestroy) {
+        await pendingDestroy;
+        continue;
+      }
       if (typeof plugin.onDestroy !== 'function') {
         this.destroyed.add(plugin);
         continue;
       }
       const context = this.createContext(null);
-      try {
-        await plugin.onDestroy(context);
-      } catch (error) {
-        await this.dispatchPluginError(
-          plugin,
-          error,
-          'destroy',
-          'lifecycle',
-          undefined,
-          context
-        );
-      } finally {
-        this.destroyed.add(plugin);
-      }
+      const destroyPromise = Promise.resolve().then(async () => {
+        try {
+          await plugin.onDestroy!(context);
+        } catch (error) {
+          await this.dispatchPluginError(
+            plugin,
+            error,
+            'destroy',
+            'lifecycle',
+            undefined,
+            context
+          );
+        } finally {
+          this.destroyed.add(plugin);
+        }
+      });
+      this.destroyPromises.set(plugin, destroyPromise);
+      await destroyPromise;
     }
   }
 

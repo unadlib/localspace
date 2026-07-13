@@ -522,10 +522,11 @@ store.use([compressionPlugin(), encryptionPlugin({ key: myKey })]);
 ### `close(): Promise<void>`
 
 Closes the instance without deleting stored data. Calls cleanup hooks only for
-plugins that were initialized, releases the active driver connection, and is
-safe to call more than once. A closed instance rejects later storage operations
-with `LocalSpaceError(INSTANCE_CLOSED)` before initializing plugins or invoking
-their operation hooks.
+plugins that were initialized, waits for in-flight storage operations before
+releasing the active driver connection, and is safe to call more than once. A
+closed instance rejects later storage operations with
+`LocalSpaceError(INSTANCE_CLOSED)` before initializing plugins or invoking their
+operation hooks.
 
 ```ts
 await store.close();

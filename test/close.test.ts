@@ -139,6 +139,43 @@ describe('LocalSpace.close', () => {
     expect(onDestroy).toHaveBeenCalledTimes(1);
   });
 
+  it('shares plugin teardown between concurrent destroy and close calls', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let releaseDestroy!: () => void;
+    let markDestroyStarted!: () => void;
+    const destroyGate = new Promise<void>((resolve) => {
+      releaseDestroy = resolve;
+    });
+    const destroyStarted = new Promise<void>((resolve) => {
+      markDestroyStarted = resolve;
+    });
+    const onDestroy = vi.fn(async () => {
+      markDestroyStarted();
+      await destroyGate;
+    });
+    const instance = localspace.createInstance({
+      name: uniqueName('concurrent-plugin-destroy'),
+      plugins: [{ name: 'concurrent-plugin-destroy', onDestroy }],
+    });
+    await instance.setDriver([instance.MEMORY]);
+    await instance.setItem('key', 'value');
+
+    const destroying = instance.destroy();
+    await destroyStarted;
+    let closeSettled = false;
+    const closing = instance.close().then(() => {
+      closeSettled = true;
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(onDestroy).toHaveBeenCalledTimes(1);
+    expect(closeSettled).toBe(false);
+    releaseDestroy();
+
+    await Promise.all([destroying, closing]);
+    expect(onDestroy).toHaveBeenCalledTimes(1);
+  });
+
   it('does not initialize plugins or run hooks after close', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const onInit = vi.fn();
@@ -276,6 +313,122 @@ describe('LocalSpace.close', () => {
     expect(oldDriverClose).toHaveBeenCalledTimes(1);
     expect(newDriverInit).not.toHaveBeenCalled();
     expect(newDriverClose).not.toHaveBeenCalled();
+  });
+
+  it('waits for in-flight operations before closing the active driver', async () => {
+    let releaseWrite!: () => void;
+    let markWriteStarted!: () => void;
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    const writeStarted = new Promise<void>((resolve) => {
+      markWriteStarted = resolve;
+    });
+    const events: string[] = [];
+    const closeStorage = vi.fn(async () => {
+      events.push('driver-closed');
+    });
+    const driver: Driver = {
+      ...createClosableMemoryDriver(
+        uniqueName('close-in-flight-driver'),
+        closeStorage
+      ),
+      setItem: async <T>(_key: string, value: T) => {
+        markWriteStarted();
+        await writeGate;
+        events.push('write-finished');
+        return value;
+      },
+    };
+    const instance = new LocalSpace({
+      name: uniqueName('close-in-flight-operation'),
+    });
+    await instance.defineDriver(driver);
+    await instance.setDriver([driver._driver]);
+    await instance.ready();
+
+    const write = instance.setItem('key', 'value');
+    await writeStarted;
+    const closing = instance.close().then(() => {
+      events.push('close-finished');
+    });
+    await Promise.resolve();
+
+    expect(closeStorage).not.toHaveBeenCalled();
+    releaseWrite();
+
+    await expect(write).resolves.toBe('value');
+    await closing;
+    expect(closeStorage).toHaveBeenCalledTimes(1);
+    expect(events).toEqual([
+      'write-finished',
+      'driver-closed',
+      'close-finished',
+    ]);
+  });
+
+  it('waits for in-flight operations before switching drivers', async () => {
+    let releaseWrite!: () => void;
+    let markWriteStarted!: () => void;
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    const writeStarted = new Promise<void>((resolve) => {
+      markWriteStarted = resolve;
+    });
+    const oldDriverClose = vi.fn(async () => undefined);
+    const oldDriverSet = vi.fn(async function <T>(
+      this: LocalSpace,
+      _key: string,
+      value: T
+    ) {
+      markWriteStarted();
+      await writeGate;
+      await this.ready();
+      return value;
+    });
+    const oldDriver: Driver = {
+      ...createClosableMemoryDriver(
+        uniqueName('switch-in-flight-old'),
+        oldDriverClose
+      ),
+      setItem: oldDriverSet,
+    };
+    const newDriverSet = vi.fn(async <T>(_key: string, value: T) => value);
+    const newDriver: Driver = {
+      ...createClosableMemoryDriver(
+        uniqueName('switch-in-flight-new'),
+        vi.fn(async () => undefined)
+      ),
+      setItem: newDriverSet,
+    };
+    const instance = new LocalSpace({
+      name: uniqueName('switch-in-flight-operation'),
+    });
+    await instance.defineDriver(oldDriver);
+    await instance.defineDriver(newDriver);
+    await instance.setDriver([oldDriver._driver]);
+    await instance.ready();
+
+    const write = instance.setItem('key', 'value');
+    await writeStarted;
+    const switching = instance.setDriver([newDriver._driver]);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const queuedWrite = instance.setItem('queued', 'new-value');
+    await Promise.resolve();
+
+    expect(oldDriverClose).not.toHaveBeenCalled();
+    expect(oldDriverSet).toHaveBeenCalledTimes(1);
+    expect(newDriverSet).not.toHaveBeenCalled();
+    releaseWrite();
+
+    await expect(write).resolves.toBe('value');
+    await switching;
+    await expect(queuedWrite).resolves.toBe('new-value');
+    expect(oldDriverClose).toHaveBeenCalledTimes(1);
+    expect(newDriverSet).toHaveBeenCalledTimes(1);
+    expect(instance.driver()).toBe(newDriver._driver);
+    await instance.close();
   });
 
   it('continues initialized plugin cleanup after a hook failure', async () => {

@@ -1,9 +1,4 @@
-import {
-  describe,
-  it,
-  expect,
-  vi,
-} from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import localspace, {
   LocalSpace,
   ttlPlugin,
@@ -82,9 +77,9 @@ describe('Plugin system', () => {
     });
 
     await store.setItem('ephemeral', 'value');
-    await sleep(40);
-
-    expect(onExpire).toHaveBeenCalledWith('ephemeral', 'value');
+    await vi.waitFor(() =>
+      expect(onExpire).toHaveBeenCalledWith('ephemeral', 'value')
+    );
     const remaining = await store.getItem('ephemeral');
     expect(remaining).toBeNull();
   });
@@ -389,7 +384,6 @@ describe('Plugin system', () => {
     expect(contexts[2].isBatch).toBe(true);
     expect(contexts[2].batchSize).toBe(2);
   });
-
 });
 
 describe('Plugin batch operations', () => {
@@ -400,10 +394,13 @@ describe('Plugin batch operations', () => {
       plugins: [ttlPlugin({ defaultTTL: 60000 })],
     });
 
-    await store.setItems([
+    const items = [
       { key: 'a', value: 'val-a' },
       { key: 'b', value: 'val-b' },
-    ]);
+      { key: 'undefined', value: undefined },
+    ];
+
+    await expect(store.setItems(items)).resolves.toEqual(items);
 
     // Raw reader should see TTL payloads
     const rawReader = localspace.createInstance({
@@ -452,10 +449,12 @@ describe('Plugin batch operations', () => {
       plugins: [encryptionPlugin({ key })],
     });
 
-    await store.setItems([
+    const items = [
       { key: 'secret1', value: { data: 'hidden1' } },
       { key: 'secret2', value: { data: 'hidden2' } },
-    ]);
+    ];
+
+    await expect(store.setItems(items)).resolves.toEqual(items);
 
     // Raw reader should see encrypted payloads
     const rawReader = localspace.createInstance({
@@ -483,10 +482,12 @@ describe('Plugin batch operations', () => {
       plugins: [compressionPlugin({ threshold: 512 })],
     });
 
-    await store.setItems([
+    const items = [
       { key: 'large1', value: largePayload1 },
       { key: 'large2', value: largePayload2 },
-    ]);
+    ];
+
+    await expect(store.setItems(items)).resolves.toEqual(items);
 
     // Raw reader should see compressed payloads
     const rawReader = localspace.createInstance({
@@ -519,7 +520,7 @@ describe('Plugin batch operations', () => {
       { key: 'item2', value: { msg: 'y'.repeat(100) } },
     ];
 
-    await store.setItems(items);
+    await expect(store.setItems(items)).resolves.toEqual(items);
 
     // Raw reader should see encrypted (outermost layer)
     const rawReader = localspace.createInstance({
@@ -533,6 +534,40 @@ describe('Plugin batch operations', () => {
     const result = await store.getItems<{ msg: string }>(['item1', 'item2']);
     expect(result[0].value?.msg).toBe('x'.repeat(100));
     expect(result[1].value?.msg).toBe('y'.repeat(100));
+  });
+
+  it('lets afterSetItems customize logical values with storage transforms', async () => {
+    const afterSetItems = vi.fn(
+      <T>(entries: Array<{ key: string; value: T | null }>) =>
+        entries.map(({ key, value }) => ({
+          key,
+          value: `${String(value)}:confirmed` as unknown as T,
+        }))
+    );
+    const store = localspace.createInstance({
+      name: 'logical-batch-return-db',
+      storeName: 'logical-batch-return-store',
+      plugins: [
+        ttlPlugin({ defaultTTL: 60000 }),
+        { name: 'logical-batch-return', afterSetItems },
+      ],
+    });
+
+    const result = await store.setItems([{ key: 'a', value: 'value' }]);
+
+    expect(afterSetItems.mock.calls[0][0]).toEqual([
+      { key: 'a', value: 'value' },
+    ]);
+    expect(result).toEqual([{ key: 'a', value: 'value:confirmed' }]);
+
+    const rawReader = localspace.createInstance({
+      name: 'logical-batch-return-db',
+      storeName: 'logical-batch-return-store',
+    });
+    await expect(rawReader.getItem('a')).resolves.toMatchObject({
+      __ls_ttl: true,
+      data: 'value',
+    });
   });
 });
 

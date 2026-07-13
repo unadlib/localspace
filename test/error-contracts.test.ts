@@ -65,6 +65,46 @@ describe('stable error contracts', () => {
     });
   });
 
+  it('cleans up synchronous driver initialization failures', async () => {
+    const driverName = `failing-sync-${Math.random().toString(36).slice(2)}`;
+    const initializationError = new Error('synchronous initialization failed');
+    const cleanupError = new Error('cleanup also failed');
+    const closeStorage = vi.fn((): Promise<void> => {
+      throw cleanupError;
+    });
+    const driver: Driver = {
+      ...createFailingDriver(driverName, initializationError),
+      _initStorage: () => {
+        throw initializationError;
+      },
+      _closeStorage: closeStorage,
+    };
+    const instance = new LocalSpace();
+    await instance.defineDriver(driver);
+    await instance.setDriver([driverName]);
+
+    const error = await instance.ready().catch((cause) => cause);
+
+    expect(closeStorage).toHaveBeenCalledTimes(1);
+    expect(error).toMatchObject({
+      code: 'DRIVER_UNAVAILABLE',
+      details: {
+        attemptedDrivers: [driverName],
+        driverErrors: [
+          {
+            driver: driverName,
+            name: 'Error',
+            message: 'synchronous initialization failed',
+          },
+        ],
+      },
+      cause: [initializationError],
+    });
+
+    await instance.close();
+    expect(closeStorage).toHaveBeenCalledTimes(1);
+  });
+
   it('maps IndexedDB quota failures to QUOTA_EXCEEDED with a stable message', async () => {
     const store = localspace.createInstance({
       name: `indexeddb-quota-${Math.random().toString(36).slice(2)}`,
