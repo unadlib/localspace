@@ -477,9 +477,24 @@ store.use(ttlPlugin({ defaultTTL: 60_000 }));
 store.use([compressionPlugin(), encryptionPlugin({ key: myKey })]);
 ```
 
+### `close(): Promise<void>`
+
+Closes the instance without deleting stored data. Calls cleanup hooks only for
+plugins that were initialized, releases the active driver connection, and is
+safe to call more than once. A closed instance rejects later storage operations
+with `LocalSpaceError(INSTANCE_CLOSED)`.
+
+```ts
+await store.close();
+```
+
+Calling `close()` on an unused instance does not initialize its driver or
+plugins. Use `clear()` or `dropInstance()` when data should be deleted.
+
 ### `destroy(): Promise<void>`
 
-Tears down plugins and releases resources.
+Runs the existing plugin teardown lifecycle. It does not replace explicit data
+deletion.
 
 ```ts
 // Always call when disposing an instance with plugins
@@ -524,6 +539,10 @@ interface LocalSpaceConfig {
   pluginErrorPolicy?: 'strict' | 'lenient';
 }
 ```
+
+When the requested Storage Bucket cannot be opened, IndexedDB falls back to
+the default storage backend. Instances that resolve to that same backend share
+one connection context even if one of them originally requested a bucket.
 
 > **Default database name.** When `name`/`storeName` are omitted, localspace
 > uses `'localforage'` / `'keyvaluepairs'`. This lets an app migrating from

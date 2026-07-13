@@ -481,11 +481,27 @@ export class PluginManager {
   }
 
   async destroy(): Promise<void> {
+    await this.destroyPlugins(false);
+  }
+
+  async destroyInitialized(): Promise<void> {
+    await Promise.allSettled(
+      this.pluginRegistry
+        .map(({ plugin }) => this.initPromises.get(plugin))
+        .filter((promise): promise is Promise<void> => !!promise)
+    );
+    await this.destroyPlugins(true);
+  }
+
+  private async destroyPlugins(initializedOnly: boolean): Promise<void> {
     const plugins = this.pluginRegistry
       .map((entry) => entry.plugin)
       .slice()
       .reverse();
     for (const plugin of plugins) {
+      if (initializedOnly && !this.initialized.has(plugin)) {
+        continue;
+      }
       if (this.destroyed.has(plugin) || this.disabled.has(plugin)) {
         continue;
       }

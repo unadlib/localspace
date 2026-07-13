@@ -32,7 +32,7 @@ const store = localspace.createInstance({
 
 - **Registration** – supply `plugins` when calling `createInstance()` or chain `instance.use(plugin)` later. Each plugin can also expose `enabled` (boolean or function) and `priority` to control execution order.
 
-- **Lifecycle events** – `onInit(context)` is invoked after `ready()`, and `onDestroy` lets you tear down timers or channels. Call `await instance.destroy()` when disposing of an instance to run every `onDestroy` hook (executed in reverse priority order). Context exposes the active driver, db info, config, and a shared `metadata` bag for cross-plugin coordination.
+- **Lifecycle events** – `onInit(context)` is invoked after `ready()`, and `onDestroy` lets you tear down timers or channels. Call `await instance.close()` when disposing of an instance: initialized plugins receive one `onDestroy` call in reverse priority order, then the driver connection is released without deleting data. Context exposes the active driver, db info, config, and a shared `metadata` bag for cross-plugin coordination.
 
 - **Interceptors** – hook into `beforeSet/afterSet`, `beforeGet/afterGet`, `beforeRemove/afterRemove`, plus batch-specific methods such as `beforeSetItems` or `beforeGetItems`. Hooks run sequentially: `before*` hooks execute from highest to lowest priority, while `after*` hooks unwind in reverse order so layered transformations (TTL → compression → encryption) remain invertible. Returning a value passes it to the next plugin, while throwing a `LocalSpaceError` aborts the operation.
 

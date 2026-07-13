@@ -19,6 +19,7 @@ import {
   createLocalSpaceError,
   describeError,
   LocalSpaceError,
+  toLocalSpaceError,
 } from './errors.js';
 import serializer from './utils/serializer.js';
 import idbDriver from './drivers/indexeddb.js';
@@ -124,6 +125,7 @@ const DefaultConfig: LocalSpaceConfig = {
 
 type ReadyAwareInstance = {
   ready: () => Promise<void>;
+  _assertOpen: (operation: string) => void;
 } & Record<string, unknown>;
 
 type ReadyWrappedMethod = (...args: unknown[]) => unknown;
@@ -139,6 +141,7 @@ function callWhenReady(
 ): void {
   instance[libraryMethod] = function (...args: unknown[]) {
     return instance.ready().then(() => {
+      instance._assertOpen(libraryMethod);
       const method = instance[libraryMethod] as ReadyWrappedMethod;
       return method.apply(instance, args);
     });
@@ -185,6 +188,10 @@ export class LocalSpace implements LocalSpaceInstance {
   _ready: Promise<void> | null = null;
   _dbInfo: DbInfo | null = null;
   _driver?: string;
+  private _closed = false;
+  private _closePromise: Promise<void> | null = null;
+  private _driverInitialized = false;
+  private _activeDriverClose: (() => Promise<void>) | null = null;
   private _pluginManager: PluginManager;
   private _rawDriverMethods: Partial<
     Record<PluginAwareMethod, (...args: any[]) => Promise<unknown>>
@@ -311,7 +318,55 @@ export class LocalSpace implements LocalSpaceInstance {
     return this;
   }
 
+  close(): Promise<void> {
+    if (this._closePromise) {
+      return this._closePromise;
+    }
+
+    this._closed = true;
+    const initializationInProgress = this._ready;
+
+    this._closePromise = (async () => {
+      let cleanupError: LocalSpaceError | undefined;
+
+      if (initializationInProgress) {
+        await initializationInProgress.catch(() => undefined);
+      }
+
+      try {
+        await this._pluginManager.destroyInitialized();
+      } catch (error) {
+        cleanupError = toLocalSpaceError(
+          error,
+          'OPERATION_FAILED',
+          'Failed to close LocalSpace plugins.',
+          { operation: 'close' }
+        );
+      }
+
+      try {
+        await this._releaseActiveDriver();
+      } catch (error) {
+        cleanupError ??= toLocalSpaceError(
+          error,
+          'OPERATION_FAILED',
+          'Failed to close LocalSpace driver.',
+          { driver: this.driver() ?? undefined, operation: 'close' }
+        );
+      }
+
+      if (cleanupError) {
+        throw cleanupError;
+      }
+    })();
+
+    return this._closePromise;
+  }
+
   async destroy(): Promise<void> {
+    if (this._closed) {
+      return this._closePromise ?? Promise.resolve();
+    }
     await this._pluginManager.ensureInitialized();
     await this._pluginManager.destroy();
   }
@@ -415,6 +470,7 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   async ready(): Promise<void> {
+    this._assertOpen('ready');
     const driverInitialization =
       this._driverSet ?? this._pendingDriverInitialization ?? Promise.resolve();
 
@@ -429,6 +485,7 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   async setDriver(drivers: string | string[]): Promise<void> {
+    this._assertOpen('setDriver');
     // Wait for driver initialization to complete before checking support
     // Skip waiting if this is being called from _runDefaultDriverSelection to avoid deadlock
     if (
@@ -458,11 +515,35 @@ export class LocalSpace implements LocalSpaceInstance {
       return rejection;
     }
 
+    const previousInitialization = this._ready;
+    this._ready = null;
+    const previousDriverRelease = (async () => {
+      if (previousInitialization) {
+        await previousInitialization.catch(() => undefined);
+      }
+      try {
+        await this._releaseActiveDriver();
+      } catch (error) {
+        throw toLocalSpaceError(
+          error,
+          'OPERATION_FAILED',
+          'Failed to release the current LocalSpace driver.',
+          { driver: this.driver() ?? undefined, operation: 'setDriver' }
+        );
+      }
+    })();
+
     const setDriverToConfig = () => {
       this._config.driver = this.driver() ?? undefined;
     };
 
     const extendSelfWithDriver = async (driver: Driver) => {
+      const closeStorage =
+        typeof driver._closeStorage === 'function'
+          ? () => driver._closeStorage!.call(this)
+          : null;
+      this._activeDriverClose = closeStorage;
+      this._driverInitialized = false;
       this._extend(driver);
       this._driver = driver._driver;
       setDriverToConfig();
@@ -474,8 +555,19 @@ export class LocalSpace implements LocalSpaceInstance {
           ? initStorage.call(this, this._config)
           : Promise.resolve();
 
-      await this._ready;
-      return this._ready;
+      try {
+        await this._ready;
+        this._driverInitialized = true;
+        return this._ready;
+      } catch (error) {
+        if (closeStorage) {
+          await closeStorage().catch(() => undefined);
+        }
+        this._activeDriverClose = null;
+        this._driverInitialized = false;
+        this._dbInfo = null;
+        throw error;
+      }
     };
 
     const initDriver = (supportedDrivers: string[]) => {
@@ -497,6 +589,9 @@ export class LocalSpace implements LocalSpaceInstance {
               return;
             } catch (error) {
               failures.push({ driver: driverName, error });
+              if (this._closed) {
+                throw this._closedError('ready');
+              }
             }
           }
 
@@ -517,7 +612,7 @@ export class LocalSpace implements LocalSpaceInstance {
         ? this._driverSet.catch(() => Promise.resolve())
         : Promise.resolve();
 
-    this._driverSet = oldDriverSetDone
+    this._driverSet = Promise.all([oldDriverSetDone, previousDriverRelease])
       .then(async () => {
         const driverName = supportedDrivers[0];
         this._dbInfo = null;
@@ -526,11 +621,16 @@ export class LocalSpace implements LocalSpaceInstance {
         const driver = await this.getDriver(driverName);
         this._driver = driver._driver;
         setDriverToConfig();
-        this._wrapLibraryMethodsWithReady();
         this._initDriver = initDriver(supportedDrivers);
       })
       .catch((cause) => {
         setDriverToConfig();
+        if (
+          cause instanceof LocalSpaceError &&
+          cause.details?.operation === 'setDriver'
+        ) {
+          throw cause;
+        }
         const error = createDriverUnavailableError(supportedDrivers, [
           {
             driver: supportedDrivers[0] ?? 'unknown',
@@ -539,6 +639,8 @@ export class LocalSpace implements LocalSpaceInstance {
         ]);
         throw error;
       });
+
+    this._wrapLibraryMethodsWithReady();
 
     return this._driverSet;
   }
@@ -551,11 +653,28 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   _extend(libraryMethodsAndProperties: Partial<Driver>): void {
-    extend(
-      this as unknown as Record<string, unknown>,
-      libraryMethodsAndProperties as unknown as Partial<Record<string, unknown>>
-    );
-    this._capturePluginAwareMethods(libraryMethodsAndProperties);
+    const source = libraryMethodsAndProperties as Partial<
+      Record<string, unknown>
+    >;
+    const guarded = { ...source };
+
+    for (const method of new Set(LibraryMethods)) {
+      const candidate = source[method];
+      if (typeof candidate !== 'function') {
+        continue;
+      }
+      guarded[method] = (...args: unknown[]) => {
+        try {
+          this._assertOpen(method);
+          return Promise.resolve(candidate.apply(this, args));
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      };
+    }
+
+    extend(this as unknown as Record<string, unknown>, guarded);
+    this._capturePluginAwareMethods(guarded as Partial<Driver>);
   }
 
   private _capturePluginAwareMethods(source: Partial<Driver>): void {
@@ -926,6 +1045,36 @@ export class LocalSpace implements LocalSpaceInstance {
       'Driver not initialized',
       { operation }
     );
+  }
+
+  private async _releaseActiveDriver(): Promise<void> {
+    const closeStorage = this._driverInitialized
+      ? this._activeDriverClose
+      : null;
+    this._activeDriverClose = null;
+    this._driverInitialized = false;
+
+    try {
+      if (closeStorage) {
+        await closeStorage();
+      }
+    } finally {
+      this._dbInfo = null;
+    }
+  }
+
+  private _closedError(operation: string): LocalSpaceError {
+    return createLocalSpaceError(
+      'INSTANCE_CLOSED',
+      'LocalSpace instance is closed.',
+      { operation }
+    );
+  }
+
+  _assertOpen(operation: string): void {
+    if (this._closed) {
+      throw this._closedError(operation);
+    }
   }
 
   // Driver methods (will be replaced by actual driver implementations)

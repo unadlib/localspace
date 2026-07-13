@@ -138,6 +138,12 @@ export interface Driver {
   _initStorage(config: LocalSpaceConfig): Promise<void>;
 
   /**
+   * Release resources owned by the current driver instance without deleting
+   * persisted data.
+   */
+  _closeStorage?(): Promise<void>;
+
+  /**
    * Check if driver is supported (can be boolean or function)
    */
   _support?: boolean | (() => boolean | Promise<boolean>);
@@ -246,6 +252,7 @@ export interface DbInfo extends LocalSpaceConfig {
   serializer?: Serializer;
   keyPrefix?: string;
   idbFactory?: IDBFactory | null;
+  idbContextId?: string;
 }
 
 /**
@@ -284,6 +291,11 @@ export interface LocalSpaceInstance {
    * Register one or more plugins on this instance.
    */
   use(plugin: LocalSpacePlugin | LocalSpacePlugin[]): LocalSpaceInstance;
+
+  /**
+   * Close this instance without deleting persisted data.
+   */
+  close(): Promise<void>;
 
   /**
    * Tear down plugins and release their resources.

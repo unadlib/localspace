@@ -96,6 +96,82 @@ test.describe('localspace browser interoperability', () => {
     expect(result.storedValue).toBe('original');
   });
 
+  test('close releases an IndexedDB instance without deleting its data', async ({
+    page,
+  }) => {
+    await ensureFixtureReady(page);
+
+    const result = await page.evaluate(async (storeName) => {
+      const localspace = (window as any).localspace;
+      const instance = localspace.createInstance({
+        name: 'playwright-suite',
+        storeName,
+        prewarmTransactions: false,
+      });
+      await instance.setDriver([instance.INDEXEDDB]);
+      await instance.setItem('persisted', 'value');
+      await instance.close();
+      await instance.close();
+
+      let closedCode = '';
+      try {
+        await instance.getItem('persisted');
+      } catch (error) {
+        closedCode = (error as { code?: string }).code ?? '';
+      }
+
+      const observer = localspace.createInstance({
+        name: 'playwright-suite',
+        storeName,
+        prewarmTransactions: false,
+      });
+      await observer.setDriver([observer.INDEXEDDB]);
+      const persisted = await observer.getItem('persisted');
+      await observer.dropInstance();
+
+      return { closedCode, persisted };
+    }, randomStoreName('close-retains-data'));
+
+    expect(result.closedCode).toBe('INSTANCE_CLOSED');
+    expect(result.persisted).toBe('value');
+  });
+
+  test('closing one instance keeps a shared IndexedDB context usable', async ({
+    page,
+  }) => {
+    await ensureFixtureReady(page);
+
+    const result = await page.evaluate(async (storeName) => {
+      const localspace = (window as any).localspace;
+      const options = {
+        name: 'playwright-suite',
+        storeName,
+        prewarmTransactions: false,
+      };
+      const first = localspace.createInstance(options);
+      const second = localspace.createInstance(options);
+      await first.setDriver([first.INDEXEDDB]);
+      await second.setDriver([second.INDEXEDDB]);
+      await first.ready();
+      await second.ready();
+      await first.setItem('shared', 'before-close');
+
+      await first.close();
+      const afterFirstClose = await second.getItem('shared');
+      await second.setItem('shared', 'after-close');
+      await second.close();
+
+      const cleanup = localspace.createInstance(options);
+      await cleanup.setDriver([cleanup.INDEXEDDB]);
+      const finalValue = await cleanup.getItem('shared');
+      await cleanup.dropInstance();
+      return { afterFirstClose, finalValue };
+    }, randomStoreName('shared-close-context'));
+
+    expect(result.afterFirstClose).toBe('before-close');
+    expect(result.finalValue).toBe('after-close');
+  });
+
   test('clear() resets length and keys', async ({ page }) => {
     await ensureFixtureReady(page);
 

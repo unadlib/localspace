@@ -217,9 +217,14 @@ function isIndexedDBValid(): boolean | Promise<boolean> {
   }
 }
 
-async function resolveIdbFactory(
+type ResolvedIdbBackend = {
+  factory: IDBFactory;
+  contextId: string;
+};
+
+async function resolveIdbBackend(
   config: LocalSpaceConfig
-): Promise<IDBFactory | null> {
+): Promise<ResolvedIdbBackend | null> {
   if (config.bucket?.name) {
     const nav =
       typeof navigator !== 'undefined' ? (navigator as Navigator) : undefined;
@@ -231,7 +236,12 @@ async function resolveIdbFactory(
           durability: config.bucket.durability,
           persisted: config.bucket.persisted,
         });
-        return bucket.indexedDB ?? null;
+        if (bucket.indexedDB) {
+          return {
+            factory: bucket.indexedDB,
+            contextId: `bucket:${config.bucket.name}`,
+          };
+        }
       } catch (error) {
         console.warn(
           `Failed to open storage bucket "${config.bucket.name}", falling back to default bucket.`,
@@ -241,7 +251,8 @@ async function resolveIdbFactory(
     }
   }
 
-  return getDefaultIDB();
+  const factory = getDefaultIDB();
+  return factory ? { factory, contextId: 'default' } : null;
 }
 
 function checkBlobSupport(db: IDBDatabase): Promise<boolean> {
@@ -408,7 +419,10 @@ function requireStoreName(dbInfo: DbInfo): string {
 
 function getDbContextKey(dbInfo: DbInfo): string {
   const dbName = requireDbName(dbInfo);
-  return dbInfo.bucket?.name ? `${dbInfo.bucket.name}::${dbName}` : dbName;
+  const contextId =
+    dbInfo.idbContextId ??
+    (dbInfo.bucket?.name ? `bucket:${dbInfo.bucket.name}` : 'default');
+  return `${contextId}::${dbName}`;
 }
 
 function getDbContext(dbInfo: DbInfo): DbContext | undefined {
@@ -419,6 +433,39 @@ function ensureDbContext(dbInfo: DbInfo): DbContext {
   const key = getDbContextKey(dbInfo);
   dbContexts[key] = dbContexts[key] || createDbContext();
   return dbContexts[key];
+}
+
+function disposeDbContextIfUnused(
+  dbInfo: DbInfo,
+  dbContext: DbContext
+): boolean {
+  if (
+    dbContext.forages.length > 0 ||
+    dbContext.activeTransactions > 0 ||
+    dbContext.pendingTransactions.length > 0 ||
+    dbContext.deferredOperations.length > 0 ||
+    dbContext.prewarmPromise
+  ) {
+    return false;
+  }
+
+  if (dbContext.idleTimer) {
+    clearTimeout(dbContext.idleTimer);
+    dbContext.idleTimer = null;
+  }
+  try {
+    dbContext.db?.close();
+  } catch {
+    // The registry can still be released after a best-effort close.
+  }
+  dbContext.db = null;
+  dbContext.prewarmed = false;
+
+  const contextKey = getDbContextKey(dbInfo);
+  if (dbContexts[contextKey] === dbContext) {
+    delete dbContexts[contextKey];
+  }
+  return true;
 }
 
 function deferReadiness(dbInfo: DbInfo): void {
@@ -704,13 +751,15 @@ function createTransaction(
     }
 
     const maxTx = dbInfo.maxConcurrentTransactions;
-    const processPending = () => {
+    const processPending = (): boolean => {
       if (dbContext.pendingTransactions.length > 0) {
         const next = dbContext.pendingTransactions.shift();
         if (next) {
           setTimeout(next, 0);
+          return true;
         }
       }
+      return false;
     };
 
     const start = () => {
@@ -732,8 +781,13 @@ function createTransaction(
             0,
             dbContext.activeTransactions - 1
           );
-          scheduleIdleClose(dbInfo);
-          processPending();
+          const scheduledPendingTransaction = processPending();
+          if (
+            scheduledPendingTransaction ||
+            !disposeDbContextIfUnused(dbInfo, dbContext)
+          ) {
+            scheduleIdleClose(dbInfo);
+          }
         };
 
         tx.addEventListener('complete', finalize);
@@ -806,20 +860,25 @@ async function _initStorage(
     });
   }
 
-  dbInfo.idbFactory = await resolveIdbFactory(config);
-  if (!dbInfo.idbFactory) {
+  const backend = await resolveIdbBackend(config);
+  if (!backend) {
     throw createLocalSpaceError(
       'DRIVER_UNAVAILABLE',
       'IndexedDB not available',
       { driver: DRIVER_NAME }
     );
   }
+  dbInfo.idbFactory = backend.factory;
+  dbInfo.idbContextId = backend.contextId;
 
   // Validates that a database name is configured (throws otherwise).
   requireDbName(dbInfo);
+  self._dbInfo = dbInfo;
   const dbContext = ensureDbContext(dbInfo);
 
-  dbContext.forages.push(self);
+  if (!dbContext.forages.includes(self)) {
+    dbContext.forages.push(self);
+  }
 
   if (!self._initReady) {
     self._initReady = self.ready;
@@ -855,8 +914,6 @@ async function _initStorage(
     dbInfo.db = dbContext.db = db;
   }
 
-  self._dbInfo = dbInfo;
-
   for (const forage of forages) {
     if (forage !== self) {
       forage._dbInfo.db = dbInfo.db;
@@ -868,6 +925,48 @@ async function _initStorage(
   const prewarm = maybePrewarmTransaction(dbInfo, dbContext);
   if (prewarm) {
     prewarm.catch(() => undefined);
+  }
+}
+
+async function _closeStorage(this: IndexedDBDriverContext): Promise<void> {
+  const self = this;
+  const dbInfo = self._dbInfo;
+  if (!dbInfo) {
+    return;
+  }
+
+  const contextKey = getDbContextKey(dbInfo);
+  const dbContext = dbContexts[contextKey];
+  if (!dbContext) {
+    dbInfo.db = null;
+    return;
+  }
+
+  for (let index = dbContext.forages.length - 1; index >= 0; index--) {
+    if (dbContext.forages[index] === self) {
+      dbContext.forages.splice(index, 1);
+    }
+  }
+  dbInfo.db = null;
+
+  if (dbContext.forages.length > 0) {
+    return;
+  }
+
+  if (dbContext.idleTimer) {
+    clearTimeout(dbContext.idleTimer);
+    dbContext.idleTimer = null;
+  }
+  if (dbContext.prewarmPromise) {
+    await dbContext.prewarmPromise.catch(() => undefined);
+  }
+
+  try {
+    dbContext.db?.close();
+  } finally {
+    dbContext.db = null;
+    dbContext.prewarmed = false;
+    disposeDbContextIfUnused(dbInfo, dbContext);
   }
 }
 
@@ -1885,6 +1984,7 @@ function dropInstance(
   const dropDbInfo: DbInfo = {
     ...(effectiveOptions as DbInfo),
     idbFactory: currentDbInfo?.idbFactory ?? undefined,
+    idbContextId: currentDbInfo?.idbContextId,
   };
   if (!dropDbInfo.bucket && currentConfig.bucket) {
     dropDbInfo.bucket = currentConfig.bucket;
@@ -2046,7 +2146,7 @@ function dropInstance(
         })
         .catch((err) => {
           if (dbContext) {
-            rejectReadiness(effectiveOptions as DbInfo, err);
+            rejectReadiness(dropDbInfo, err);
           }
           throw err;
         });
@@ -2064,6 +2164,7 @@ function dropInstance(
 const asyncStorage: Driver = {
   _driver: 'asyncStorage',
   _initStorage,
+  _closeStorage,
   _support: isIndexedDBValid,
   iterate,
   getItem,
