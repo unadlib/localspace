@@ -69,6 +69,8 @@ const PluginAwareMethods = [
   'setItems',
   'getItems',
   'removeItems',
+  'iterate',
+  'runTransaction',
 ] as const;
 
 type PluginAwareMethod = (typeof PluginAwareMethods)[number];
@@ -585,6 +587,11 @@ export class LocalSpace implements LocalSpaceInstance {
           (this as unknown as Record<string, unknown>)[method] =
             this._createRemoveItemsWrapper(original);
           break;
+        case 'iterate':
+        case 'runTransaction':
+          (this as unknown as Record<string, unknown>)[method] =
+            this._createStorageTransformGuard(original, method);
+          break;
         default:
           (this as unknown as Record<string, unknown>)[method] = original;
       }
@@ -811,6 +818,16 @@ export class LocalSpace implements LocalSpaceInstance {
         await this._pluginManager.afterRemove(entry.key, entry.context);
       }
     }) as typeof this.removeItems;
+  }
+
+  private _createStorageTransformGuard(
+    original: RawDriverMethod,
+    operation: 'iterate' | 'runTransaction'
+  ): RawDriverMethod {
+    return async (...args: unknown[]) => {
+      this._pluginManager.assertNoStorageTransformBypass(operation);
+      return original(...args);
+    };
   }
 
   _getSupportedDrivers(drivers: string[]): string[] {

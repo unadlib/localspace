@@ -81,6 +81,11 @@ console.log('Keys:', allKeys);
 
 Iterates over all items. Return a non-undefined value to stop early.
 
+When the built-in encryption, compression, or TTL plugin is active, LocalSpace
+2.1 rejects `iterate()` with `UNSUPPORTED_OPERATION` before invoking the
+iterator. Use `keys()` plus `getItems()` when logical, plugin-processed values
+are required.
+
 ```ts
 // Process all items
 await localspace.iterate<User, void>((value, key, index) => {
@@ -177,6 +182,11 @@ IndexedDB provides native atomic transactions. The memory driver provides
 snapshot rollback semantics. localStorage and React Native AsyncStorage reject
 this method with `UNSUPPORTED_OPERATION` because they cannot provide a real
 transaction.
+
+When the built-in encryption, compression, or TTL plugin is active, LocalSpace
+2.1 rejects `runTransaction()` with `UNSUPPORTED_OPERATION` before creating a
+driver transaction or invoking the runner. This prevents transaction writes
+from bypassing the configured storage transformation.
 
 ```ts
 // Atomic counter increment on IndexedDB

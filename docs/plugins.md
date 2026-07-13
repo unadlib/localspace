@@ -105,6 +105,12 @@ await cacheStore.setItems([
 
 Encrypts serialized payloads using the Web Crypto API (AES-GCM by default) and decrypts transparently on reads.
 
+In LocalSpace 2.1, built-in storage transformations cover single and batch item
+operations. `iterate()` and `runTransaction()` reject before invoking the
+driver when encryption, compression, or TTL is active; use `keys()` with
+`getItems()` for processed iteration. Plugin-aware transaction scopes are
+planned for 3.0.
+
 **Options:**
 
 - Provide a `key` (CryptoKey/ArrayBuffer/string) or `keyDerivation` block (PBKDF2)

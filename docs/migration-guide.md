@@ -86,6 +86,11 @@ after a failed readwrite transaction, but it is runtime-only and does not
 isolate concurrent callers. localStorage and React Native AsyncStorage reject
 `runTransaction()` with `UNSUPPORTED_OPERATION`.
 
+LocalSpace 2.1 also rejects `runTransaction()` and `iterate()` while a built-in
+encryption, compression, or TTL plugin is active. Earlier 2.x releases exposed
+raw plugin envelopes or allowed transaction writes to bypass transformations.
+Use item/batch APIs until plugin-aware transaction scopes are available.
+
 ```ts
 if (store.driver() === store.INDEXEDDB || store.driver() === store.MEMORY) {
   await store.runTransaction('readwrite', async (tx) => {

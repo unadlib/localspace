@@ -10,7 +10,7 @@ import type {
   PluginOperation,
   PluginStage,
 } from '../types.js';
-import { LocalSpaceError } from '../errors.js';
+import { createLocalSpaceError, LocalSpaceError } from '../errors.js';
 import { normalizeBatchEntries } from '../utils/helpers.js';
 
 export class PluginAbortError extends Error {
@@ -31,6 +31,11 @@ type RegisteredPlugin = {
 };
 
 const sharedMetadataFor = (): Record<string, unknown> => Object.create(null);
+const BUILT_IN_STORAGE_TRANSFORM_PLUGINS = new Set([
+  'encryption',
+  'compression',
+  'ttl',
+]);
 
 /**
  * Plugin combination warnings to help users avoid problematic configurations.
@@ -116,6 +121,32 @@ export class PluginManager {
 
   hasPlugins(): boolean {
     return this.pluginRegistry.length > 0;
+  }
+
+  assertNoStorageTransformBypass(
+    operation: 'iterate' | 'runTransaction'
+  ): void {
+    const pluginNames = [
+      ...new Set(
+        this.getActivePlugins()
+          .map((plugin) => plugin.name)
+          .filter((name) => BUILT_IN_STORAGE_TRANSFORM_PLUGINS.has(name))
+      ),
+    ];
+
+    if (pluginNames.length === 0) {
+      return;
+    }
+
+    throw createLocalSpaceError(
+      'UNSUPPORTED_OPERATION',
+      `${operation} cannot bypass active storage transformation plugins.`,
+      {
+        operation,
+        plugins: pluginNames,
+        reason: 'storage-transform-plugin-bypass',
+      }
+    );
   }
 
   registerPlugins(plugins: LocalSpacePlugin[]): void {
