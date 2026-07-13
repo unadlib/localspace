@@ -389,6 +389,10 @@ await localspace.setDriver([
 page lifetime, supports the full storage API, and loses data on reload. It is
 opt-in and is not included in the default driver order.
 
+Call `setDriver()` only while the instance is idle. While a storage operation
+is active it rejects with `LocalSpaceError(OPERATION_FAILED)` and
+`details.reason === 'active-operations'`; await the operation and retry.
+
 ### `supports(driverName: string): boolean`
 
 Checks if a driver is supported.
@@ -522,9 +526,9 @@ store.use([compressionPlugin(), encryptionPlugin({ key: myKey })]);
 ### `close(): Promise<void>`
 
 Closes the instance without deleting stored data. Calls cleanup hooks only for
-plugins that were initialized, waits for in-flight storage operations before
-releasing the active driver connection, and is safe to call more than once. A
-closed instance rejects later storage operations with
+plugins that were initialized, releases the active driver connection, and is
+safe to call more than once. A closed instance rejects later storage operations
+with
 `LocalSpaceError(INSTANCE_CLOSED)` before initializing plugins or invoking their
 operation hooks.
 
@@ -534,6 +538,11 @@ await store.close();
 
 Calling `close()` on an unused instance does not initialize its driver or
 plugins. Use `clear()` or `dropInstance()` when data should be deleted.
+Call it only while the instance is idle. While a storage operation is active it
+rejects with `LocalSpaceError(OPERATION_FAILED)` and
+`details.reason === 'active-operations'`; await the operation and retry. The
+same rule prevents hooks, transaction runners, and custom drivers from awaiting
+a lifecycle transition that is waiting for their own operation.
 
 ### `destroy(): Promise<void>`
 

@@ -40,7 +40,7 @@ const store = localspace.createInstance({
 
 - **Batch vs single hooks (deprecated combination)** – a 2.x batch call such as `setItems()` invokes **both** the batch hook (`beforeSetItems`) **and** the per-entry single hook (`beforeSet`, once per entry). On the per-entry single hook, `context.operationState.isBatch` is `true`. Defining both matching forms in a custom plugin is deprecated in 2.1; new plugins should define one form per phase. Existing plugins must keep the `if (context.operationState.isBatch) return value;` guard until migrated. The built-in TTL, encryption, and compression plugins retain this internal compatibility pattern through 2.x.
 
-- **Batch write return values** – `setItems()` and `afterSetItems` use caller-facing logical values when a built-in TTL, compression, or encryption transform is active. Their storage envelopes remain internal to the driver path; an `afterSetItems` hook may still explicitly customize the returned entries.
+- **Batch write return values** – `setItems()` and `afterSetItems` use caller-facing logical values when a built-in TTL, compression, or encryption transform is active. Their storage envelopes remain internal to the driver path. Entry lineage is tracked by key and occurrence across `beforeSetItems`, so custom hooks may add, reorder, or replace entries without borrowing another key's logical value; an `afterSetItems` hook may still explicitly customize the returned entries.
 
 - **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (validation failures, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'lenient'` reports and continues. The built-in encryption plugin always fails closed, including with the lenient policy; use `strict` for compression, TTL, or any correctness-critical custom plugin.
 
@@ -144,6 +144,9 @@ the built-in factories; custom plugins may use the names `encryption`,
 **Options:**
 
 - Provide a `key` (CryptoKey/ArrayBuffer/string) or `keyDerivation` block (PBKDF2)
+- A supplied `CryptoKey` is checked per operation: encrypted reads require its
+  `decrypt` usage, while new AES-GCM writes require `encrypt`. This allows a
+  decrypt-only key to serve a read-only migration path without weakening writes.
 - Customize AES-GCM parameters, `ivLength`, `ivGenerator`, or `randomSource`.
   AES-CBC and AES-CTR are deprecated read-only migration modes in 2.1: they
   decrypt matching 2.0 payloads but reject every new write. AES-CTR readers

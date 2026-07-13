@@ -183,6 +183,11 @@ await cache.close();
 driver connection; later operations reject with `INSTANCE_CLOSED`. Use
 `clear()` or `dropInstance()` only when stored data should be removed.
 `destroy()` is deprecated and retains its legacy plugin-only behavior in 2.x.
+Call `close()` and `setDriver()` only while the instance is idle. If a storage
+operation is active, they reject with `OPERATION_FAILED` and
+`details.reason === 'active-operations'`; await the operation and retry. This
+also prevents lifecycle calls made inside hooks, transaction runners, or custom
+drivers from waiting on themselves.
 
 ### React Native AsyncStorage
 

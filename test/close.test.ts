@@ -7,7 +7,6 @@ import localspace, {
   type Driver,
   type LocalSpacePlugin,
 } from '../src';
-import { LocalSpaceError } from '../src/errors';
 
 const uniqueName = (prefix: string) =>
   `${prefix}-${Math.random().toString(36).slice(2)}`;
@@ -101,7 +100,7 @@ describe('LocalSpace.close', () => {
     await observer.dropInstance();
   });
 
-  it('waits for in-flight plugin initialization before cleaning it', async () => {
+  it('rejects close while plugin initialization is in flight', async () => {
     let releaseInitialization!: () => void;
     let markInitializationStarted!: () => void;
     const initializationGate = new Promise<void>((resolve) => {
@@ -131,11 +130,16 @@ describe('LocalSpace.close', () => {
     const operation = instance.setItem('key', 'value');
     await initializationStarted;
     const closing = instance.close();
+
+    await expect(closing).rejects.toMatchObject({
+      code: 'OPERATION_FAILED',
+      details: { operation: 'close', reason: 'active-operations' },
+    });
     releaseInitialization();
 
-    await expect(operation).rejects.toBeInstanceOf(LocalSpaceError);
-    await closing;
-    expect(beforeSet).not.toHaveBeenCalled();
+    await expect(operation).resolves.toBe('value');
+    expect(beforeSet).toHaveBeenCalledTimes(1);
+    await instance.close();
     expect(onDestroy).toHaveBeenCalledTimes(1);
   });
 
@@ -289,7 +293,27 @@ describe('LocalSpace.close', () => {
 
     const switching = instance.setDriver([newDriver._driver]);
     await oldDriverCloseStarted;
+    const activeOperations = (
+      instance as unknown as {
+        _activeOperations: Set<Promise<unknown>>;
+      }
+    )._activeOperations;
+    const activeMarker = Promise.resolve();
+    activeOperations.add(activeMarker);
     const inFlightReady = instance.ready();
+    let readyState: 'pending' | 'resolved' | 'rejected' = 'pending';
+    void inFlightReady.then(
+      () => {
+        readyState = 'resolved';
+      },
+      () => {
+        readyState = 'rejected';
+      }
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(readyState).toBe('pending');
+    activeOperations.delete(activeMarker);
+
     const closing = instance.close();
 
     let closeSettled = false;
@@ -315,7 +339,7 @@ describe('LocalSpace.close', () => {
     expect(newDriverClose).not.toHaveBeenCalled();
   });
 
-  it('waits for in-flight operations before closing the active driver', async () => {
+  it('rejects close until the active operation settles', async () => {
     let releaseWrite!: () => void;
     let markWriteStarted!: () => void;
     const writeGate = new Promise<void>((resolve) => {
@@ -349,16 +373,17 @@ describe('LocalSpace.close', () => {
 
     const write = instance.setItem('key', 'value');
     await writeStarted;
-    const closing = instance.close().then(() => {
-      events.push('close-finished');
+    await expect(instance.close()).rejects.toMatchObject({
+      code: 'OPERATION_FAILED',
+      details: { operation: 'close', reason: 'active-operations' },
     });
-    await Promise.resolve();
 
     expect(closeStorage).not.toHaveBeenCalled();
     releaseWrite();
 
     await expect(write).resolves.toBe('value');
-    await closing;
+    await instance.close();
+    events.push('close-finished');
     expect(closeStorage).toHaveBeenCalledTimes(1);
     expect(events).toEqual([
       'write-finished',
@@ -367,7 +392,7 @@ describe('LocalSpace.close', () => {
     ]);
   });
 
-  it('waits for in-flight operations before switching drivers', async () => {
+  it('rejects driver switches until the active operation settles', async () => {
     let releaseWrite!: () => void;
     let markWriteStarted!: () => void;
     const writeGate = new Promise<void>((resolve) => {
@@ -412,10 +437,12 @@ describe('LocalSpace.close', () => {
 
     const write = instance.setItem('key', 'value');
     await writeStarted;
-    const switching = instance.setDriver([newDriver._driver]);
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    const queuedWrite = instance.setItem('queued', 'new-value');
-    await Promise.resolve();
+    await expect(instance.setDriver([newDriver._driver])).rejects.toMatchObject(
+      {
+        code: 'OPERATION_FAILED',
+        details: { operation: 'setDriver', reason: 'active-operations' },
+      }
+    );
 
     expect(oldDriverClose).not.toHaveBeenCalled();
     expect(oldDriverSet).toHaveBeenCalledTimes(1);
@@ -423,11 +450,80 @@ describe('LocalSpace.close', () => {
     releaseWrite();
 
     await expect(write).resolves.toBe('value');
-    await switching;
-    await expect(queuedWrite).resolves.toBe('new-value');
+    await instance.setDriver([newDriver._driver]);
+    await expect(instance.setItem('queued', 'new-value')).resolves.toBe(
+      'new-value'
+    );
     expect(oldDriverClose).toHaveBeenCalledTimes(1);
     expect(newDriverSet).toHaveBeenCalledTimes(1);
     expect(instance.driver()).toBe(newDriver._driver);
+    await instance.close();
+  });
+
+  it('fails fast when a plugin hook tries to close its own operation', async () => {
+    const instance = localspace.createInstance({
+      name: uniqueName('hook-reentrant-close'),
+      plugins: [
+        {
+          name: 'hook-reentrant-close',
+          beforeSet: async (_key, value, context) => {
+            await context.instance.close();
+            return value;
+          },
+        },
+      ],
+    });
+    await instance.setDriver([instance.MEMORY]);
+
+    await expect(instance.setItem('key', 'value')).rejects.toMatchObject({
+      code: 'OPERATION_FAILED',
+      details: { operation: 'close', reason: 'active-operations' },
+    });
+
+    await instance.close();
+  });
+
+  it('fails fast when a transaction runner tries to switch drivers', async () => {
+    const instance = localspace.createInstance({
+      name: uniqueName('transaction-reentrant-switch'),
+    });
+    await instance.setDriver([instance.MEMORY]);
+
+    await expect(
+      instance.runTransaction('readonly', async () => {
+        await instance.setDriver([instance.MEMORY]);
+      })
+    ).rejects.toMatchObject({
+      code: 'OPERATION_FAILED',
+      details: { reason: 'active-operations' },
+    });
+
+    await instance.close();
+  });
+
+  it('fails fast when a custom driver tries to close its own operation', async () => {
+    const driver: Driver = {
+      ...createClosableMemoryDriver(
+        uniqueName('driver-reentrant-close'),
+        vi.fn(async () => undefined)
+      ),
+      setItem: async function <T>(this: LocalSpace, _key: string, value: T) {
+        await this.close();
+        return value;
+      },
+    };
+    const instance = new LocalSpace({
+      name: uniqueName('driver-reentrant-close-operation'),
+    });
+    await instance.defineDriver(driver);
+    await instance.setDriver([driver._driver]);
+    await instance.ready();
+
+    await expect(instance.setItem('key', 'value')).rejects.toMatchObject({
+      code: 'OPERATION_FAILED',
+      details: { operation: 'close', reason: 'active-operations' },
+    });
+
     await instance.close();
   });
 

@@ -569,6 +569,56 @@ describe('Plugin batch operations', () => {
       data: 'value',
     });
   });
+
+  it('tracks logical values when a batch hook adds and reorders entries', async () => {
+    const afterSetItems = vi.fn(
+      <T>(entries: Array<{ key: string; value: T | null }>) => entries
+    );
+    const reshapeBatch: LocalSpacePlugin = {
+      name: 'reshape-logical-batch',
+      priority: 20,
+      beforeSetItems: <T>() =>
+        [
+          { key: 'b', value: 20 },
+          { key: 'added', value: 9 },
+          { key: 'a', value: 1 },
+        ] as unknown as Array<{ key: string; value: T }>,
+      afterSetItems,
+    };
+    const store = localspace.createInstance({
+      name: 'reshaped-logical-batch-db',
+      storeName: 'reshaped-logical-batch-store',
+      plugins: [reshapeBatch, ttlPlugin({ defaultTTL: 60000 })],
+    });
+
+    const result = await store.setItems([
+      { key: 'a', value: 1 },
+      { key: 'b', value: 2 },
+    ]);
+    const expected = [
+      { key: 'b', value: 20 },
+      { key: 'added', value: 9 },
+      { key: 'a', value: 1 },
+    ];
+
+    expect(afterSetItems).toHaveBeenCalledWith(
+      expected,
+      expect.objectContaining({ operation: 'setItems' })
+    );
+    expect(result).toEqual(expected);
+    await expect(store.getItems<number>(['b', 'added', 'a'])).resolves.toEqual(
+      expected
+    );
+
+    const rawReader = localspace.createInstance({
+      name: 'reshaped-logical-batch-db',
+      storeName: 'reshaped-logical-batch-store',
+    });
+    await expect(rawReader.getItem('added')).resolves.toMatchObject({
+      __ls_ttl: true,
+      data: 9,
+    });
+  });
 });
 
 describe('Plugin edge cases and combinations', () => {

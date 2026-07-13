@@ -19,6 +19,8 @@
   Web Crypto failures, and malformed or unknown-version encrypted payloads.
 - Kept AES-CBC/AES-CTR legacy payloads available through read-only migration
   configurations while rejecting every new write with those algorithms.
+- Restored read-only AES-GCM `CryptoKey` compatibility by requiring `decrypt`
+  for reads and independently requiring `encrypt` for every new write.
 - Prevented built-in transformation plugins from being silently bypassed by
   `runTransaction()` or from exposing raw envelopes through `iterate()`.
 - Removed expired TTL values before reporting `onExpire` failures so plugin
@@ -29,14 +31,15 @@
   legacy setter's `storeName` namespace mapping.
 - Rejected operations on closed instances before lazy plugin initialization,
   operation hooks, or transformation bypass checks can run.
-- Waited for in-flight operations before closing or switching drivers so active
-  driver resources are not released early.
+- Rejected closing or switching drivers while storage operations are active so
+  lifecycle calls cannot deadlock themselves or release driver resources early.
 - Preserved zero-valued operational limits as the 2.x disabled/unbounded
   settings while continuing to reject negative or non-integer values.
 - Identified built-in transformation plugins by an internal capability marker
   so same-named custom plugins no longer trigger guards or built-in warnings.
 - Kept TTL, compression, and encryption envelopes internal when `setItems()`
-  returns, while preserving logical-value customization in `afterSetItems`.
+  returns, while preserving custom hook additions, reordering, replacements,
+  and logical-value customization in `afterSetItems`.
 - Serialized overlapping `destroy()` and `close()` plugin teardown so each
   initialized plugin receives exactly one `onDestroy` call.
 - Attempted cleanup when custom `_initStorage()` throws synchronously and kept

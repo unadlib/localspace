@@ -69,6 +69,12 @@ connection, and leaves stored data intact. A closed instance is terminal and
 later operations reject with `INSTANCE_CLOSED` before plugin initialization or
 hooks; create a new instance to access the same persisted namespace again.
 
+Call `close()` and `setDriver()` only after current storage operations settle.
+While an operation is active they reject with `OPERATION_FAILED` and
+`details.reason === 'active-operations'`; wait for the operation and retry.
+Lifecycle calls from hooks, transaction runners, and custom drivers follow the
+same rule instead of waiting on themselves.
+
 `destroy()` remains available during 2.x with its historical plugin-only
 cleanup behavior, but is deprecated. Use `clear()` or `dropInstance()` only
 when the intent is to delete data.

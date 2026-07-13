@@ -35,6 +35,55 @@ type RegisteredPlugin = {
   order: number;
 };
 
+type BatchLineageEntry<T> = {
+  key: string;
+  physicalValue: T;
+  logicalValue: T;
+};
+
+type PreparedSetItems<T> = {
+  entries: BatchItems<T>;
+  logicalEntries: Array<{ key: string; value: T }>;
+  hasStorageTransforms: boolean;
+};
+
+const createBatchLineage = <T>(
+  entries: BatchItems<T>
+): BatchLineageEntry<T>[] =>
+  normalizeBatchEntries(entries).map(({ key, value }) => ({
+    key,
+    physicalValue: value,
+    logicalValue: value,
+  }));
+
+const updateBatchLineage = <T>(
+  previous: BatchLineageEntry<T>[],
+  entries: BatchItems<T>,
+  preserveLogicalValues: boolean
+): BatchLineageEntry<T>[] => {
+  const previousByKey = new Map<string, BatchLineageEntry<T>[]>();
+  for (const entry of previous) {
+    const matches = previousByKey.get(entry.key) ?? [];
+    matches.push(entry);
+    previousByKey.set(entry.key, matches);
+  }
+
+  return normalizeBatchEntries(entries).map(({ key, value }) => {
+    const matches = previousByKey.get(key);
+    const previousEntry = matches?.shift();
+    // Built-in transforms only change the physical representation. Custom
+    // hooks retain lineage for pass-through entries, while a replacement or
+    // newly introduced key establishes its own logical value.
+    const logicalValue =
+      previousEntry &&
+      (preserveLogicalValues || Object.is(value, previousEntry.physicalValue))
+        ? previousEntry.logicalValue
+        : value;
+
+    return { key, physicalValue: value, logicalValue };
+  });
+};
+
 const sharedMetadataFor = (): Record<string, unknown> => Object.create(null);
 const COMBINED_PLUGIN_HOOK_PAIRS: Array<
   [keyof LocalSpacePlugin, keyof LocalSpacePlugin]
@@ -142,12 +191,6 @@ export class PluginManager {
 
   hasPlugins(): boolean {
     return this.pluginRegistry.length > 0;
-  }
-
-  hasActiveStorageTransforms(): boolean {
-    return this.getActivePlugins().some(
-      (plugin) => getBuiltInStorageTransformKind(plugin) !== null
-    );
   }
 
   assertNoStorageTransformBypass(
@@ -406,9 +449,14 @@ export class PluginManager {
   async beforeSetItems<T>(
     entries: BatchItems<T>,
     context: PluginContext
-  ): Promise<BatchItems<T>> {
+  ): Promise<PreparedSetItems<T>> {
     let current = entries;
+    let lineage = createBatchLineage(entries);
+    let hasStorageTransforms = false;
     for (const plugin of this.getActivePlugins()) {
+      const isStorageTransform =
+        getBuiltInStorageTransformKind(plugin) !== null;
+      hasStorageTransforms ||= isStorageTransform;
       if (!plugin.beforeSetItems) continue;
       current = await this.invokeValueHook(
         plugin,
@@ -419,8 +467,16 @@ export class PluginManager {
         context,
         current
       );
+      lineage = updateBatchLineage(lineage, current, isStorageTransform);
     }
-    return current;
+    return {
+      entries: current,
+      logicalEntries: lineage.map(({ key, logicalValue }) => ({
+        key,
+        value: logicalValue,
+      })),
+      hasStorageTransforms,
+    };
   }
 
   async afterSetItems<T>(

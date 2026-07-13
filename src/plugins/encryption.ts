@@ -15,7 +15,7 @@ import {
 import { markBuiltInStorageTransformPlugin } from '../core/plugin-capabilities.js';
 
 export interface EncryptionPluginOptions {
-  /** Pre-shared CryptoKey or raw key material */
+  /** Pre-shared CryptoKey (usage checked per operation) or raw key material */
   key?: CryptoKey | ArrayBuffer | string;
   /** Derive a key using PBKDF2 */
   keyDerivation?: {
@@ -181,11 +181,11 @@ const importKey = async (
   subtle: SubtleCrypto,
   algorithmName: string
 ): Promise<CryptoKey> => {
-  const requiredUsages: KeyUsage[] =
+  const importedUsages: KeyUsage[] =
     algorithmName === AES_GCM ? ['encrypt', 'decrypt'] : ['decrypt'];
 
   if (isCryptoKey(options.key)) {
-    return validateCryptoKey(options.key, algorithmName, requiredUsages);
+    return validateCryptoKey(options.key, algorithmName, []);
   }
 
   if (options.key !== undefined) {
@@ -195,9 +195,9 @@ const importKey = async (
       toArrayBuffer(options.key),
       { name: algorithmName },
       false,
-      requiredUsages
+      importedUsages
     );
-    return validateCryptoKey(imported, algorithmName, requiredUsages);
+    return validateCryptoKey(imported, algorithmName, importedUsages);
   }
 
   const derivation = options.keyDerivation;
@@ -229,9 +229,9 @@ const importKey = async (
       length: derivation.length ?? 256,
     },
     false,
-    requiredUsages
+    importedUsages
   );
-  return validateCryptoKey(derived, algorithmName, requiredUsages);
+  return validateCryptoKey(derived, algorithmName, importedUsages);
 };
 
 const validateEncryptedPayload = (value: unknown): EncryptedPayloadBody => {
@@ -304,7 +304,7 @@ const createEncryptionPlugin = (
   const subtle = resolveSubtle(options);
   let keyPromise: Promise<CryptoKey> | null = null;
 
-  const ensureKey = (): Promise<CryptoKey> => {
+  const ensureKey = async (requiredUsage: 'encrypt' | 'decrypt') => {
     if (!keyPromise) {
       keyPromise = importKey(options, subtle, algorithmName).catch((error) => {
         throw toLocalSpaceError(
@@ -314,7 +314,8 @@ const createEncryptionPlugin = (
         );
       });
     }
-    return keyPromise;
+    const key = await keyPromise;
+    return validateCryptoKey(key, algorithmName, [requiredUsage]);
   };
 
   if (!Number.isInteger(ivLength) || ivLength <= 0) {
@@ -398,7 +399,7 @@ const createEncryptionPlugin = (
           { algorithm: algorithmName, operation: 'encrypt' }
         );
       }
-      const cryptoKey = await ensureKey();
+      const cryptoKey = await ensureKey('encrypt');
       const payloadBytes = await serializeValue(value, itemKey);
       const iv = fillRandom(ivLength, options);
       if (!(iv instanceof Uint8Array) || iv.byteLength !== ivLength) {
@@ -451,7 +452,7 @@ const createEncryptionPlugin = (
           }
         );
       }
-      const cryptoKey = await ensureKey();
+      const cryptoKey = await ensureKey('decrypt');
       const ivBuffer = serializer.stringToBuffer(payload.iv);
       const dataBuffer = serializer.stringToBuffer(payload.data);
       let decryptAlgorithm: AlgorithmIdentifier;

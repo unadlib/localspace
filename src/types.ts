@@ -297,7 +297,9 @@ export interface LocalSpaceInstance {
   use(plugin: LocalSpacePlugin | LocalSpacePlugin[]): LocalSpaceInstance;
 
   /**
-   * Close this instance without deleting persisted data.
+   * Close this instance without deleting persisted data. Rejects with
+   * OPERATION_FAILED while a storage operation is active; wait for the
+   * operation and retry.
    */
   close(): Promise<void>;
 
@@ -334,7 +336,8 @@ export interface LocalSpaceInstance {
   ready(): Promise<void>;
 
   /**
-   * Set driver(s) to use
+   * Set driver(s) to use. Rejects with OPERATION_FAILED while a storage
+   * operation is active; wait for the operation and retry.
    */
   setDriver(drivers: string | string[]): Promise<void>;
 

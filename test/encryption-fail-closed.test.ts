@@ -160,6 +160,80 @@ describe('encryption plugin fail-closed behavior', () => {
     expect((error as LocalSpaceError).message).toContain('decrypt');
   });
 
+  it('uses decrypt-only AES-GCM CryptoKeys for reads but rejects writes', async () => {
+    const keyMaterial = new TextEncoder().encode(VALID_KEY);
+    const encryptOnlyKey = await crypto.subtle.importKey(
+      'raw',
+      keyMaterial,
+      { name: 'AES-GCM' },
+      false,
+      ['encrypt']
+    );
+    const decryptOnlyKey = await crypto.subtle.importKey(
+      'raw',
+      keyMaterial,
+      { name: 'AES-GCM' },
+      false,
+      ['decrypt']
+    );
+    const { secure, raw } = await createMemoryStores(
+      'encryption-decrypt-only-key',
+      encryptionPlugin({ key: decryptOnlyKey })
+    );
+    const firstIv = Uint8Array.from({ length: 12 }, (_, index) => index + 1);
+    const secondIv = Uint8Array.from({ length: 12 }, (_, index) => index + 21);
+    await raw.setItems([
+      {
+        key: 'first',
+        value: await createLegacyPayload(
+          { name: 'AES-GCM', iv: firstIv },
+          encryptOnlyKey,
+          { secret: 'first' },
+          firstIv
+        ),
+      },
+      {
+        key: 'second',
+        value: await createLegacyPayload(
+          { name: 'AES-GCM', iv: secondIv },
+          encryptOnlyKey,
+          { secret: 'second' },
+          secondIv
+        ),
+      },
+    ]);
+
+    await expect(
+      secure.setItem('new-single', 'plaintext')
+    ).rejects.toMatchObject({
+      code: 'INVALID_CONFIG',
+      details: {
+        keyUsages: ['decrypt'],
+        requiredKeyUsages: ['encrypt'],
+      },
+    });
+    await expect(
+      secure.setItems([{ key: 'new-batch', value: 'plaintext' }])
+    ).rejects.toMatchObject({
+      code: 'INVALID_CONFIG',
+      details: { requiredKeyUsages: ['encrypt'] },
+    });
+
+    await expect(secure.getItem('first')).resolves.toEqual({
+      secret: 'first',
+    });
+    await expect(
+      secure.getItems<{ secret: string }>(['second', 'first'])
+    ).resolves.toEqual([
+      { key: 'second', value: { secret: 'second' } },
+      { key: 'first', value: { secret: 'first' } },
+    ]);
+    await expect(raw.getItems(['new-single', 'new-batch'])).resolves.toEqual([
+      { key: 'new-single', value: null },
+      { key: 'new-batch', value: null },
+    ]);
+  });
+
   it('reads AES-CBC legacy payloads but rejects new writes', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const fixtureKey = await crypto.subtle.importKey(

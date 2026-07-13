@@ -204,6 +204,7 @@ export class LocalSpace implements LocalSpaceInstance {
   private _activeDriverClose: (() => Promise<void>) | null = null;
   private _driverTransition: Promise<void> | null = null;
   private _operationPause: Promise<void> | null = null;
+  private _operationsStarting = 0;
   private readonly _activeOperations = new Set<Promise<unknown>>();
   private _pluginManager: PluginManager;
   private _rawDriverMethods: Partial<
@@ -359,6 +360,12 @@ export class LocalSpace implements LocalSpaceInstance {
   close(): Promise<void> {
     if (this._closePromise) {
       return this._closePromise;
+    }
+
+    try {
+      this._assertLifecycleIdle('close');
+    } catch (error) {
+      return Promise.reject(error);
     }
 
     this._closed = true;
@@ -523,13 +530,8 @@ export class LocalSpace implements LocalSpaceInstance {
 
   async ready(): Promise<void> {
     this._assertOpen('ready');
-    // An active operation still belongs to the current driver. Custom drivers
-    // may call ready() after an async boundary, so making that call wait for
-    // the transition would deadlock with the transition draining the operation.
-    const driverTransition =
-      this._activeOperations.size === 0 ? this._driverTransition : null;
     const driverInitialization =
-      driverTransition ??
+      this._driverTransition ??
       this._driverSet ??
       this._pendingDriverInitialization ??
       Promise.resolve();
@@ -547,12 +549,13 @@ export class LocalSpace implements LocalSpaceInstance {
 
   async setDriver(drivers: string | string[]): Promise<void> {
     this._assertOpen('setDriver');
+    const isDefaultDriverSelection = this._isRunningDefaultDriverSelection;
+    if (!isDefaultDriverSelection) {
+      this._assertLifecycleIdle('setDriver');
+    }
     // Wait for driver initialization to complete before checking support
     // Skip waiting if this is being called from _runDefaultDriverSelection to avoid deadlock
-    if (
-      this._pendingDriverInitialization &&
-      !this._isRunningDefaultDriverSelection
-    ) {
+    if (this._pendingDriverInitialization && !isDefaultDriverSelection) {
       await this._pendingDriverInitialization.catch(() => undefined);
       this._assertOpen('setDriver');
     }
@@ -562,7 +565,7 @@ export class LocalSpace implements LocalSpaceInstance {
       this._assertOpen('setDriver');
     }
 
-    if (!this._isRunningDefaultDriverSelection) {
+    if (!isDefaultDriverSelection) {
       this._manualDriverOverride = true;
     }
 
@@ -577,6 +580,9 @@ export class LocalSpace implements LocalSpaceInstance {
     if (this._driverTransition) {
       await this._driverTransition.catch(() => undefined);
       this._assertOpen('setDriver');
+    }
+    if (!isDefaultDriverSelection) {
+      this._assertLifecycleIdle('setDriver');
     }
     if (supportedDrivers.length === 0) {
       const error = createDriverUnavailableError(requestedDrivers);
@@ -683,7 +689,7 @@ export class LocalSpace implements LocalSpaceInstance {
       }
 
       const isInitialDefaultSelection =
-        this._isRunningDefaultDriverSelection &&
+        isDefaultDriverSelection &&
         !previousInitialization &&
         !this._driverInitialized;
       if (!isInitialDefaultSelection) {
@@ -872,10 +878,13 @@ export class LocalSpace implements LocalSpaceInstance {
     }
 
     let operationPromise: Promise<unknown>;
+    this._operationsStarting++;
     try {
       operationPromise = Promise.resolve(executor());
     } catch (error) {
       return Promise.reject(error);
+    } finally {
+      this._operationsStarting--;
     }
 
     this._activeOperations.add(operationPromise);
@@ -936,21 +945,11 @@ export class LocalSpace implements LocalSpaceInstance {
       await this._ensurePluginsInitialized('setItems');
       const batchContext = this._pluginManager.createContext('setItems');
       batchContext.operationState.isBatch = true;
-      const preserveLogicalValues =
-        this._pluginManager.hasActiveStorageTransforms();
-      const logicalEntries = preserveLogicalValues
-        ? this._pluginManager.normalizeBatch(entries)
-        : [];
-      const logicalEntriesByKey = new Map<string, unknown[]>();
-      for (const entry of logicalEntries) {
-        const values = logicalEntriesByKey.get(entry.key) ?? [];
-        values.push(entry.value);
-        logicalEntriesByKey.set(entry.key, values);
-      }
-      const prepared = await this._pluginManager.beforeSetItems(
-        entries,
-        batchContext
-      );
+      const {
+        entries: prepared,
+        logicalEntries,
+        hasStorageTransforms: preserveLogicalValues,
+      } = await this._pluginManager.beforeSetItems(entries, batchContext);
       const normalized = this._pluginManager.normalizeBatch(prepared);
       batchContext.operationState.batchSize = normalized.length;
       const processedEntries: Array<{
@@ -961,15 +960,11 @@ export class LocalSpace implements LocalSpaceInstance {
 
       for (let index = 0; index < normalized.length; index++) {
         const entry = normalized[index];
-        let logicalValue = entry.value;
-        if (preserveLogicalValues) {
-          const matchingValues = logicalEntriesByKey.get(entry.key);
-          if (matchingValues && matchingValues.length > 0) {
-            logicalValue = matchingValues.shift();
-          } else if (index < logicalEntries.length) {
-            logicalValue = logicalEntries[index].value;
-          }
-        }
+        const logicalEntry = logicalEntries[index];
+        const logicalValue =
+          preserveLogicalValues && logicalEntry?.key === entry.key
+            ? logicalEntry.value
+            : entry.value;
         const entryContext = this._pluginManager.createContext('setItem');
         entryContext.operationState.originalValue = logicalValue;
         entryContext.operationState.isBatch = true;
@@ -1005,12 +1000,12 @@ export class LocalSpace implements LocalSpaceInstance {
       )) as BatchResponse<unknown>;
       const responseEntriesByKey = indexProcessedEntries();
       const afterSetItemsInput = preserveLogicalValues
-        ? driverResponse.map((entry, index) => {
+        ? driverResponse.map((entry) => {
             const matchingEntries = responseEntriesByKey.get(entry.key);
             const processedEntry =
               matchingEntries && matchingEntries.length > 0
                 ? matchingEntries.shift()
-                : processedEntries[index];
+                : undefined;
             return {
               key: entry.key,
               value: processedEntry
@@ -1235,21 +1230,29 @@ export class LocalSpace implements LocalSpaceInstance {
     }
   }
 
+  private _assertLifecycleIdle(operation: 'close' | 'setDriver'): void {
+    if (this._operationsStarting === 0 && this._activeOperations.size === 0) {
+      return;
+    }
+
+    throw createLocalSpaceError(
+      'OPERATION_FAILED',
+      `Cannot ${operation} while storage operations are active.`,
+      { operation, reason: 'active-operations' }
+    );
+  }
+
   private _runDefaultDriverSelection(): Promise<void> {
     if (this._manualDriverOverride) {
       return this._driverSet ?? Promise.resolve();
     }
 
     this._isRunningDefaultDriverSelection = true;
-    return this.setDriver(this._config.driver!).then(
-      () => {
-        this._isRunningDefaultDriverSelection = false;
-      },
-      (error) => {
-        this._isRunningDefaultDriverSelection = false;
-        throw error;
-      }
-    );
+    try {
+      return this.setDriver(this._config.driver!);
+    } finally {
+      this._isRunningDefaultDriverSelection = false;
+    }
   }
 
   private _notInitializedError(operation: string): LocalSpaceError {
