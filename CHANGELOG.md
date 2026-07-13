@@ -1,5 +1,62 @@
 # Changelog
 
+## [2.1.0] - 2026-07-14
+
+### Added
+
+- Added idempotent `close()` for non-destructive instance disposal. It cleans
+  initialized plugins, releases the active driver/context, preserves stored
+  data, and makes later operations reject with `INSTANCE_CLOSED`.
+- Added development-only, once-per-category 3.0 migration warnings and the
+  exported `setDeprecationWarnings()` switch.
+- Added readers and static compatibility fixtures for the versioned 3.0
+  encryption, compression, and TTL envelopes while keeping the 2.x writer
+  format unchanged.
+
+### Fixed
+
+- Made encryption fail closed for invalid algorithms, serialization failures,
+  Web Crypto failures, and malformed or unknown-version encrypted payloads.
+- Prevented built-in transformation plugins from being silently bypassed by
+  `runTransaction()` or from exposing raw envelopes through `iterate()`.
+- Removed expired TTL values before reporting `onExpire` failures so plugin
+  callback errors cannot leak internal wrappers or resurrect stale data.
+- Kept IndexedDB transactions alive until async runners settle, aborting
+  earlier writes when a runner rejects, and avoided readonly blob probes.
+- Reworked memory transactions around a private copy and store-level write
+  coordination so rollback cannot overwrite successful concurrent writes.
+- Unified constructor and setter configuration normalization, including stable
+  `INVALID_CONFIG` failures and consistent `storeName` handling.
+- Stabilized `LocalSpaceError` classification and retained original driver,
+  quota, plugin, and browser errors through `cause` and structured details.
+- Keyed shared IndexedDB contexts by the resolved backend, deduplicated
+  registrations, and released the final connection without deleting data.
+
+### Deprecated
+
+- Deprecated AES-CBC/AES-CTR configuration, the ignored `size` option,
+  `destroy()`, mutable `config()` references, matching batch/single hooks in one
+  custom plugin, React Native adapter auto-detection, and unsupported package
+  deep imports. Existing 2.x behavior is retained where it is safe to do so.
+
+### Tooling
+
+- Migrated to an executable ESLint 9 flat config, aligned Vitest and its
+  coverage provider, and moved generated TypeDoc output to
+  `generated-docs/api` so handwritten documentation is never replaced.
+- Added pull-request CI without a duplicate build and separated deterministic
+  browser correctness tests from opt-in performance benchmarks.
+- Continued package-consumer coverage for ESM, CommonJS, React Native subpath,
+  public types, production warning silence, and blocked deep imports.
+
+### Migration
+
+- Existing core and legacy plugin data remain readable; 2.1 continues writing
+  the legacy plugin format. Review `docs/migration-guide.md` before 3.0,
+  especially for plugin-backed iteration/transactions and lifecycle cleanup.
+
+---
+
 ## [2.0.1] - 2026-07-11
 
 ### Fixed

@@ -169,6 +169,21 @@ The memory driver is runtime-only: data is shared by `name`/`storeName` while th
 page is alive and is lost on reload. It is not part of the default fallback order
 so persistent-storage failures remain visible unless you opt in.
 
+### Instance Lifecycle
+
+Dispose an isolated instance without deleting its data by calling `close()`:
+
+```ts
+const cache = localspace.createInstance({ name: 'my-app', storeName: 'cache' });
+await cache.setItem('token', 'abc123');
+await cache.close();
+```
+
+`close()` is idempotent. It cleans initialized plugins and releases the active
+driver connection; later operations reject with `INSTANCE_CLOSED`. Use
+`clear()` or `dropInstance()` only when stored data should be removed.
+`destroy()` is deprecated and retains its legacy plugin-only behavior in 2.x.
+
 ### React Native AsyncStorage
 
 ```ts
@@ -270,7 +285,7 @@ const store = localspace.createInstance({
     compressionPlugin({ threshold: 1024 }), // Compress > 1KB
     encryptionPlugin({ key: '32-byte-key-here' }), // Encrypt
   ],
-  pluginErrorPolicy: 'strict', // Recommended for encryption
+  pluginErrorPolicy: 'strict', // Fail on every plugin error
 });
 ```
 
@@ -281,6 +296,12 @@ const store = localspace.createInstance({
 | **TTL**         | Auto-expire items with `{ data, expiresAt }` wrapper |
 | **Encryption**  | AES-GCM encryption via Web Crypto API                |
 | **Compression** | LZ-string compression for large values               |
+
+Encryption always fails closed in 2.1, including under the default lenient
+plugin policy. When encryption, compression, or TTL is active,
+`runTransaction()` and `iterate()` reject with `UNSUPPORTED_OPERATION` rather
+than bypassing transformations or exposing internal payloads. Use item/batch
+methods; plugin-aware transactions are planned for 3.0.
 
 Cross-context replication is intentionally not built in. For best-effort
 single-item notifications, adapt
@@ -341,10 +362,11 @@ const mobileStore = await createReactNativeInstance(localspace, {
 
 ## Performance Notes
 
-- **Batch APIs outperform loops:** `setItems()` ~6x faster, `getItems()` ~7.7x faster than per-item loops
+- **Batch APIs reduce per-operation overhead:** prefer `setItems()`, `getItems()`, and `removeItems()` when work belongs together
 - **Transaction helpers:** `runTransaction()` is atomic on IndexedDB and rolls back on the memory driver
 - **IndexedDB durability:** Chrome 121+ uses relaxed durability by default
 - **Non-transactional drivers:** localStorage and React Native AsyncStorage reject `runTransaction()`
+- **Benchmarks are environment-specific:** run `pnpm test:benchmark` locally; no fixed speedup is used as a correctness gate
 
 ---
 
@@ -356,6 +378,7 @@ const mobileStore = await createReactNativeInstance(localspace, {
 | Browser storage is full    | Check `error.code === 'QUOTA_EXCEEDED'`                |
 | Persistent storage blocked | Add `localspace.MEMORY` as an explicit fallback        |
 | Plugin errors swallowed    | Set `pluginErrorPolicy: 'strict'`                      |
+| Instance is closed         | Create a new instance; `close()` is terminal           |
 
 **Errors** are `LocalSpaceError` with `code`, `details`, and `cause` properties.
 
@@ -373,12 +396,12 @@ const mobileStore = await createReactNativeInstance(localspace, {
 
 ## Documentation
 
-| Document                                     | Description                           |
-| -------------------------------------------- | ------------------------------------- |
-| [API Reference](./docs/api-reference.md)     | Complete method documentation         |
-| [Plugin System](./docs/plugins.md)           | Built-in plugins & custom development |
-| [Real-World Examples](./docs/examples.md)    | Production-ready code patterns        |
-| [Migration Guide](./docs/migration-guide.md) | Migrating from localForage and 1.x    |
+| Document                                     | Description                            |
+| -------------------------------------------- | -------------------------------------- |
+| [API Reference](./docs/api-reference.md)     | Complete method documentation          |
+| [Plugin System](./docs/plugins.md)           | Built-in plugins & custom development  |
+| [Real-World Examples](./docs/examples.md)    | Production-ready code patterns         |
+| [Migration Guide](./docs/migration-guide.md) | Upgrading 2.x and migrating older apps |
 
 ---
 

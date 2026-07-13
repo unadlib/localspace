@@ -2,6 +2,10 @@
 
 ## Upgrade From 2.0.x To 2.1
 
+```bash
+pnpm add localspace@^2.1.0
+```
+
 ### Validate Configuration Before Driver Selection
 
 The constructor and `config(options)` now share one validation path. Invalid
@@ -15,6 +19,12 @@ the error value.
 non-word characters with `_`, while the constructor preserved them. If an app
 used the setter and must reopen the old namespace, pass the already-normalized
 name explicitly (for example `my_store_name`) before upgrading.
+
+Driver and storage failures now use stable `LocalSpaceError` codes. In
+particular, all-driver initialization failure is `DRIVER_UNAVAILABLE`, quota
+failure is `QUOTA_EXCEEDED`, and other driver operation failure is
+`OPERATION_FAILED`. Inspect `error.code`; engine-specific text remains in
+`error.cause` and `error.details.causeMessage` for diagnostics.
 
 ### Migrate 2.1 Deprecations Before 3.0
 
@@ -43,6 +53,18 @@ Package deep imports have no executable compatibility entry on which a runtime
 warning could be attached: the `exports` map rejects them immediately. The
 release tests keep that boundary explicit rather than adding a temporary deep
 entry that would expand the supported package surface.
+
+### Close Instances Without Deleting Data
+
+Use `await instance.close()` when an instance is no longer needed. The method
+is idempotent, cleans only initialized plugins, releases the active driver
+connection, and leaves stored data intact. A closed instance is terminal and
+later operations reject with `INSTANCE_CLOSED`; create a new instance to access
+the same persisted namespace again.
+
+`destroy()` remains available during 2.x with its historical plugin-only
+cleanup behavior, but is deprecated. Use `clear()` or `dropInstance()` only
+when the intent is to delete data.
 
 ### Prepare Plugin Data For 3.0 Rollback
 

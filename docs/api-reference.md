@@ -102,6 +102,41 @@ const admin = await localspace.iterate<User, User>((value, key) => {
 
 ---
 
+## Error Contract
+
+Rejected operations use `LocalSpaceError`. Branch on `error.code`, not browser
+exception text; the original failure is available through `error.cause`, while
+`error.details` carries stable context such as `driver`, `operation`, `key`,
+`configKey`, and attempted driver failures.
+
+Common codes include:
+
+| Code                     | Meaning                                                              |
+| ------------------------ | -------------------------------------------------------------------- |
+| `INVALID_CONFIG`         | Configuration failed normalization before driver initialization      |
+| `DRIVER_UNAVAILABLE`     | Every requested driver failed; `details.driverErrors` preserves each |
+| `QUOTA_EXCEEDED`         | A driver reported a storage quota failure                            |
+| `OPERATION_FAILED`       | A driver operation failed for another stable category                |
+| `UNSUPPORTED_OPERATION`  | The selected driver/plugin combination cannot honor the contract     |
+| `INSTANCE_CLOSED`        | A terminally closed instance received another operation              |
+| `SERIALIZATION_FAILED`   | A value could not be safely transformed or serialized                |
+| `DESERIALIZATION_FAILED` | Stored data was malformed, unsupported, or could not be transformed  |
+
+```ts
+import { LocalSpaceError } from 'localspace';
+
+try {
+  await store.setItem('key', value);
+} catch (error) {
+  if (error instanceof LocalSpaceError && error.code === 'QUOTA_EXCEEDED') {
+    reportStoragePressure(error.details);
+  }
+  throw error;
+}
+```
+
+---
+
 ## Batch Operations
 
 Each batch chunk executes in a transaction on IndexedDB. When `maxBatchSize` is
@@ -502,8 +537,8 @@ releases the active driver without deleting data. `destroy()` retains its 2.0
 plugin-only behavior throughout the 2.x line.
 
 ```ts
-// Always call when disposing an instance with plugins
-await store.destroy();
+// Legacy only; new code should call await store.close()
+await legacyStore.destroy();
 ```
 
 ## Configuration Options
@@ -515,7 +550,7 @@ interface LocalSpaceConfig {
   // Database configuration
   name?: string; // Database name (default: 'localforage')
   storeName?: string; // Store/table name (default: 'keyvaluepairs')
-  version?: number; // Database version (default: 1.0)
+  version?: number; // Database version (default: 1)
   description?: string; // Database description
   size?: number; // Deprecated compatibility hint; built-in drivers ignore it
 
