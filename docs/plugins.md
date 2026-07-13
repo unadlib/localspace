@@ -40,7 +40,7 @@ const store = localspace.createInstance({
 
 - **Batch vs single hooks (important)** – a batch call such as `setItems()` invokes **both** the batch hook (`beforeSetItems`) **and** the per-entry single hook (`beforeSet`, once per entry). On the per-entry single hook, `context.operationState.isBatch` is `true`. A plugin that implements **both** the batch and the single form of a hook must guard the single form with `if (context.operationState.isBatch) return value;` to avoid processing each entry twice (e.g. double-encrypting). The built-in TTL, encryption, and compression plugins all follow this convention. A plugin that implements **only** the single hook (no batch form) does not need the guard: its `beforeSet`/`afterGet` still runs for every entry of a batch, with `isBatch` set so it can adapt if needed.
 
-- **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (validation failures, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'lenient'` reports and continues; use `strict` for encryption/compression/ttl or any correctness-critical plugin.
+- **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (validation failures, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'lenient'` reports and continues. The built-in encryption plugin always fails closed, including with the lenient policy; use `strict` for compression, TTL, or any correctness-critical custom plugin.
 
 ---
 
@@ -201,19 +201,12 @@ const pakoStore = localspace.createInstance({
 
 2. **Always compress before encrypting**: Encrypted data has high entropy and compresses poorly. The default priorities handle this automatically.
 
-3. **Use strict error policy with security-critical plugins** (default is lenient):
+3. **Encryption always fails closed**. Key initialization, serialization, IV generation, encryption, and decryption failures propagate even when the global policy is lenient. Use strict policy when encryption is combined with other correctness-critical plugins:
 
    ```ts
-   // DON'T do this - encryption failures will be silently swallowed
-   const bad = localspace.createInstance({
-     plugins: [encryptionPlugin({ key })],
-     pluginErrorPolicy: 'lenient', // Dangerous!
-   });
-
-   // DO this - encryption failures will propagate
-   const good = localspace.createInstance({
-     plugins: [encryptionPlugin({ key })],
-     pluginErrorPolicy: 'strict', // Safe (recommended)
+   const secure = localspace.createInstance({
+     plugins: [ttlPlugin({ defaultTTL: 60_000 }), encryptionPlugin({ key })],
+     pluginErrorPolicy: 'strict', // Also propagates TTL and custom plugin errors
    });
    ```
 
@@ -234,12 +227,12 @@ writes without automatically deleting data.
 
 ## Plugin Troubleshooting
 
-| Issue                     | Solution                                                             |
-| ------------------------- | -------------------------------------------------------------------- |
-| TTL items not expiring    | Ensure `cleanupInterval` is set, or read items to trigger expiration |
-| Encryption fails silently | Set `pluginErrorPolicy: 'strict'` for encryption/compression/ttl     |
-| Compression not working   | Verify payload exceeds `threshold`                                   |
-| Plugin order seems wrong  | Check `priority` values; higher = runs first in `before*` hooks      |
+| Issue                      | Solution                                                                           |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| TTL items not expiring     | Ensure `cleanupInterval` is set, or read items to trigger expiration               |
+| Encryption operation fails | Inspect the propagated `LocalSpaceError`; encryption never falls back to plaintext |
+| Compression not working    | Verify payload exceeds `threshold`                                                 |
+| Plugin order seems wrong   | Check `priority` values; higher = runs first in `before*` hooks                    |
 
 ---
 

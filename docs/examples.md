@@ -127,7 +127,7 @@ async function createSecureStore(userPassword: string, userId: string) {
         },
       }),
     ],
-    pluginErrorPolicy: 'strict', // Never swallow encryption errors
+    pluginErrorPolicy: 'strict', // Also fail fast for TTL and custom plugin errors
   });
 
   await store.ready();

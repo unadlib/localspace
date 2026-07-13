@@ -38,11 +38,66 @@ type EncryptedPayload = {
   data: string;
 };
 
+const AES_GCM = 'AES-GCM';
+const AES_KEY_LENGTHS = new Set([16, 24, 32]);
+const BASE64_PATTERN =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
 const toArrayBuffer = (value: string | ArrayBuffer): ArrayBuffer => {
   if (typeof value !== 'string') {
     return value;
   }
   return new TextEncoder().encode(value).buffer;
+};
+
+const isCryptoKey = (value: unknown): value is CryptoKey => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  if (typeof CryptoKey !== 'undefined' && value instanceof CryptoKey) {
+    return true;
+  }
+
+  const candidate = value as Partial<CryptoKey>;
+  return (
+    typeof candidate.type === 'string' &&
+    !!candidate.algorithm &&
+    Array.isArray(candidate.usages)
+  );
+};
+
+const validateRawKey = (value: string | ArrayBuffer): void => {
+  const byteLength = toArrayBuffer(value).byteLength;
+  if (!AES_KEY_LENGTHS.has(byteLength)) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'AES-GCM key material must be 16, 24, or 32 bytes.',
+      { keyByteLength: byteLength }
+    );
+  }
+};
+
+const validateCryptoKey = (key: CryptoKey): CryptoKey => {
+  const algorithmName = key.algorithm?.name;
+  if (key.type !== 'secret' || algorithmName !== AES_GCM) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      `Encryption key must be a secret ${AES_GCM} CryptoKey.`,
+      { keyType: key.type, keyAlgorithm: algorithmName }
+    );
+  }
+
+  const usages = new Set(key.usages);
+  if (!usages.has('encrypt') || !usages.has('decrypt')) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Encryption CryptoKey must allow both encrypt and decrypt usage.',
+      { keyUsages: [...key.usages] }
+    );
+  }
+
+  return key;
 };
 
 const ensureCrypto = (_options: EncryptionPluginOptions): Crypto => {
@@ -106,18 +161,20 @@ const importKey = async (
   options: EncryptionPluginOptions,
   subtle: SubtleCrypto
 ): Promise<CryptoKey> => {
-  if (options.key instanceof CryptoKey) {
-    return options.key;
+  if (isCryptoKey(options.key)) {
+    return validateCryptoKey(options.key);
   }
 
-  if (options.key) {
-    return subtle.importKey(
+  if (options.key !== undefined) {
+    validateRawKey(options.key);
+    const imported = await subtle.importKey(
       'raw',
       toArrayBuffer(options.key),
-      { name: 'AES-GCM' },
+      { name: AES_GCM },
       false,
       ['encrypt', 'decrypt']
     );
+    return validateCryptoKey(imported);
   }
 
   const derivation = options.keyDerivation;
@@ -136,7 +193,7 @@ const importKey = async (
     ['deriveKey']
   );
 
-  return subtle.deriveKey(
+  const derived = await subtle.deriveKey(
     {
       name: 'PBKDF2',
       salt: toArrayBuffer(derivation.salt),
@@ -145,15 +202,16 @@ const importKey = async (
     },
     baseKey,
     {
-      name: 'AES-GCM',
+      name: AES_GCM,
       length: derivation.length ?? 256,
     },
     false,
     ['encrypt', 'decrypt']
   );
+  return validateCryptoKey(derived);
 };
 
-const isEncryptedPayload = (value: unknown): value is EncryptedPayload => {
+const hasEncryptedMarker = (value: unknown): boolean => {
   return (
     !!value &&
     typeof value === 'object' &&
@@ -161,7 +219,30 @@ const isEncryptedPayload = (value: unknown): value is EncryptedPayload => {
   );
 };
 
-const ALLOWED_ALGORITHMS = ['AES-GCM', 'AES-CBC', 'AES-CTR'] as const;
+const parseEncryptedPayload = (value: unknown): EncryptedPayload | null => {
+  if (!hasEncryptedMarker(value)) {
+    return null;
+  }
+
+  const payload = value as Partial<EncryptedPayload>;
+  if (
+    payload.algorithm !== AES_GCM ||
+    typeof payload.iv !== 'string' ||
+    payload.iv.length === 0 ||
+    !BASE64_PATTERN.test(payload.iv) ||
+    typeof payload.data !== 'string' ||
+    payload.data.length === 0 ||
+    !BASE64_PATTERN.test(payload.data)
+  ) {
+    throw createLocalSpaceError(
+      'DESERIALIZATION_FAILED',
+      'Failed to decrypt payload: invalid or unsupported encrypted payload.',
+      { payloadAlgorithm: payload.algorithm }
+    );
+  }
+
+  return payload as EncryptedPayload;
+};
 
 export const encryptionPlugin = (
   options: EncryptionPluginOptions
@@ -169,26 +250,164 @@ export const encryptionPlugin = (
   const subtle = resolveSubtle(options);
   let keyPromise: Promise<CryptoKey> | null = null;
 
-  const ensureKey = () => {
+  const ensureKey = (): Promise<CryptoKey> => {
     if (!keyPromise) {
-      keyPromise = importKey(options, subtle);
+      keyPromise = importKey(options, subtle).catch((error) => {
+        throw toLocalSpaceError(
+          error,
+          'INVALID_CONFIG',
+          'Failed to initialize encryption key'
+        );
+      });
     }
     return keyPromise;
   };
 
   const ivLength = options.ivLength ?? 12;
-  const algorithmName = options.algorithm?.name ?? 'AES-GCM';
+  const algorithmName = options.algorithm?.name ?? AES_GCM;
 
-  if (
-    !ALLOWED_ALGORITHMS.includes(
-      algorithmName as (typeof ALLOWED_ALGORITHMS)[number]
-    )
-  ) {
+  if (algorithmName !== AES_GCM) {
     throw createLocalSpaceError(
       'INVALID_CONFIG',
-      `Unsupported encryption algorithm: ${algorithmName}. Allowed: ${ALLOWED_ALGORITHMS.join(', ')}`
+      `Unsupported encryption algorithm: ${algorithmName}. Only ${AES_GCM} is supported.`,
+      { algorithm: algorithmName }
     );
   }
+
+  if (!Number.isInteger(ivLength) || ivLength <= 0) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Encryption IV length must be a positive integer.',
+      { ivLength }
+    );
+  }
+
+  if (options.key === undefined && !options.keyDerivation) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Encryption plugin requires either `key` or `keyDerivation`.'
+    );
+  }
+
+  if (options.key === undefined && options.keyDerivation) {
+    const { iterations = 150000, length = 256 } = options.keyDerivation;
+    if (!Number.isInteger(iterations) || iterations <= 0) {
+      throw createLocalSpaceError(
+        'INVALID_CONFIG',
+        'PBKDF2 iterations must be a positive integer.',
+        { iterations }
+      );
+    }
+    if (![128, 192, 256].includes(length)) {
+      throw createLocalSpaceError(
+        'INVALID_CONFIG',
+        'Derived AES-GCM key length must be 128, 192, or 256 bits.',
+        { keyLength: length }
+      );
+    }
+  }
+
+  const encryptionAlgorithm = (iv: Uint8Array): AesGcmParams => ({
+    ...(options.algorithm ?? { name: AES_GCM }),
+    name: AES_GCM,
+    iv: iv as BufferSource,
+  });
+
+  const serializeValue = async (
+    value: unknown,
+    itemKey?: string
+  ): Promise<Uint8Array> => {
+    try {
+      const serialized = await serializer.serialize(value);
+      if (typeof serialized !== 'string') {
+        throw createLocalSpaceError(
+          'SERIALIZATION_FAILED',
+          'Encryption plugin cannot serialize this value.',
+          itemKey ? { key: itemKey } : undefined
+        );
+      }
+      return new TextEncoder().encode(serialized);
+    } catch (error) {
+      throw toLocalSpaceError(
+        error,
+        'SERIALIZATION_FAILED',
+        itemKey
+          ? `Failed to serialize encrypted payload for key "${itemKey}"`
+          : 'Failed to serialize encrypted payload',
+        itemKey ? { key: itemKey } : undefined
+      );
+    }
+  };
+
+  const encryptValue = async (
+    value: unknown,
+    itemKey?: string
+  ): Promise<EncryptedPayload> => {
+    try {
+      const cryptoKey = await ensureKey();
+      const payloadBytes = await serializeValue(value, itemKey);
+      const iv = fillRandom(ivLength, options);
+      if (!(iv instanceof Uint8Array) || iv.byteLength !== ivLength) {
+        throw createLocalSpaceError(
+          'INVALID_CONFIG',
+          `Random source must return ${ivLength} bytes.`
+        );
+      }
+      const encrypted = await subtle.encrypt(
+        encryptionAlgorithm(iv),
+        cryptoKey,
+        payloadBytes as BufferSource
+      );
+
+      return {
+        __ls_encrypted: true,
+        algorithm: AES_GCM,
+        iv: serializer.bufferToString(
+          iv.buffer.slice(
+            iv.byteOffset,
+            iv.byteOffset + iv.byteLength
+          ) as ArrayBuffer
+        ),
+        data: serializer.bufferToString(encrypted),
+      };
+    } catch (error) {
+      throw toLocalSpaceError(
+        error,
+        'OPERATION_FAILED',
+        itemKey
+          ? `Failed to encrypt payload for key "${itemKey}"`
+          : 'Failed to encrypt payload',
+        itemKey ? { key: itemKey } : undefined
+      );
+    }
+  };
+
+  const decryptValue = async <T>(
+    payload: EncryptedPayload,
+    itemKey?: string
+  ): Promise<T> => {
+    try {
+      const cryptoKey = await ensureKey();
+      const ivBuffer = serializer.stringToBuffer(payload.iv);
+      const dataBuffer = serializer.stringToBuffer(payload.data);
+      const plainBuffer = await subtle.decrypt(
+        encryptionAlgorithm(new Uint8Array(ivBuffer)),
+        cryptoKey,
+        new Uint8Array(dataBuffer)
+      );
+      const decoded = new TextDecoder().decode(plainBuffer);
+      return serializer.deserialize(decoded) as T;
+    } catch (error) {
+      throw toLocalSpaceError(
+        error,
+        'OPERATION_FAILED',
+        itemKey
+          ? `Failed to decrypt payload for key "${itemKey}"`
+          : 'Failed to decrypt payload',
+        itemKey ? { key: itemKey } : undefined
+      );
+    }
+  };
 
   return {
     name: 'encryption',
@@ -202,40 +421,7 @@ export const encryptionPlugin = (
       if (context.operationState.isBatch) {
         return value;
       }
-      const key = await ensureKey();
-      const serialized = await serializer.serialize(value);
-      const payloadBytes = new TextEncoder().encode(serialized);
-      const iv = fillRandom(ivLength, options);
-
-      let encrypted: ArrayBuffer;
-      try {
-        encrypted = await subtle.encrypt(
-          {
-            ...(options.algorithm ?? { name: algorithmName }),
-            iv: iv as BufferSource,
-          },
-          key,
-          payloadBytes
-        );
-      } catch (error) {
-        throw toLocalSpaceError(
-          error,
-          'OPERATION_FAILED',
-          'Failed to encrypt payload'
-        );
-      }
-
-      return {
-        __ls_encrypted: true,
-        algorithm: algorithmName,
-        iv: serializer.bufferToString(
-          iv.buffer.slice(
-            iv.byteOffset,
-            iv.byteOffset + iv.byteLength
-          ) as ArrayBuffer
-        ),
-        data: serializer.bufferToString(encrypted),
-      } as unknown as T;
+      return (await encryptValue(value)) as unknown as T;
     },
     afterGet: async <T>(
       _key: string,
@@ -246,77 +432,22 @@ export const encryptionPlugin = (
       if (context.operationState.isBatch) {
         return value;
       }
-      if (!isEncryptedPayload(value)) {
+      const payload = parseEncryptedPayload(value);
+      if (!payload) {
         return value;
       }
-
-      const key = await ensureKey();
-      const ivBuffer = serializer.stringToBuffer(value.iv);
-      const dataBuffer = serializer.stringToBuffer(value.data);
-
-      try {
-        const plainBuffer = await subtle.decrypt(
-          {
-            ...(options.algorithm ?? { name: algorithmName }),
-            iv: new Uint8Array(ivBuffer),
-          },
-          key,
-          new Uint8Array(dataBuffer)
-        );
-        const decoded = new TextDecoder().decode(plainBuffer);
-        return serializer.deserialize(decoded) as T;
-      } catch (error) {
-        throw toLocalSpaceError(
-          error,
-          'OPERATION_FAILED',
-          'Failed to decrypt payload'
-        );
-      }
+      return decryptValue<T>(payload);
     },
     beforeSetItems: async <T>(
       entries: BatchItems<T>,
       _context: PluginContext
     ): Promise<BatchItems<T>> => {
       const normalized = normalizeBatchEntries(entries);
-      const cryptoKey = await ensureKey();
-
       const encrypted = await Promise.all(
         normalized.map(async ({ key: itemKey, value }) => {
-          const serialized = await serializer.serialize(value);
-          const payloadBytes = new TextEncoder().encode(serialized);
-          const iv = fillRandom(ivLength, options);
-
-          let encryptedData: ArrayBuffer;
-          try {
-            encryptedData = await subtle.encrypt(
-              {
-                ...(options.algorithm ?? { name: algorithmName }),
-                iv: iv as BufferSource,
-              },
-              cryptoKey,
-              payloadBytes
-            );
-          } catch (error) {
-            throw toLocalSpaceError(
-              error,
-              'OPERATION_FAILED',
-              `Failed to encrypt payload for key "${itemKey}"`
-            );
-          }
-
           return {
             key: itemKey,
-            value: {
-              __ls_encrypted: true,
-              algorithm: algorithmName,
-              iv: serializer.bufferToString(
-                iv.buffer.slice(
-                  iv.byteOffset,
-                  iv.byteOffset + iv.byteLength
-                ) as ArrayBuffer
-              ),
-              data: serializer.bufferToString(encryptedData),
-            } as unknown as T,
+            value: (await encryptValue(value, itemKey)) as unknown as T,
           };
         })
       );
@@ -327,38 +458,16 @@ export const encryptionPlugin = (
       entries: BatchResponse<T>,
       _context: PluginContext
     ): Promise<BatchResponse<T>> => {
-      const cryptoKey = await ensureKey();
-
       const decrypted = await Promise.all(
         entries.map(async ({ key: itemKey, value }) => {
-          if (!isEncryptedPayload(value)) {
+          const payload = parseEncryptedPayload(value);
+          if (!payload) {
             return { key: itemKey, value };
           }
-
-          const ivBuffer = serializer.stringToBuffer(value.iv);
-          const dataBuffer = serializer.stringToBuffer(value.data);
-
-          try {
-            const plainBuffer = await subtle.decrypt(
-              {
-                ...(options.algorithm ?? { name: algorithmName }),
-                iv: new Uint8Array(ivBuffer),
-              },
-              cryptoKey,
-              new Uint8Array(dataBuffer)
-            );
-            const decoded = new TextDecoder().decode(plainBuffer);
-            return {
-              key: itemKey,
-              value: serializer.deserialize(decoded) as T,
-            };
-          } catch (error) {
-            throw toLocalSpaceError(
-              error,
-              'OPERATION_FAILED',
-              `Failed to decrypt payload for key "${itemKey}"`
-            );
-          }
+          return {
+            key: itemKey,
+            value: await decryptValue<T>(payload, itemKey),
+          };
         })
       );
 

@@ -36,17 +36,6 @@ const sharedMetadataFor = (): Record<string, unknown> => Object.create(null);
  * Plugin combination warnings to help users avoid problematic configurations.
  */
 const PLUGIN_WARNINGS = {
-  LENIENT_WITH_ENCRYPTION: {
-    condition: (
-      plugins: LocalSpacePlugin[],
-      config: PluginHost['_config']
-    ): boolean => {
-      const hasEncryption = plugins.some((p) => p.name === 'encryption');
-      return hasEncryption && config.pluginErrorPolicy === 'lenient';
-    },
-    message:
-      '[localspace] Warning: Using lenient error policy with encryption plugin may silently fail decryption. Consider using strict policy for security-critical plugins.',
-  },
   LENIENT_WITH_COMPRESSION: {
     condition: (
       plugins: LocalSpacePlugin[],
