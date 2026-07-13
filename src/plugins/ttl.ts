@@ -5,7 +5,11 @@ import type {
   BatchResponse,
 } from '../types.js';
 import { normalizeBatchEntries } from '../utils/helpers.js';
-import { toLocalSpaceError } from '../errors.js';
+import { createLocalSpaceError, toLocalSpaceError } from '../errors.js';
+import {
+  hasOwnPayloadField,
+  readPluginEnvelope,
+} from '../core/plugin-envelope.js';
 
 export interface TTLPluginOptions {
   /** Default TTL in milliseconds applied when key-specific TTL is not defined */
@@ -28,18 +32,57 @@ type TTLMetadata = {
   running?: boolean;
 };
 
-type TtlPayload<T> = {
-  __ls_ttl: true;
+type TtlPayloadBody<T> = {
   data: T;
   expiresAt: number;
 };
 
+type TtlPayload<T> = TtlPayloadBody<T> & {
+  __ls_ttl: true;
+};
+
 const TTL_METADATA_KEY = '__localspace_ttl_metadata';
 
-const isTtlPayload = (value: unknown): value is TtlPayload<unknown> =>
-  !!value &&
-  typeof value === 'object' &&
-  (value as TtlPayload<unknown>).__ls_ttl === true;
+const validateTtlPayload = (value: unknown): TtlPayloadBody<unknown> => {
+  const payload = value as Partial<TtlPayloadBody<unknown>>;
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    !hasOwnPayloadField(payload, 'data') ||
+    typeof payload.expiresAt !== 'number' ||
+    !Number.isFinite(payload.expiresAt)
+  ) {
+    throw createLocalSpaceError(
+      'DESERIALIZATION_FAILED',
+      'Failed to read TTL payload: invalid TTL payload.'
+    );
+  }
+  return payload as TtlPayloadBody<unknown>;
+};
+
+const parseTtlPayload = (value: unknown): TtlPayloadBody<unknown> | null => {
+  const envelope = readPluginEnvelope<unknown>(value, 'ttl');
+  if (envelope.matched) {
+    return validateTtlPayload(envelope.payload);
+  }
+
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    (value as Partial<TtlPayload<unknown>>).__ls_ttl !== true
+  ) {
+    return null;
+  }
+
+  const hasLegacyPayloadFields = ['data', 'expiresAt'].some((field) =>
+    hasOwnPayloadField(value, field)
+  );
+  if (!hasLegacyPayloadFields) {
+    return null;
+  }
+
+  return validateTtlPayload(value);
+};
 
 const getMetadata = (context: PluginContext): TTLMetadata => {
   const existing = context.metadata[TTL_METADATA_KEY] as
@@ -202,17 +245,18 @@ export const ttlPlugin = (
     if (context.operationState.isBatch) {
       return value;
     }
-    if (!isTtlPayload(value)) {
+    const payload = parseTtlPayload(value);
+    if (!payload) {
       return value;
     }
 
-    if (value.expiresAt <= Date.now()) {
+    if (payload.expiresAt <= Date.now()) {
       await context.instance.removeItem(key).catch(() => undefined);
-      await notifyExpired(key, value.data, context, options);
+      await notifyExpired(key, payload.data, context, options);
       return null;
     }
 
-    return value.data as T;
+    return payload.data as T;
   },
   beforeSetItems: async <T>(
     entries: BatchItems<T>,
@@ -245,15 +289,16 @@ export const ttlPlugin = (
     const expiredEntries: Array<{ key: string; value: unknown }> = [];
 
     const result = entries.map(({ key, value }) => {
-      if (!isTtlPayload(value)) {
+      const payload = parseTtlPayload(value);
+      if (!payload) {
         return { key, value };
       }
-      if (value.expiresAt <= now) {
+      if (payload.expiresAt <= now) {
         expiredKeys.push(key);
-        expiredEntries.push({ key, value: value.data });
+        expiredEntries.push({ key, value: payload.data });
         return { key, value: null };
       }
-      return { key, value: value.data as T };
+      return { key, value: payload.data as T };
     });
 
     // Remove expired keys in batch

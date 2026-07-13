@@ -8,6 +8,10 @@ import { normalizeBatchEntries } from '../utils/helpers.js';
 import { toLocalSpaceError } from '../errors.js';
 import serializer from '../utils/serializer.js';
 import { compressToUint8Array, decompressFromUint8Array } from 'lz-string';
+import {
+  hasOwnPayloadField,
+  readPluginEnvelope,
+} from '../core/plugin-envelope.js';
 
 export interface CompressionCodec {
   compress(data: string): Promise<Uint8Array | string> | Uint8Array | string;
@@ -23,17 +27,62 @@ export interface CompressionPluginOptions {
   algorithm?: string;
 }
 
-type CompressionPayload = {
-  __ls_compressed: true;
+type CompressionPayloadBody = {
   algorithm: string;
   data: string;
   originalSize: number;
 };
 
-const isCompressionPayload = (value: unknown): value is CompressionPayload =>
-  !!value &&
-  typeof value === 'object' &&
-  (value as CompressionPayload).__ls_compressed === true;
+type CompressionPayload = CompressionPayloadBody & {
+  __ls_compressed: true;
+};
+
+const validateCompressionPayload = (value: unknown): CompressionPayloadBody => {
+  const payload = value as Partial<CompressionPayloadBody>;
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    typeof payload.algorithm !== 'string' ||
+    payload.algorithm.length === 0 ||
+    typeof payload.data !== 'string' ||
+    typeof payload.originalSize !== 'number' ||
+    !Number.isSafeInteger(payload.originalSize) ||
+    payload.originalSize < 0
+  ) {
+    throw toLocalSpaceError(
+      new Error('Invalid compression payload fields.'),
+      'DESERIALIZATION_FAILED',
+      'Failed to decompress payload: invalid compression payload.'
+    );
+  }
+  return payload as CompressionPayloadBody;
+};
+
+const parseCompressionPayload = (
+  value: unknown
+): CompressionPayloadBody | null => {
+  const envelope = readPluginEnvelope<unknown>(value, 'compression');
+  if (envelope.matched) {
+    return validateCompressionPayload(envelope.payload);
+  }
+
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    (value as Partial<CompressionPayload>).__ls_compressed !== true
+  ) {
+    return null;
+  }
+
+  const hasLegacyPayloadFields = ['algorithm', 'data', 'originalSize'].some(
+    (field) => hasOwnPayloadField(value, field)
+  );
+  if (!hasLegacyPayloadFields) {
+    return null;
+  }
+
+  return validateCompressionPayload(value);
+};
 
 const defaultCodec: CompressionCodec = {
   compress: (data: string) => compressToUint8Array(data),
@@ -112,11 +161,12 @@ export const compressionPlugin = (
       if (context.operationState.isBatch) {
         return value;
       }
-      if (!isCompressionPayload(value)) {
+      const payload = parseCompressionPayload(value);
+      if (!payload) {
         return value;
       }
       try {
-        const buffer = serializer.stringToBuffer(value.data);
+        const buffer = serializer.stringToBuffer(payload.data);
         const decompressed = await codec.decompress(new Uint8Array(buffer));
         return serializer.deserialize(decompressed) as T;
       } catch (error) {
@@ -178,11 +228,12 @@ export const compressionPlugin = (
     ): Promise<BatchResponse<T>> => {
       const decompressed = await Promise.all(
         entries.map(async ({ key, value }) => {
-          if (!isCompressionPayload(value)) {
+          const payload = parseCompressionPayload(value);
+          if (!payload) {
             return { key, value };
           }
           try {
-            const buffer = serializer.stringToBuffer(value.data);
+            const buffer = serializer.stringToBuffer(payload.data);
             const decompressedData = await codec.decompress(
               new Uint8Array(buffer)
             );

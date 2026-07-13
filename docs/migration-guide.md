@@ -44,6 +44,14 @@ warning could be attached: the `exports` map rejects them immediately. The
 release tests keep that boundary explicit rather than adding a temporary deep
 entry that would expand the supported package surface.
 
+### Prepare Plugin Data For 3.0 Rollback
+
+The 2.1 built-in plugin readers understand both legacy 2.x payloads and the
+versioned 3.0 envelope documented in the plugin guide. Writers remain on the
+legacy format in 2.1. This makes a data-layer rollback possible after a 3.0
+writer has been introduced, while unknown envelope versions fail explicitly
+instead of being exposed as plaintext or ordinary application objects.
+
 ## Upgrade From 1.x To 2.0
 
 Install the new major version:

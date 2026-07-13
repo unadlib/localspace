@@ -1,0 +1,183 @@
+{
+  "fixtureSchemaVersion": 1,
+  "contract": {
+    "namespace": "localspace.plugin",
+    "formatVersion": 1,
+    "legacyWriter": "2.0.x",
+    "futureWriter": "3.0.0-fixture",
+    "requiredReaders": ["2.1.x", "3.x"]
+  },
+  "keys": {
+    "encryption": "0123456789abcdef0123456789abcdef",
+    "wrongEncryption": "fedcba9876543210fedcba9876543210"
+  },
+  "legacy": {
+    "encryption": {
+      "expected": {
+        "message": "fixture-secret",
+        "writer": "2.0.x"
+      },
+      "stored": {
+        "__ls_encrypted": true,
+        "algorithm": "AES-GCM",
+        "iv": "AAECAwQFBgcICQoL",
+        "data": "VsfWGaprs8vN/kucF6apcJN6ZqpP2Rf5RaiZmJpS3u3JzkQ8c5clPqELw36nmhNkbrEHxiMWEQxSCwKDVw=="
+      }
+    },
+    "compression": {
+      "expected": {
+        "message": "fixture-compressed",
+        "values": [1, 2, 3],
+        "writer": "2.0.x"
+      },
+      "stored": {
+        "__ls_compressed": true,
+        "algorithm": "lz-string",
+        "originalSize": 66,
+        "data": "N4IgtgpgzlCGDmEQC4QDMCWAPALgVwCcIBaAYwHswAHImCAExABoQA3WAGz2hQG0BGJgCYmAZgC6LAO4EMOCARQghAOgAMKrCAC+QA=="
+      }
+    },
+    "ttl": {
+      "expected": {
+        "message": "fixture-ttl",
+        "writer": "2.0.x"
+      },
+      "stored": {
+        "__ls_ttl": true,
+        "data": {
+          "message": "fixture-ttl",
+          "writer": "2.0.x"
+        },
+        "expiresAt": 4102444800000
+      }
+    }
+  },
+  "future": {
+    "encryption": {
+      "expected": {
+        "message": "fixture-secret",
+        "writer": "2.0.x"
+      },
+      "stored": {
+        "__localspace__": {
+          "namespace": "localspace.plugin",
+          "kind": "encryption",
+          "version": 1
+        },
+        "payload": {
+          "algorithm": "AES-GCM",
+          "iv": "AAECAwQFBgcICQoL",
+          "data": "VsfWGaprs8vN/kucF6apcJN6ZqpP2Rf5RaiZmJpS3u3JzkQ8c5clPqELw36nmhNkbrEHxiMWEQxSCwKDVw=="
+        }
+      }
+    },
+    "compression": {
+      "expected": {
+        "message": "fixture-compressed",
+        "values": [1, 2, 3],
+        "writer": "2.0.x"
+      },
+      "stored": {
+        "__localspace__": {
+          "namespace": "localspace.plugin",
+          "kind": "compression",
+          "version": 1
+        },
+        "payload": {
+          "algorithm": "lz-string",
+          "originalSize": 66,
+          "data": "N4IgtgpgzlCGDmEQC4QDMCWAPALgVwCcIBaAYwHswAHImCAExABoQA3WAGz2hQG0BGJgCYmAZgC6LAO4EMOCARQghAOgAMKrCAC+QA=="
+        }
+      }
+    },
+    "ttl": {
+      "expected": {
+        "message": "fixture-ttl",
+        "writer": "2.0.x"
+      },
+      "stored": {
+        "__localspace__": {
+          "namespace": "localspace.plugin",
+          "kind": "ttl",
+          "version": 1
+        },
+        "payload": {
+          "data": {
+            "message": "fixture-ttl",
+            "writer": "2.0.x"
+          },
+          "expiresAt": 4102444800000
+        }
+      }
+    }
+  },
+  "markerCollisions": {
+    "encryption": {
+      "__ls_encrypted": true,
+      "applicationValue": "not an encryption payload"
+    },
+    "compression": {
+      "__ls_compressed": true,
+      "applicationValue": "not a compression payload"
+    },
+    "ttl": {
+      "__ls_ttl": true,
+      "applicationValue": "not a TTL payload"
+    },
+    "reservedLookalike": {
+      "__localspace__": {
+        "namespace": "application.data",
+        "kind": "ttl",
+        "version": 1
+      },
+      "payload": "ordinary user value"
+    }
+  },
+  "failures": {
+    "unknownVersion": {
+      "encryption": {
+        "__localspace__": {
+          "namespace": "localspace.plugin",
+          "kind": "encryption",
+          "version": 99
+        },
+        "payload": {}
+      },
+      "compression": {
+        "__localspace__": {
+          "namespace": "localspace.plugin",
+          "kind": "compression",
+          "version": 99
+        },
+        "payload": {}
+      },
+      "ttl": {
+        "__localspace__": {
+          "namespace": "localspace.plugin",
+          "kind": "ttl",
+          "version": 99
+        },
+        "payload": {}
+      }
+    },
+    "corrupted": {
+      "encryption": {
+        "__ls_encrypted": true,
+        "algorithm": "AES-GCM",
+        "iv": "AAECAwQFBgcICQoL",
+        "data": "not-base64"
+      },
+      "compression": {
+        "__ls_compressed": true,
+        "algorithm": "lz-string",
+        "originalSize": "66",
+        "data": "N4Igtgpg"
+      },
+      "ttl": {
+        "__ls_ttl": true,
+        "data": "value",
+        "expiresAt": "never"
+      }
+    }
+  }
+}

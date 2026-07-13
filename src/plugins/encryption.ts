@@ -8,6 +8,10 @@ import { normalizeBatchEntries } from '../utils/helpers.js';
 import { createLocalSpaceError, toLocalSpaceError } from '../errors.js';
 import serializer from '../utils/serializer.js';
 import { warnDeprecation } from '../utils/deprecations.js';
+import {
+  hasOwnPayloadField,
+  readPluginEnvelope,
+} from '../core/plugin-envelope.js';
 
 export interface EncryptionPluginOptions {
   /** Pre-shared CryptoKey or raw key material */
@@ -35,11 +39,14 @@ export interface EncryptionPluginOptions {
   randomSource?: (buffer: Uint8Array) => Uint8Array;
 }
 
-type EncryptedPayload = {
-  __ls_encrypted: true;
+type EncryptedPayloadBody = {
   algorithm: string;
   iv: string;
   data: string;
+};
+
+type EncryptedPayload = EncryptedPayloadBody & {
+  __ls_encrypted: true;
 };
 
 const AES_GCM = 'AES-GCM';
@@ -215,21 +222,11 @@ const importKey = async (
   return validateCryptoKey(derived);
 };
 
-const hasEncryptedMarker = (value: unknown): boolean => {
-  return (
-    !!value &&
-    typeof value === 'object' &&
-    (value as EncryptedPayload).__ls_encrypted === true
-  );
-};
-
-const parseEncryptedPayload = (value: unknown): EncryptedPayload | null => {
-  if (!hasEncryptedMarker(value)) {
-    return null;
-  }
-
-  const payload = value as Partial<EncryptedPayload>;
+const validateEncryptedPayload = (value: unknown): EncryptedPayloadBody => {
+  const payload = value as Partial<EncryptedPayloadBody>;
   if (
+    !payload ||
+    typeof payload !== 'object' ||
     payload.algorithm !== AES_GCM ||
     typeof payload.iv !== 'string' ||
     payload.iv.length === 0 ||
@@ -245,7 +242,31 @@ const parseEncryptedPayload = (value: unknown): EncryptedPayload | null => {
     );
   }
 
-  return payload as EncryptedPayload;
+  return payload as EncryptedPayloadBody;
+};
+
+const parseEncryptedPayload = (value: unknown): EncryptedPayloadBody | null => {
+  const envelope = readPluginEnvelope<unknown>(value, 'encryption');
+  if (envelope.matched) {
+    return validateEncryptedPayload(envelope.payload);
+  }
+
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    (value as Partial<EncryptedPayload>).__ls_encrypted !== true
+  ) {
+    return null;
+  }
+
+  const hasLegacyPayloadFields = ['algorithm', 'iv', 'data'].some((field) =>
+    hasOwnPayloadField(value, field)
+  );
+  if (!hasLegacyPayloadFields) {
+    return null;
+  }
+
+  return validateEncryptedPayload(value);
 };
 
 export const encryptionPlugin = (
@@ -393,7 +414,7 @@ export const encryptionPlugin = (
   };
 
   const decryptValue = async <T>(
-    payload: EncryptedPayload,
+    payload: EncryptedPayloadBody,
     itemKey?: string
   ): Promise<T> => {
     try {

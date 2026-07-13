@@ -60,6 +60,29 @@ Plugins are sorted by `priority` (higher runs first in `before*`, last in `after
 
 ## Built-in Plugins
 
+### Payload envelope compatibility
+
+LocalSpace 2.1 continues writing the legacy 2.x plugin payloads so an upgrade
+does not rewrite stored data. Its readers also accept the frozen 3.0 envelope:
+
+```ts
+{
+  __localspace__: {
+    namespace: 'localspace.plugin',
+    kind: 'encryption' | 'compression' | 'ttl',
+    version: 1,
+  },
+  payload: { /* kind-specific fields */ },
+}
+```
+
+Encryption payload fields are `algorithm`, `iv`, and `data`; compression uses
+`algorithm`, `data`, and `originalSize`; TTL uses `data` and `expiresAt`. The
+`__localspace__` namespace is reserved for internal envelopes. Readers reject
+an unknown version or malformed matching payload with
+`DESERIALIZATION_FAILED`; objects that merely resemble a legacy marker are
+left as user values.
+
 ### TTL Plugin
 
 Wraps values as `{ data, expiresAt }`, invalidates stale reads, and optionally runs background cleanup.
