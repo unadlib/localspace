@@ -1,10 +1,10 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, type PlaywrightTestConfig } from '@playwright/test';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig({
+export const sharedPlaywrightConfig = {
   testDir: path.join(rootDir, 'test', 'playwright'),
   timeout: 30 * 1000,
   fullyParallel: false,
@@ -24,4 +24,9 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 30 * 1000,
   },
+} satisfies PlaywrightTestConfig;
+
+export default defineConfig({
+  ...sharedPlaywrightConfig,
+  testIgnore: '**/*benchmark.spec.ts',
 });

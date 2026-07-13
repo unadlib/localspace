@@ -59,6 +59,7 @@
     "test:rn:integration:setup": "pnpm --filter localspace-rn-integration install --prod=false",
     "test:rn:integration": "pnpm run test:rn:integration:setup && pnpm run build && pnpm -C integration/react-native-jest test",
     "test:e2e": "pnpm run build && playwright test",
+    "test:benchmark": "pnpm run build && playwright test --config playwright.benchmark.config.ts",
     "test:exports": "pnpm run build && node test/package-exports.cjs && pnpm run test:types:package",
     "test:types:package": "tsc -p test/package-types/tsconfig.json",
     "test:e2e:coverage": "rimraf .nyc_output && pnpm run build && PLAYWRIGHT_COVERAGE=1 playwright test && nyc report --reporter=text-summary --reporter=html",

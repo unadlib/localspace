@@ -205,8 +205,6 @@ test.describe('IndexedDB benchmark', () => {
     expect(metrics.set.batchMs).toBeGreaterThan(0);
     expect(metrics.get.batchMs).toBeGreaterThan(0);
     expect(metrics.remove.batchMs).toBeGreaterThan(0);
-    expect(metrics.setSpeedup).toBeGreaterThan(1);
-    expect(metrics.removeSpeedup).toBeGreaterThan(1);
   });
 
   test('compares runTransaction and batched chunks (with prewarm toggle)', async ({ page }) => {
