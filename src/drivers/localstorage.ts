@@ -470,7 +470,7 @@ function dropInstance(
   const effectiveOptions: LocalSpaceConfig = { ...(options || {}) };
 
   if (!effectiveOptions.name) {
-    const currentConfig = this.config();
+    const currentConfig = this._config;
     effectiveOptions.name = currentConfig.name;
     effectiveOptions.storeName = currentConfig.storeName;
   }

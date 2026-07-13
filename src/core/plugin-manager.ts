@@ -12,6 +12,7 @@ import type {
 } from '../types.js';
 import { createLocalSpaceError, LocalSpaceError } from '../errors.js';
 import { normalizeBatchEntries } from '../utils/helpers.js';
+import { warnDeprecation } from '../utils/deprecations.js';
 
 export class PluginAbortError extends Error {
   constructor(message = 'Plugin aborted the operation') {
@@ -36,6 +37,16 @@ const BUILT_IN_STORAGE_TRANSFORM_PLUGINS = new Set([
   'compression',
   'ttl',
 ]);
+const COMBINED_PLUGIN_HOOK_PAIRS: Array<
+  [keyof LocalSpacePlugin, keyof LocalSpacePlugin]
+> = [
+  ['beforeSetItems', 'beforeSet'],
+  ['afterSetItems', 'afterSet'],
+  ['beforeGetItems', 'beforeGet'],
+  ['afterGetItems', 'afterGet'],
+  ['beforeRemoveItems', 'beforeRemove'],
+  ['afterRemoveItems', 'afterRemove'],
+];
 
 /**
  * Plugin combination warnings to help users avoid problematic configurations.
@@ -152,6 +163,19 @@ export class PluginManager {
   registerPlugins(plugins: LocalSpacePlugin[]): void {
     for (const plugin of plugins) {
       if (!plugin) continue;
+      if (
+        !BUILT_IN_STORAGE_TRANSFORM_PLUGINS.has(plugin.name) &&
+        COMBINED_PLUGIN_HOOK_PAIRS.some(
+          ([batchHook, singleHook]) =>
+            typeof plugin[batchHook] === 'function' &&
+            typeof plugin[singleHook] === 'function'
+        )
+      ) {
+        warnDeprecation(
+          'combined-plugin-hooks',
+          `plugin "${plugin.name}" defines matching batch and single hooks; define one form per phase before 3.0.`
+        );
+      }
       this.pluginRegistry.push({ plugin, order: this.orderCounter++ });
     }
     this.sortPlugins();

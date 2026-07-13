@@ -49,6 +49,7 @@ export type {
 };
 export type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from './errors.js';
 export { LocalSpaceError } from './errors.js';
+export { setDeprecationWarnings } from './utils/deprecations.js';
 
 // Export class for creating instances
 export { LocalSpace };

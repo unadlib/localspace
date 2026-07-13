@@ -27,6 +27,7 @@ import localstorageDriver from './drivers/localstorage.js';
 import memoryDriver from './drivers/memory.js';
 import { PluginManager } from './core/plugin-manager.js';
 import { normalizeConfigOptions } from './core/config.js';
+import { warnDeprecation } from './utils/deprecations.js';
 
 // Shared drivers across all instances
 const DefinedDrivers: DefinedDriversMap = {};
@@ -200,6 +201,12 @@ export class LocalSpace implements LocalSpaceInstance {
   constructor(options?: LocalSpaceOptions) {
     const driverInitializationPromises: Promise<void>[] = [];
     const { plugins = [], ...configOverrides } = options ?? {};
+    if (Object.prototype.hasOwnProperty.call(configOverrides, 'size')) {
+      warnDeprecation(
+        'legacy-size-option',
+        'the `size` option is ignored by built-in drivers and will be removed in 3.0.'
+      );
+    }
     const normalizedOverrides = normalizeConfigOptions(configOverrides);
 
     // Define default drivers
@@ -259,6 +266,12 @@ export class LocalSpace implements LocalSpaceInstance {
   config(): LocalSpaceConfig;
   config(optionsOrKey?: LocalSpaceConfig | keyof LocalSpaceConfig) {
     if (typeof optionsOrKey === 'object' && optionsOrKey !== null) {
+      if (Object.prototype.hasOwnProperty.call(optionsOrKey, 'size')) {
+        warnDeprecation(
+          'legacy-size-option',
+          'the `size` option is ignored by built-in drivers and will be removed in 3.0.'
+        );
+      }
       if (this._ready) {
         return createLocalSpaceError(
           'CONFIG_LOCKED',
@@ -304,6 +317,10 @@ export class LocalSpace implements LocalSpaceInstance {
       return this._config[key];
     }
 
+    warnDeprecation(
+      'mutable-config-reference',
+      'mutating the object returned by `config()` is deprecated; pass options to createInstance() instead.'
+    );
     return this._config;
   }
 
@@ -364,6 +381,10 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   async destroy(): Promise<void> {
+    warnDeprecation(
+      'destroy',
+      '`destroy()` is deprecated; use `close()` to release plugins and the active driver.'
+    );
     if (this._closed) {
       return this._closePromise ?? Promise.resolve();
     }

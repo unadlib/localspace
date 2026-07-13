@@ -172,7 +172,7 @@ class CredentialManager {
   async logout() {
     if (this.store) {
       await this.store.clear();
-      await this.store.destroy();
+      await this.store.close();
       this.store = null;
     }
   }

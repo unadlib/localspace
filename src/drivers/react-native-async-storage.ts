@@ -16,6 +16,7 @@ import {
   chunkArray,
 } from '../utils/helpers.js';
 import serializer from '../utils/serializer.js';
+import { warnDeprecation } from '../utils/deprecations.js';
 
 type ReactNativeAsyncStorageDbInfo = DbInfo & {
   keyPrefix: string;
@@ -217,6 +218,11 @@ async function resolveAsyncStorage(
   if (configured) {
     return configured;
   }
+
+  warnDeprecation(
+    'react-native-auto-detection',
+    'automatic React Native AsyncStorage detection is deprecated; inject `reactNativeAsyncStorage` explicitly.'
+  );
 
   const detected = await resolveRuntimeAsyncStorage();
   if (detected) {
@@ -620,7 +626,7 @@ function dropInstance(
   const effectiveOptions: LocalSpaceConfig = { ...(options || {}) };
 
   if (!effectiveOptions.name) {
-    const currentConfig = this.config();
+    const currentConfig = this._config;
     effectiveOptions.name = currentConfig.name;
     effectiveOptions.storeName = currentConfig.storeName;
   }

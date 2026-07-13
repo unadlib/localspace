@@ -231,6 +231,10 @@ const config = localspace.config();
 console.log(config.name, config.storeName);
 ```
 
+The 2.x getter still returns its historical mutable internal reference, but
+mutating that object is deprecated. Treat it as readonly and pass configuration
+to `createInstance()`; 3.0 returns a readonly snapshot.
+
 ### `config<K>(key: K): LocalSpaceConfig[K]`
 
 Returns a specific configuration value.
@@ -493,8 +497,9 @@ plugins. Use `clear()` or `dropInstance()` when data should be deleted.
 
 ### `destroy(): Promise<void>`
 
-Runs the existing plugin teardown lifecycle. It does not replace explicit data
-deletion.
+Deprecated in 2.1. Use `close()`, which runs initialized plugin cleanup and also
+releases the active driver without deleting data. `destroy()` retains its 2.0
+plugin-only behavior throughout the 2.x line.
 
 ```ts
 // Always call when disposing an instance with plugins

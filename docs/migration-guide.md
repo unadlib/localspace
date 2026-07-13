@@ -16,6 +16,34 @@ non-word characters with `_`, while the constructor preserved them. If an app
 used the setter and must reopen the old namespace, pass the already-normalized
 name explicitly (for example `my_store_name`) before upgrading.
 
+### Migrate 2.1 Deprecations Before 3.0
+
+LocalSpace 2.1 emits each deprecation category at most once in non-production
+runtimes. Warnings do not alter stored values or fallback order. They can be
+disabled for the current package copy when an application has its own migration
+telemetry:
+
+```ts
+import { setDeprecationWarnings } from 'localspace';
+
+setDeprecationWarnings(false);
+```
+
+| Deprecated 2.x behavior                              | Conservative migration                                                              |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| AES-CBC or AES-CTR configuration                     | Re-encrypt through an authenticated AES-GCM migration; 2.1 rejects these algorithms |
+| `size` configuration                                 | Remove it; built-in drivers have always ignored it as a quota control               |
+| `destroy()`                                          | Use idempotent, non-destructive `close()`                                           |
+| Mutating the object returned by `config()`           | Treat configuration as readonly and pass options to `createInstance()`              |
+| Matching batch and single hooks in one custom plugin | Define one hook form per phase; retain the 2.x `isBatch` guard until migrated       |
+| React Native adapter auto-detection                  | Import `localspace/react-native` and inject `reactNativeAsyncStorage` explicitly    |
+| Package deep imports                                 | Import only `localspace` or `localspace/react-native`                               |
+
+Package deep imports have no executable compatibility entry on which a runtime
+warning could be attached: the `exports` map rejects them immediately. The
+release tests keep that boundary explicit rather than adding a temporary deep
+entry that would expand the supported package surface.
+
 ## Upgrade From 1.x To 2.0
 
 Install the new major version:

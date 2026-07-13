@@ -280,6 +280,10 @@ export interface LocalSpaceInstance {
   config<K extends keyof LocalSpaceConfig>(
     key: K
   ): LocalSpaceConfig[K] | undefined;
+  /**
+   * @deprecated The mutable reference returned by this overload is retained
+   * for 2.x compatibility. Do not mutate it; 3.0 returns a readonly snapshot.
+   */
   config(): LocalSpaceConfig;
 
   /**
@@ -299,6 +303,8 @@ export interface LocalSpaceInstance {
 
   /**
    * Tear down plugins and release their resources.
+   * @deprecated Use close(), which also releases the active driver without
+   * deleting data.
    */
   destroy(): Promise<void>;
 
@@ -521,6 +527,9 @@ export interface LocalSpacePlugin {
    * If a plugin implements both forms, guard the single form with
    * `if (context.operationState.isBatch) return value;` so entries are not
    * processed twice. See docs/plugins.md "Batch vs single hooks".
+   *
+   * Combining a batch hook with its matching single hook is deprecated in
+   * 2.1. Define one form per phase when authoring new plugins.
    */
   beforeSetItems?<T>(
     entries: BatchItems<T>,

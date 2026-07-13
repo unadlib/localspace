@@ -1950,7 +1950,7 @@ function dropInstance(
   options?: LocalSpaceConfig
 ): Promise<void> {
   const self = this;
-  const currentConfig = self.config();
+  const currentConfig = self._config;
 
   // Normalize options
   const effectiveOptions: LocalSpaceConfig = {

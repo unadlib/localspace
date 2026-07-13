@@ -7,6 +7,7 @@ import type {
 import { normalizeBatchEntries } from '../utils/helpers.js';
 import { createLocalSpaceError, toLocalSpaceError } from '../errors.js';
 import serializer from '../utils/serializer.js';
+import { warnDeprecation } from '../utils/deprecations.js';
 
 export interface EncryptionPluginOptions {
   /** Pre-shared CryptoKey or raw key material */
@@ -19,7 +20,10 @@ export interface EncryptionPluginOptions {
     hash?: string;
     length?: number;
   };
-  /** Web Crypto algorithm parameters */
+  /**
+   * Web Crypto algorithm parameters. AES-CBC and AES-CTR are deprecated and
+   * rejected; use authenticated AES-GCM.
+   */
   algorithm?: AesGcmParams;
   /** IV length in bytes (default 12) */
   ivLength?: number;
@@ -247,6 +251,23 @@ const parseEncryptedPayload = (value: unknown): EncryptedPayload | null => {
 export const encryptionPlugin = (
   options: EncryptionPluginOptions
 ): LocalSpacePlugin => {
+  const ivLength = options.ivLength ?? 12;
+  const algorithmName = options.algorithm?.name ?? AES_GCM;
+
+  if (algorithmName === 'AES-CBC' || algorithmName === 'AES-CTR') {
+    warnDeprecation(
+      'legacy-encryption-algorithm',
+      `${algorithmName} encryption is deprecated and unsupported; migrate to AES-GCM.`
+    );
+  }
+  if (algorithmName !== AES_GCM) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      `Unsupported encryption algorithm: ${algorithmName}. Only ${AES_GCM} is supported.`,
+      { algorithm: algorithmName }
+    );
+  }
+
   const subtle = resolveSubtle(options);
   let keyPromise: Promise<CryptoKey> | null = null;
 
@@ -262,17 +283,6 @@ export const encryptionPlugin = (
     }
     return keyPromise;
   };
-
-  const ivLength = options.ivLength ?? 12;
-  const algorithmName = options.algorithm?.name ?? AES_GCM;
-
-  if (algorithmName !== AES_GCM) {
-    throw createLocalSpaceError(
-      'INVALID_CONFIG',
-      `Unsupported encryption algorithm: ${algorithmName}. Only ${AES_GCM} is supported.`,
-      { algorithm: algorithmName }
-    );
-  }
 
   if (!Number.isInteger(ivLength) || ivLength <= 0) {
     throw createLocalSpaceError(

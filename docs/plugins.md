@@ -38,7 +38,7 @@ const store = localspace.createInstance({
 
 - **Per-call state** – plugins can stash data on `context.operationState` (e.g., capture the original value in `beforeSet` and reuse it in `afterSet`). For batch operations, `context.operationState.isBatch` is `true` and `context.operationState.batchSize` provides the total count.
 
-- **Batch vs single hooks (important)** – a batch call such as `setItems()` invokes **both** the batch hook (`beforeSetItems`) **and** the per-entry single hook (`beforeSet`, once per entry). On the per-entry single hook, `context.operationState.isBatch` is `true`. A plugin that implements **both** the batch and the single form of a hook must guard the single form with `if (context.operationState.isBatch) return value;` to avoid processing each entry twice (e.g. double-encrypting). The built-in TTL, encryption, and compression plugins all follow this convention. A plugin that implements **only** the single hook (no batch form) does not need the guard: its `beforeSet`/`afterGet` still runs for every entry of a batch, with `isBatch` set so it can adapt if needed.
+- **Batch vs single hooks (deprecated combination)** – a 2.x batch call such as `setItems()` invokes **both** the batch hook (`beforeSetItems`) **and** the per-entry single hook (`beforeSet`, once per entry). On the per-entry single hook, `context.operationState.isBatch` is `true`. Defining both matching forms in a custom plugin is deprecated in 2.1; new plugins should define one form per phase. Existing plugins must keep the `if (context.operationState.isBatch) return value;` guard until migrated. The built-in TTL, encryption, and compression plugins retain this internal compatibility pattern through 2.x.
 
 - **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (validation failures, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'lenient'` reports and continues. The built-in encryption plugin always fails closed, including with the lenient policy; use `strict` for compression, TTL, or any correctness-critical custom plugin.
 
@@ -117,7 +117,8 @@ planned for 3.0.
 **Options:**
 
 - Provide a `key` (CryptoKey/ArrayBuffer/string) or `keyDerivation` block (PBKDF2)
-- Customize `algorithm`, `ivLength`, `ivGenerator`, or `randomSource`
+- Customize AES-GCM parameters, `ivLength`, `ivGenerator`, or `randomSource`.
+  AES-CBC and AES-CTR are deprecated and rejected in 2.1.
 - Works in browsers and modern Node runtimes (pass your own `subtle` when needed)
 
 ```ts

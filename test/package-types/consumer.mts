@@ -1,5 +1,6 @@
 import localspace, {
   LocalSpace,
+  setDeprecationWarnings,
   type BatchItems,
   type LocalSpaceInstance,
   type TransactionMode,
@@ -15,6 +16,7 @@ const mode: TransactionMode = 'readwrite';
 const options = {} as ReactNativeInstanceOptions;
 const legacySizeResult = instance.config({ size: 4_980_736 });
 const legacySize: number | undefined = instance.config('size');
+setDeprecationWarnings(false);
 
 void [
   localspace,
@@ -25,4 +27,5 @@ void [
   legacySizeResult,
   legacySize,
   createReactNativeInstance,
+  setDeprecationWarnings,
 ];

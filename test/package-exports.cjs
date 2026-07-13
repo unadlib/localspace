@@ -25,6 +25,21 @@ async function main() {
   assert.equal(typeof cjs.ttlPlugin, 'function');
   assert.equal('syncPlugin' in cjs, false);
   assert.equal('quotaPlugin' in cjs, false);
+  assert.equal(typeof cjs.setDeprecationWarnings, 'function');
+  assert.throws(
+    () => require('localspace/src/localspace'),
+    (error) => error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'
+  );
+  const originalWarn = console.warn;
+  const productionWarnings = [];
+  console.warn = (message) => productionWarnings.push(String(message));
+  try {
+    const productionInstance = new cjs.LocalSpace({ size: 1 });
+    productionInstance.config();
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.deepEqual(productionWarnings, []);
 
   const cjsReactNative = require('localspace/react-native');
   assert.equal(typeof cjsReactNative.createReactNativeInstance, 'function');
@@ -32,15 +47,22 @@ async function main() {
     typeof cjsReactNative.installReactNativeAsyncStorageDriver,
     'function'
   );
+  assert.equal(typeof cjsReactNative.setDeprecationWarnings, 'function');
 
   const esm = await import('localspace');
   assert.equal(typeof esm.LocalSpace, 'function');
   assert.equal(typeof esm.default?.setItem, 'function');
   assert.equal('syncPlugin' in esm, false);
   assert.equal('quotaPlugin' in esm, false);
+  assert.equal(typeof esm.setDeprecationWarnings, 'function');
+  await assert.rejects(
+    import('localspace/src/localspace'),
+    (error) => error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'
+  );
 
   const esmReactNative = await import('localspace/react-native');
   assert.equal(typeof esmReactNative.createReactNativeInstance, 'function');
+  assert.equal(typeof esmReactNative.setDeprecationWarnings, 'function');
 }
 
 main().catch((error) => {
