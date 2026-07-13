@@ -69,7 +69,10 @@ Wraps values as `{ data, expiresAt }`, invalidates stale reads, and optionally r
 - `defaultTTL` (ms) and exact-key `keyTTL` overrides
 - `cleanupInterval` to periodically scan expired entries
 - `cleanupBatchSize` (default: 100) for efficient batch cleanup
-- `onExpire(key, value)` callback before removal
+- `onExpire(key, value)` callback after the expired entry is removed. Under the
+  lenient policy callback failures are reported and the read still returns
+  `null`; under the strict policy the callback error is propagated after the
+  removal.
 
 ```ts
 // Cache API responses for 5 minutes

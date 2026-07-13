@@ -5,6 +5,7 @@ import type {
   BatchResponse,
 } from '../types.js';
 import { normalizeBatchEntries } from '../utils/helpers.js';
+import { toLocalSpaceError } from '../errors.js';
 
 export interface TTLPluginOptions {
   /** Default TTL in milliseconds applied when key-specific TTL is not defined */
@@ -60,6 +61,37 @@ const resolveTtl = (
     return options.keyTTL[key];
   }
   return options.defaultTTL;
+};
+
+const notifyExpired = async (
+  key: string,
+  value: unknown,
+  context: PluginContext,
+  options: TTLPluginOptions
+): Promise<void> => {
+  if (!options.onExpire) {
+    return;
+  }
+
+  try {
+    await options.onExpire(key, value);
+  } catch (error) {
+    const wrapped = toLocalSpaceError(
+      error,
+      'OPERATION_FAILED',
+      `TTL onExpire callback failed for key "${key}"`,
+      { key, operation: 'ttl.onExpire' }
+    );
+
+    if (context.config.pluginErrorPolicy === 'strict') {
+      throw wrapped;
+    }
+
+    console.warn(
+      `[localspace] TTL onExpire callback failed for key "${key}"`,
+      wrapped
+    );
+  }
 };
 
 const scheduleCleanup = (
@@ -176,9 +208,7 @@ export const ttlPlugin = (
 
     if (value.expiresAt <= Date.now()) {
       await context.instance.removeItem(key).catch(() => undefined);
-      if (options.onExpire) {
-        await options.onExpire(key, value.data);
-      }
+      await notifyExpired(key, value.data, context, options);
       return null;
     }
 
@@ -229,11 +259,9 @@ export const ttlPlugin = (
     // Remove expired keys in batch
     if (expiredKeys.length > 0) {
       await context.instance.removeItems(expiredKeys).catch(() => undefined);
-      // Call onExpire for each expired entry
-      if (options.onExpire) {
-        for (const entry of expiredEntries) {
-          await options.onExpire(entry.key, entry.value);
-        }
+      // Notify only after every expired key has been removed.
+      for (const entry of expiredEntries) {
+        await notifyExpired(entry.key, entry.value, context, options);
       }
     }
 
