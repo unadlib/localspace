@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import localspace, { LocalSpace, ttlPlugin } from '../src/index';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import localspace, { ttlPlugin } from '../src/index';
 import type { LocalSpaceInstance } from '../src/types';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -511,7 +511,7 @@ describe('Edge cases and concurrency tests', () => {
       }
 
       let count = 0;
-      await instance.iterate((value, key) => {
+      await instance.iterate(() => {
         count++;
         if (count === 10) {
           return 'stop'; // Early termination

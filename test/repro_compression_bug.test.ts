@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import localspace from '../src/index';
 import compressionPlugin from '../src/plugins/compression';
 

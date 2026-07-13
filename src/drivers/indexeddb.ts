@@ -212,7 +212,7 @@ function isIndexedDBValid(): boolean | Promise<boolean> {
     }
 
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 }

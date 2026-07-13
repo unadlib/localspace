@@ -25,9 +25,6 @@ const CONCURRENCY_CONFIG = {
   concurrency: 8,
 };
 
-const randomStoreName = (label: string) =>
-  `${label}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-
 async function ensureStoragesReady(page: Page) {
   await page.goto(fixtureUrl);
   await page.waitForFunction(

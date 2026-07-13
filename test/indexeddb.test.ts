@@ -21,7 +21,7 @@ describe('IndexedDB driver tests', () => {
     try {
       await instance.clear();
       await instance.dropInstance();
-    } catch (e) {
+    } catch {
       // Ignore cleanup errors
     }
   });

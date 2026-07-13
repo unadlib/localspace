@@ -56,7 +56,7 @@ function isLocalStorageValid(): boolean {
       'setItem' in localStorage &&
       !!localStorage.setItem
     );
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -80,7 +80,7 @@ function checkIfLocalStorageThrows(): boolean {
     localStorage.setItem(localStorageTestKey, 'true');
     localStorage.removeItem(localStorageTestKey);
     return false;
-  } catch (e) {
+  } catch {
     return true;
   }
 }

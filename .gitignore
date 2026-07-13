@@ -129,3 +129,4 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
 test-results
+/generated-docs/
