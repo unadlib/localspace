@@ -81,10 +81,17 @@ atomic.
 
 ### Use Transactions Only On Capable Drivers
 
-IndexedDB provides native transactions. The memory driver restores a snapshot
-after a failed readwrite transaction, but it is runtime-only and does not
-isolate concurrent callers. localStorage and React Native AsyncStorage reject
-`runTransaction()` with `UNSUPPORTED_OPERATION`.
+IndexedDB provides native transactions. Starting in 2.1, the memory driver uses
+a private copy plus a shared store-level write lock: ordinary readers see only
+committed values, and concurrent writers are serialized without rollback
+overwriting a successful external write. Memory data remains runtime-only.
+localStorage and React Native AsyncStorage reject `runTransaction()` with
+`UNSUPPORTED_OPERATION`.
+
+Starting in 2.1, IndexedDB keeps the native transaction open until an async
+runner settles. A runner that rejects after awaiting application work now
+aborts its earlier writes; 2.0 could reject after the browser had already
+committed them.
 
 LocalSpace 2.1 also rejects `runTransaction()` and `iterate()` while a built-in
 encryption, compression, or TTL plugin is active. Earlier 2.x releases exposed

@@ -177,11 +177,16 @@ await localspace.removeItems(['user:1', 'user:2', 'temp:session']);
 
 ### `runTransaction<T>(mode: 'readonly' | 'readwrite', runner: (scope: TransactionScope) => Promise<T> | T): Promise<T>`
 
-Executes multiple operations in a single transaction.
+Executes multiple operations in a single transaction. In LocalSpace 2.1,
+IndexedDB keeps the native transaction active until the runner settles, so an
+asynchronous runner rejection aborts earlier writes instead of reporting an
+error after they have committed.
 IndexedDB provides native atomic transactions. The memory driver provides
-snapshot rollback semantics. localStorage and React Native AsyncStorage reject
-this method with `UNSUPPORTED_OPERATION` because they cannot provide a real
-transaction.
+copy-on-write transactions with store-level write isolation. Ordinary readers
+see only committed memory values, while regular writes and other transactions
+wait for the active transaction. localStorage and React Native AsyncStorage
+reject this method with `UNSUPPORTED_OPERATION` because they cannot provide a
+real transaction.
 
 When the built-in encryption, compression, or TTL plugin is active, LocalSpace
 2.1 rejects `runTransaction()` with `UNSUPPORTED_OPERATION` before creating a

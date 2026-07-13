@@ -58,6 +58,44 @@ test.describe('localspace browser interoperability', () => {
     expect(result.iterated[1]?.iteration).toBe(2);
   });
 
+  test('IndexedDB transaction rolls back after a delayed runner failure', async ({
+    page,
+  }) => {
+    await ensureFixtureReady(page);
+
+    const result = await page.evaluate(async (storeName) => {
+      const localspace = (window as any).localspace;
+      const instance = localspace.createInstance({
+        name: 'playwright-suite',
+        storeName,
+        prewarmTransactions: false,
+      });
+
+      await instance.setDriver([instance.INDEXEDDB]);
+      await instance.ready();
+      await instance.setItem('value', 'original');
+
+      let errorMessage = '';
+      try {
+        await instance.runTransaction('readwrite', async (scope: any) => {
+          await scope.set('value', 'modified');
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          throw new Error('late runner failure');
+        });
+      } catch (error) {
+        errorMessage = error instanceof Error ? error.message : String(error);
+      }
+
+      return {
+        errorMessage,
+        storedValue: await instance.getItem('value'),
+      };
+    }, randomStoreName('transaction-rollback'));
+
+    expect(result.errorMessage).toContain('late runner failure');
+    expect(result.storedValue).toBe('original');
+  });
+
   test('clear() resets length and keys', async ({ page }) => {
     await ensureFixtureReady(page);
 

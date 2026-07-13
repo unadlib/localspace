@@ -1332,10 +1332,12 @@ function runTransaction<T>(
       const dbInfo = self._dbInfo;
       // Compute blob support once up front so we don't pause an empty transaction later.
       let precomputedBlobSupport: boolean | undefined;
-      try {
-        precomputedBlobSupport = await ensureBlobSupportForDb(dbInfo);
-      } catch {
-        precomputedBlobSupport = undefined;
+      if (mode === READ_WRITE) {
+        try {
+          precomputedBlobSupport = await ensureBlobSupportForDb(dbInfo);
+        } catch {
+          precomputedBlobSupport = undefined;
+        }
       }
       createTransaction(
         dbInfo,
@@ -1478,37 +1480,105 @@ function runTransaction<T>(
                 }),
             };
 
-            const runnerPromise = Promise.resolve().then(() => runner(scope));
-            const completion = new Promise<void>((res, rej) => {
-              transaction.oncomplete = () => res();
-              transaction.onabort = () =>
-                rej(transaction.error || new Error('Transaction aborted'));
-              transaction.onerror = () =>
-                rej(transaction.error || new Error('Transaction error'));
-            });
+            let keepAliveActive = true;
+            let operationSettled = false;
+            let runnerSettled = false;
+            let runnerFailed = false;
+            let runnerValue: T | undefined;
+            let runnerError: unknown;
 
-            const guardedRunner = runnerPromise.catch((runnerError) => {
+            const settleResolve = (value: T) => {
+              if (operationSettled) return;
+              operationSettled = true;
+              resolve(value);
+            };
+
+            const settleReject = (error: unknown) => {
+              if (operationSettled) return;
+              operationSettled = true;
+              reject(error);
+            };
+
+            const stopKeepAlive = () => {
+              keepAliveActive = false;
+            };
+
+            const keepTransactionAlive = () => {
+              if (!keepAliveActive) return;
               try {
-                transaction.abort();
-              } catch {
-                // ignore abort issues
+                const request = store.count();
+                request.onsuccess = () => {
+                  if (keepAliveActive) {
+                    keepTransactionAlive();
+                  }
+                };
+                request.onerror = () => {
+                  stopKeepAlive();
+                };
+              } catch (error) {
+                stopKeepAlive();
+                settleReject(error);
               }
-              throw runnerError;
-            });
+            };
 
-            Promise.allSettled([guardedRunner, completion]).then(
-              ([runnerOutcome, completionOutcome]) => {
-                if (runnerOutcome.status === 'rejected') {
-                  reject(runnerOutcome.reason);
-                  return;
-                }
-                if (completionOutcome.status === 'rejected') {
-                  reject(completionOutcome.reason);
-                  return;
-                }
-                resolve(runnerOutcome.value);
+            transaction.oncomplete = () => {
+              stopKeepAlive();
+              if (runnerFailed) {
+                settleReject(runnerError);
+                return;
               }
-            );
+              if (!runnerSettled) {
+                settleReject(
+                  new Error('Transaction completed before runner settled')
+                );
+                return;
+              }
+              settleResolve(runnerValue as T);
+            };
+
+            transaction.onabort = () => {
+              stopKeepAlive();
+              settleReject(
+                runnerFailed
+                  ? runnerError
+                  : (transaction.error ?? new Error('Transaction aborted'))
+              );
+            };
+
+            transaction.onerror = () => {
+              stopKeepAlive();
+              settleReject(
+                runnerFailed
+                  ? runnerError
+                  : (transaction.error ?? new Error('Transaction error'))
+              );
+            };
+
+            // Queue a harmless request before yielding to the runner. Chaining
+            // another request from each success event prevents IndexedDB from
+            // auto-committing while the runner awaits an arbitrary Promise.
+            keepTransactionAlive();
+
+            Promise.resolve()
+              .then(() => runner(scope))
+              .then(
+                (value) => {
+                  runnerSettled = true;
+                  runnerValue = value;
+                  stopKeepAlive();
+                },
+                (error) => {
+                  runnerSettled = true;
+                  runnerFailed = true;
+                  runnerError = error;
+                  stopKeepAlive();
+                  try {
+                    transaction.abort();
+                  } catch (abortError) {
+                    settleReject(runnerFailed ? runnerError : abortError);
+                  }
+                }
+              );
           } catch (error) {
             reject(error as Error);
           }
