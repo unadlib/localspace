@@ -102,6 +102,42 @@ describe('LocalSpace.close', () => {
     await observer.dropInstance();
   });
 
+  it('retries unfinished driver cleanup after close rejects', async () => {
+    const cleanupError = new Error('transient cleanup failure');
+    const closeStorage = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(cleanupError)
+      .mockResolvedValue(undefined);
+    const driver = createClosableMemoryDriver(
+      uniqueName('retry-close-driver'),
+      closeStorage
+    );
+    const instance = new LocalSpace({
+      name: uniqueName('retry-close'),
+      storeName: 'store',
+    });
+    await instance.defineDriver(driver);
+    await instance.setDriver([driver._driver]);
+    await instance.setItem('key', 'value');
+
+    const firstClose = instance.close();
+    expect(instance.close()).toBe(firstClose);
+    await expect(firstClose).rejects.toMatchObject({
+      code: 'OPERATION_FAILED',
+      cause: cleanupError,
+      details: { operation: 'close' },
+    });
+    await expect(instance.getItem('key')).rejects.toMatchObject({
+      code: 'INSTANCE_CLOSED',
+    });
+
+    const retry = instance.close();
+    expect(retry).not.toBe(firstClose);
+    await retry;
+    await instance.close();
+    expect(closeStorage).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects close while plugin initialization is in flight', async () => {
     let releaseInitialization!: () => void;
     let markInitializationStarted!: () => void;
@@ -882,6 +918,50 @@ describe('LocalSpace.close', () => {
     expect(oldDriverClose).toHaveBeenCalledTimes(1);
     expect(newDriverInit).not.toHaveBeenCalled();
     expect(newDriverClose).not.toHaveBeenCalled();
+  });
+
+  it('retries current driver cleanup after a driver switch rejects', async () => {
+    const cleanupError = new Error('transient switch cleanup failure');
+    const oldDriverClose = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(cleanupError)
+      .mockResolvedValue(undefined);
+    const newDriverClose = vi.fn(async () => undefined);
+    const oldDriver = createClosableMemoryDriver(
+      uniqueName('retry-switch-old'),
+      oldDriverClose
+    );
+    const newDriver = createClosableMemoryDriver(
+      uniqueName('retry-switch-new'),
+      newDriverClose
+    );
+    const instance = new LocalSpace({
+      name: uniqueName('retry-driver-switch'),
+      storeName: 'store',
+    });
+    await instance.defineDriver(oldDriver);
+    await instance.defineDriver(newDriver);
+    await instance.setDriver([oldDriver._driver]);
+    await instance.setItem('before-switch', 'value');
+
+    await expect(instance.setDriver([newDriver._driver])).rejects.toMatchObject({
+      code: 'OPERATION_FAILED',
+      cause: cleanupError,
+      details: { operation: 'setDriver' },
+    });
+    expect(instance.driver()).toBe(oldDriver._driver);
+    expect(oldDriverClose).toHaveBeenCalledTimes(1);
+
+    await instance.setDriver([newDriver._driver]);
+    await instance.ready();
+    expect(instance.driver()).toBe(newDriver._driver);
+    expect(oldDriverClose).toHaveBeenCalledTimes(2);
+    await expect(instance.setItem('after-switch', 'value')).resolves.toBe(
+      'value'
+    );
+
+    await instance.close();
+    expect(newDriverClose).toHaveBeenCalledTimes(1);
   });
 
   it('rejects close until the active operation settles', async () => {

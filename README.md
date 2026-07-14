@@ -182,6 +182,9 @@ await cache.close();
 `close()` is idempotent. It cleans initialized plugins and releases the active
 driver connection; later operations reject with `INSTANCE_CLOSED`. Use
 `clear()` or `dropInstance()` only when stored data should be removed.
+If custom-driver cleanup rejects, the instance remains closed but retains the
+unfinished cleanup handle; call `close()` again to retry it. Concurrent calls
+share one attempt, and cleanup that already succeeded is not repeated.
 `destroy()` is deprecated and retains its legacy plugin-only behavior in 2.x.
 If a concurrent legacy `destroy()` has already started plugin initialization,
 `close()` waits for that complete initialization pass before teardown.

@@ -415,12 +415,10 @@ export class LocalSpace implements LocalSpaceInstance {
         return Promise.reject(error);
       }
       this._closed = true;
-      this._closePromise = this._performCloseCleanup();
-      return this._closePromise;
+      return this._trackCloseAttempt(this._performCloseCleanup());
     }
 
-    let closeAttempt!: Promise<void>;
-    closeAttempt = (async () => {
+    const closeAttempt = (async () => {
       try {
         await backgroundTasks.settled;
         this._assertLifecycleIdle('close');
@@ -431,13 +429,20 @@ export class LocalSpace implements LocalSpaceInstance {
 
       this._closed = true;
       await this._performCloseCleanup();
-    })().finally(() => {
-      if (!this._closed && this._closePromise === closeAttempt) {
+    })();
+    return this._trackCloseAttempt(closeAttempt);
+  }
+
+  private _trackCloseAttempt(closeAttempt: Promise<void>): Promise<void> {
+    let trackedAttempt!: Promise<void>;
+    trackedAttempt = closeAttempt.catch((error) => {
+      if (this._closePromise === trackedAttempt) {
         this._closePromise = null;
       }
+      throw error;
     });
-    this._closePromise = closeAttempt;
-    return closeAttempt;
+    this._closePromise = trackedAttempt;
+    return trackedAttempt;
   }
 
   private async _performCloseCleanup(): Promise<void> {
@@ -493,7 +498,7 @@ export class LocalSpace implements LocalSpaceInstance {
       '`destroy()` is deprecated; use `close()` to release plugins and the active driver.'
     );
     if (this._closed) {
-      return this._closePromise ?? Promise.resolve();
+      return this._closePromise ?? this.close();
     }
     await this._pluginManager.ensureInitialized();
     await this._pluginManager.destroy();
@@ -1450,19 +1455,20 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   private async _releaseActiveDriver(): Promise<void> {
-    const closeStorage = this._driverInitialized
-      ? this._activeDriverClose
-      : null;
+    if (!this._driverInitialized) {
+      this._activeDriverClose = null;
+      this._dbInfo = null;
+      return;
+    }
+
+    const closeStorage = this._activeDriverClose;
+    if (closeStorage) {
+      await closeStorage();
+    }
+
     this._activeDriverClose = null;
     this._driverInitialized = false;
-
-    try {
-      if (closeStorage) {
-        await closeStorage();
-      }
-    } finally {
-      this._dbInfo = null;
-    }
+    this._dbInfo = null;
   }
 
   private _closedError(operation: string): LocalSpaceError {

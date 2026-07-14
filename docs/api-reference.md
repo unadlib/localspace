@@ -479,7 +479,8 @@ the callback is pending, so same-instance storage and lifecycle calls reject
 with `details.reason === 'lifecycle-reentrancy'` instead of self-deadlocking.
 The same receiver object is used for initialization, driver operations, and
 cleanup, so identity-keyed driver state remains available throughout its
-lifetime.
+lifetime. If `_closeStorage()` rejects, a later `close()` or `setDriver()` can
+invoke it again; custom drivers must make cleanup retries safe.
 
 `_support`, batch methods, `runTransaction()`, and `dropInstance()` are optional
 driver capabilities. Calling an omitted capability through a selected instance
@@ -549,6 +550,11 @@ await store.close();
 
 Calling `close()` on an unused instance does not initialize its driver or
 plugins. Use `clear()` or `dropInstance()` when data should be deleted.
+If custom-driver cleanup rejects, the instance remains terminal and rejects
+storage operations with `INSTANCE_CLOSED`, but another `close()` call retries
+the unfinished driver cleanup. Concurrent calls share an attempt, and cleanup
+that has already completed is not repeated. A failed `setDriver()` release is
+similarly retained for the next driver-switch attempt.
 If a concurrent legacy `destroy()` has already started plugin initialization,
 `close()` waits for that complete initialization pass before teardown.
 If the built-in TTL plugin is sweeping expired entries, `close()` stops its

@@ -58,6 +58,9 @@
   quota, plugin, and browser errors through `cause` and structured details.
 - Keyed shared IndexedDB contexts by the resolved backend, deduplicated
   registrations, and released the final connection without deleting data.
+- Retained unfinished custom-driver cleanup after a rejected `close()` or
+  `setDriver()` so a later lifecycle call can retry without rerunning cleanup
+  that already succeeded.
 
 ### Deprecated
 
@@ -75,6 +78,8 @@
   browser correctness tests from opt-in performance benchmarks.
 - Continued package-consumer coverage for ESM, CommonJS, React Native subpath,
   public types, production warning silence, and blocked deep imports.
+- Made published bundle source maps resolve directly to TypeScript sources and
+  made browser coverage fail when LocalSpace coverage cannot be mapped to them.
 
 ### Migration
 

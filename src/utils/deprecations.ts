@@ -46,17 +46,23 @@ const getDeprecationState = (): DeprecationState => {
 const deprecationState = getDeprecationState();
 
 const isProductionRuntime = (): boolean => {
-  const nodeEnv =
-    typeof process !== 'undefined' && process.env
-      ? process.env.NODE_ENV
-      : undefined;
-  if (typeof nodeEnv === 'string') {
-    return nodeEnv === 'production';
+  if (typeof process !== 'undefined') {
+    const nodeEnv = process.env?.NODE_ENV;
+    if (typeof nodeEnv === 'string') {
+      return nodeEnv === 'production';
+    }
+
+    // NODE_ENV is commonly omitted when Node applications are run directly.
+    // A real Node process is still a development runtime in that case, while
+    // browser shims with an empty `process.env` must use the bundle fallback.
+    if (typeof process.versions?.node === 'string') {
+      return false;
+    }
   }
 
   // Direct browser bundles have no standard runtime environment flag. They
-  // use the build-time production fallback while consumer bundlers and Node
-  // can still replace/read NODE_ENV dynamically.
+  // use the build-time production fallback while consumer bundlers can still
+  // replace/read NODE_ENV dynamically.
   return typeof __DEV__ === 'undefined' || !__DEV__;
 };
 

@@ -1,8 +1,37 @@
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const packageJson = require('../package.json');
+
+function probeUnsetNodeEnv(moduleKind) {
+  const loadLocalSpace =
+    moduleKind === 'esm'
+      ? "const { LocalSpace } = await import('localspace');"
+      : "const { LocalSpace } = require('localspace');";
+  const source = `
+const warnings = [];
+console.warn = (message) => warnings.push(String(message));
+delete process.env.NODE_ENV;
+${loadLocalSpace}
+new LocalSpace({ size: 1 });
+process.stdout.write(JSON.stringify(warnings));`;
+  const env = { ...process.env };
+  delete env.NODE_ENV;
+  const args =
+    moduleKind === 'esm'
+      ? ['--input-type=module', '--eval', source]
+      : ['--eval', source];
+  const result = spawnSync(process.execPath, args, {
+    cwd: path.join(__dirname, '..'),
+    encoding: 'utf8',
+    env,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout);
+}
 
 async function main() {
   assert.equal(packageJson.exports['.'].require.types, './dist/index.d.cts');
@@ -64,6 +93,11 @@ async function main() {
   assert.deepEqual(developmentWarnings, [
     '[localspace] Deprecation: the `size` option is ignored by built-in drivers and will be removed in 3.0.',
   ]);
+
+  const unsetNodeEnvWarning =
+    '[localspace] Deprecation: the `size` option is ignored by built-in drivers and will be removed in 3.0.';
+  assert.deepEqual(probeUnsetNodeEnv('cjs'), [unsetNodeEnvWarning]);
+  assert.deepEqual(probeUnsetNodeEnv('esm'), [unsetNodeEnvWarning]);
 
   const cjsReactNative = require('localspace/react-native');
   assert.equal(typeof cjsReactNative.createReactNativeInstance, 'function');

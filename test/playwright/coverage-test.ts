@@ -7,8 +7,13 @@ import { fileURLToPath } from 'node:url';
 import v8toIstanbul from 'v8-to-istanbul';
 
 const COVERAGE_ENV = process.env.PLAYWRIGHT_COVERAGE === '1';
-const COVERAGE_DIR = path.join(process.cwd(), '.nyc_output');
-let warnedCoverageUnavailable = false;
+const WORKSPACE_ROOT = path.resolve(process.cwd());
+const COVERAGE_DIR = path.join(WORKSPACE_ROOT, '.nyc_output');
+const SOURCE_ROOT = path.join(WORKSPACE_ROOT, 'src');
+const LOCALSPACE_BROWSER_BUNDLES = new Set([
+  path.join(WORKSPACE_ROOT, 'dist', 'index.esm.js'),
+  path.join(WORKSPACE_ROOT, 'dist', 'index.umd.js'),
+]);
 
 const randomId = () =>
   typeof crypto.randomUUID === 'function'
@@ -17,6 +22,19 @@ const randomId = () =>
 
 const sanitizeFileName = (value: string) =>
   value.replace(/[^a-zA-Z0-9.-]+/g, '_') || `anonymous_${randomId()}`;
+
+const isWithin = (candidate: string, root: string): boolean => {
+  const relative = path.relative(root, candidate);
+  return (
+    relative === '' ||
+    (!relative.startsWith('..') && !path.isAbsolute(relative))
+  );
+};
+
+const resolveServedPath = (pathname: string): string | null => {
+  const candidate = path.resolve(WORKSPACE_ROOT, pathname.replace(/^\/+/, ''));
+  return isWithin(candidate, WORKSPACE_ROOT) ? candidate : null;
+};
 
 const normalizeScriptUrl = (url?: string): string | null => {
   if (!url) {
@@ -30,7 +48,8 @@ const normalizeScriptUrl = (url?: string): string | null => {
   if (url.startsWith('http://') || url.startsWith('https://')) {
     try {
       const parsed = new URL(url);
-      return decodeURIComponent(parsed.pathname) || parsed.href;
+      const scriptPath = resolveServedPath(decodeURIComponent(parsed.pathname));
+      return scriptPath ?? parsed.href;
     } catch {
       return url;
     }
@@ -39,21 +58,47 @@ const normalizeScriptUrl = (url?: string): string | null => {
   return url;
 };
 
-type CoverageEntry = Awaited<ReturnType<Page['coverage']['stopJSCoverage']>>[number];
+const isLocalSpaceSource = (fileName: string): boolean => {
+  if (fileName.startsWith('file://')) {
+    return isWithin(fileURLToPath(fileName), SOURCE_ROOT);
+  }
+
+  if (!path.isAbsolute(fileName)) {
+    return isWithin(path.resolve(WORKSPACE_ROOT, fileName), SOURCE_ROOT);
+  }
+
+  return isWithin(fileName, SOURCE_ROOT);
+};
+
+type CoverageEntry = Awaited<
+  ReturnType<Page['coverage']['stopJSCoverage']>
+>[number];
 
 async function persistCoverage(entries: CoverageEntry[]): Promise<void> {
-  if (!entries.length) {
+  const localSpaceEntries = entries
+    .map((entry) => ({
+      entry,
+      scriptPath: normalizeScriptUrl(entry.url),
+    }))
+    .filter(
+      (candidate): candidate is { entry: CoverageEntry; scriptPath: string } =>
+        candidate.scriptPath !== null &&
+        LOCALSPACE_BROWSER_BUNDLES.has(candidate.scriptPath)
+    );
+
+  if (localSpaceEntries.length === 0) {
     return;
   }
 
   await fs.mkdir(COVERAGE_DIR, { recursive: true });
 
-  for (const entry of entries) {
+  for (const { entry, scriptPath } of localSpaceEntries) {
     if (!entry.functions?.length) {
-      continue;
+      throw new Error(
+        `[playwright-coverage] LocalSpace bundle has no V8 function coverage: ${entry.url}`
+      );
     }
 
-    const scriptPath = normalizeScriptUrl(entry.url) ?? `anonymous://${randomId()}`;
     try {
       const converter = v8toIstanbul(scriptPath, 0, {
         source: entry.source,
@@ -61,20 +106,23 @@ async function persistCoverage(entries: CoverageEntry[]): Promise<void> {
       await converter.load();
       converter.applyCoverage(entry.functions);
       const istanbulCoverage = converter.toIstanbul();
+      if (!Object.keys(istanbulCoverage).some(isLocalSpaceSource)) {
+        throw new Error(
+          `source map for ${entry.url} did not resolve to the local src directory`
+        );
+      }
       const fileName = `${sanitizeFileName(scriptPath)}-${randomId()}.json`;
       await fs.writeFile(
         path.join(COVERAGE_DIR, fileName),
         JSON.stringify(istanbulCoverage),
-        'utf-8',
+        'utf-8'
       );
     } catch (error) {
-      if (!warnedCoverageUnavailable) {
-        console.warn(
-          '[playwright-coverage] Failed to process coverage entry. Subsequent errors will be suppressed.',
-          error,
-        );
-        warnedCoverageUnavailable = true;
-      }
+      const coverageError = new Error(
+        `[playwright-coverage] Failed to map LocalSpace bundle coverage: ${entry.url}`
+      );
+      (coverageError as Error & { cause?: unknown }).cause = error;
+      throw coverageError;
     }
   }
 }
@@ -82,38 +130,12 @@ async function persistCoverage(entries: CoverageEntry[]): Promise<void> {
 const coverageAwareTest = COVERAGE_ENV
   ? base.extend({
       page: async ({ page }, use) => {
-        let collecting = false;
-        if (COVERAGE_ENV) {
-          try {
-            await page.coverage.startJSCoverage({ reportAnonymousScripts: true });
-            collecting = true;
-          } catch (error) {
-            if (!warnedCoverageUnavailable) {
-              console.warn(
-                '[playwright-coverage] Unable to start V8 coverage collection. Subsequent warnings will be suppressed.',
-                error,
-              );
-              warnedCoverageUnavailable = true;
-            }
-          }
-        }
+        await page.coverage.startJSCoverage();
 
         await use(page);
 
-        if (collecting) {
-          try {
-            const coverage = await page.coverage.stopJSCoverage();
-            await persistCoverage(coverage);
-          } catch (error) {
-            if (!warnedCoverageUnavailable) {
-              console.warn(
-                '[playwright-coverage] Unable to stop V8 coverage collection. Subsequent warnings will be suppressed.',
-                error,
-              );
-              warnedCoverageUnavailable = true;
-            }
-          }
-        }
+        const coverage = await page.coverage.stopJSCoverage();
+        await persistCoverage(coverage);
       },
     })
   : base;

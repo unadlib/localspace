@@ -1,5 +1,9 @@
 import { readFileSync } from 'node:fs';
-import { defineConfig, type OutputOptions, type RolldownOptions } from 'rolldown';
+import {
+  defineConfig,
+  type OutputOptions,
+  type RolldownOptions,
+} from 'rolldown';
 
 const pkg = JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf8')
@@ -38,10 +42,15 @@ const minifiedOutput = {
   minify: true,
 } satisfies Partial<OutputOptions>;
 
+// Bundle original TypeScript so published source maps do not stop at tsc's
+// intermediate JavaScript in dist.
+const mainInput = './src/index.ts';
+const reactNativeInput = './src/react-native.ts';
+
 export default defineConfig([
   {
     ...universalOptions,
-    input: './dist/index.js',
+    input: mainInput,
     output: [
       {
         ...minifiedOutput,
@@ -58,7 +67,7 @@ export default defineConfig([
   },
   {
     ...browserOptions,
-    input: './dist/index.js',
+    input: mainInput,
     output: {
       ...minifiedOutput,
       format: 'umd',
@@ -69,7 +78,7 @@ export default defineConfig([
   },
   {
     ...universalOptions,
-    input: './dist/react-native.js',
+    input: reactNativeInput,
     output: [
       {
         ...minifiedOutput,
