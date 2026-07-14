@@ -32,14 +32,15 @@ type PluginHost = LocalSpaceInstance & {
   _dbInfo: DbInfo | null;
 };
 
+type PluginLifecycleInvocation = {
+  instance: LocalSpaceInstance;
+  invoke<T>(callback: () => T): Promise<Awaited<T>>;
+};
+
 type PluginLifecycleBridge = {
-  createGuardedInstance(
+  createInvocation(
     lifecycle: 'plugin-init' | 'plugin-destroy'
-  ): LocalSpaceInstance;
-  invoke<T>(
-    lifecycle: 'plugin-init' | 'plugin-destroy',
-    callback: () => T
-  ): T;
+  ): PluginLifecycleInvocation;
 };
 
 type RegisteredPlugin = {
@@ -166,6 +167,8 @@ export class PluginManager {
     LocalSpacePlugin,
     Promise<void>
   >();
+
+  private readonly initializationPasses = new Set<Promise<void>>();
 
   private readonly destroyed = new WeakSet<LocalSpacePlugin>();
 
@@ -298,7 +301,17 @@ export class PluginManager {
     return reverse ? plugins.slice().reverse() : plugins;
   }
 
-  async ensureInitialized(): Promise<void> {
+  ensureInitialized(): Promise<void> {
+    const initializationPass = this.initializePlugins();
+    this.initializationPasses.add(initializationPass);
+    const stopTracking = () => {
+      this.initializationPasses.delete(initializationPass);
+    };
+    void initializationPass.then(stopTracking, stopTracking);
+    return initializationPass;
+  }
+
+  private async initializePlugins(): Promise<void> {
     for (const plugin of this.getActivePlugins()) {
       if (this.initialized.has(plugin)) {
         continue;
@@ -315,12 +328,11 @@ export class PluginManager {
         continue;
       }
 
-      const context = this.createContext(null, 'plugin-init');
+      const lifecycle = this.lifecycleBridge.createInvocation('plugin-init');
+      const context = this.createContext(null, lifecycle.instance);
       const initPromise = (async () => {
         try {
-          await this.lifecycleBridge.invoke('plugin-init', () =>
-            plugin.onInit!(context)
-          );
+          await lifecycle.invoke(() => plugin.onInit!(context));
           this.initialized.add(plugin);
         } catch (error) {
           await this.dispatchPluginError(
@@ -349,12 +361,10 @@ export class PluginManager {
 
   createContext(
     operation: PluginOperation | null,
-    lifecycle?: 'plugin-init' | 'plugin-destroy'
+    instance: LocalSpaceInstance = this.host
   ): PluginContext {
     return {
-      instance: lifecycle
-        ? this.lifecycleBridge.createGuardedInstance(lifecycle)
-        : this.host,
+      instance,
       driver: this.host.driver ? this.host.driver() : null,
       dbInfo: this.host._dbInfo ?? null,
       config: this.host._config,
@@ -607,11 +617,9 @@ export class PluginManager {
   }
 
   async destroyInitialized(): Promise<void> {
-    await Promise.allSettled(
-      this.pluginRegistry
-        .map(({ plugin }) => this.initPromises.get(plugin))
-        .filter((promise): promise is Promise<void> => !!promise)
-    );
+    while (this.initializationPasses.size > 0) {
+      await Promise.allSettled([...this.initializationPasses]);
+    }
     await this.destroyPlugins(true);
   }
 
@@ -673,12 +681,11 @@ export class PluginManager {
         this.destroyed.add(plugin);
         continue;
       }
-      const context = this.createContext(null, 'plugin-destroy');
+      const lifecycle = this.lifecycleBridge.createInvocation('plugin-destroy');
+      const context = this.createContext(null, lifecycle.instance);
       const destroyPromise = Promise.resolve().then(async () => {
         try {
-          await this.lifecycleBridge.invoke('plugin-destroy', () =>
-            plugin.onDestroy!(context)
-          );
+          await lifecycle.invoke(() => plugin.onDestroy!(context));
         } catch (error) {
           await this.dispatchPluginError(
             plugin,

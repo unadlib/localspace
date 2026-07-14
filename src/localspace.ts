@@ -95,6 +95,16 @@ type LifecycleCallback =
   | 'driver-init'
   | 'driver-close';
 
+type LifecycleInvocation<TInstance> = {
+  instance: TInstance;
+  invoke<T>(callback: () => T): Promise<Awaited<T>>;
+};
+
+type ActiveLifecycleInvocation = {
+  token: object;
+  lifecycle: LifecycleCallback;
+};
+
 const LifecycleReentrantMethods = new Set<string>([
   ...LibraryMethods,
   'ready',
@@ -227,6 +237,9 @@ export class LocalSpace implements LocalSpaceInstance {
   private _operationsStarting = 0;
   private readonly _activeOperations = new Set<Promise<unknown>>();
   private _invokingLifecycleCallback: LifecycleCallback | null = null;
+  private readonly _activeLifecycleInvocations: ActiveLifecycleInvocation[] =
+    [];
+  private readonly _lifecycleReceiver: this;
   private _pluginManager: PluginManager;
   private _rawDriverMethods: Partial<
     Record<PluginAwareMethod, RawDriverMethod>
@@ -264,11 +277,10 @@ export class LocalSpace implements LocalSpaceInstance {
 
     this._defaultConfig = extend({}, DefaultConfig);
     this._config = extend({}, this._defaultConfig, normalizedOverrides);
-    this._pluginManager = new PluginManager(this, plugins, {
-      createGuardedInstance: (lifecycle) =>
-        this._createLifecycleGuardedInstance(lifecycle),
-      invoke: (lifecycle, callback) =>
-        this._invokeLifecycleCallback(lifecycle, callback),
+    this._lifecycleReceiver = this._createLifecycleReceiver();
+    this._pluginManager = new PluginManager(this._lifecycleReceiver, plugins, {
+      createInvocation: (lifecycle) =>
+        this._createLifecycleInvocation(lifecycle),
     });
 
     this._wrapLibraryMethodsWithReady();
@@ -659,41 +671,47 @@ export class LocalSpace implements LocalSpaceInstance {
     };
 
     const extendSelfWithDriver = async (driver: Driver) => {
-      const lifecycleInstance = DefaultDriverSet.has(driver)
-        ? this
-        : this._createLifecycleGuardedInstance('driver-init');
+      const isDefaultDriver = DefaultDriverSet.has(driver);
       const closeStorage =
         typeof driver._closeStorage === 'function'
           ? () => {
-              const closeInstance = DefaultDriverSet.has(driver)
-                ? this
-                : this._createLifecycleGuardedInstance('driver-close');
-              return this._invokeLifecycleCallback('driver-close', () =>
-                driver._closeStorage!.call(closeInstance)
+              if (isDefaultDriver) {
+                return this._invokeLifecycleCallback('driver-close', () =>
+                  driver._closeStorage!.call(this)
+                );
+              }
+              const lifecycle = this._createLifecycleInvocation('driver-close');
+              return lifecycle.invoke(() =>
+                driver._closeStorage!.call(lifecycle.instance)
               );
             }
           : null;
       this._activeDriverClose = closeStorage;
       this._driverInitialized = false;
-      this._extend(driver);
+      this._extend(driver, isDefaultDriver ? this : this._lifecycleReceiver);
       this._driver = driver._driver;
       setDriverToConfig();
 
       const driverInstance = this as DriverAugmentedInstance;
       const initStorage = driverInstance._initStorage;
-      this._ready =
+      const driverInitialization =
         typeof initStorage === 'function'
-          ? Promise.resolve().then(() =>
-              this._invokeLifecycleCallback('driver-init', () =>
-                initStorage.call(lifecycleInstance, this._config)
-              )
-            )
+          ? Promise.resolve().then(() => {
+              if (isDefaultDriver) {
+                return this._invokeLifecycleCallback('driver-init', () =>
+                  initStorage.call(this, this._config)
+                );
+              }
+              const lifecycle = this._createLifecycleInvocation('driver-init');
+              return lifecycle.invoke(() =>
+                initStorage.call(lifecycle.instance, this._config)
+              );
+            })
           : Promise.resolve();
 
       try {
-        await this._ready;
+        await driverInitialization;
         this._driverInitialized = true;
-        return this._ready;
       } catch (error) {
         if (closeStorage) {
           try {
@@ -705,6 +723,7 @@ export class LocalSpace implements LocalSpaceInstance {
         this._activeDriverClose = null;
         this._driverInitialized = false;
         this._dbInfo = null;
+        this._wrapLibraryMethodsWithReady();
         throw error;
       }
     };
@@ -720,7 +739,6 @@ export class LocalSpace implements LocalSpaceInstance {
             currentDriverIndex++;
 
             this._dbInfo = null;
-            this._ready = null;
 
             try {
               const driver = await this.getDriver(driverName);
@@ -831,7 +849,10 @@ export class LocalSpace implements LocalSpaceInstance {
     );
   }
 
-  _extend(libraryMethodsAndProperties: Partial<Driver>): void {
+  _extend(
+    libraryMethodsAndProperties: Partial<Driver>,
+    receiver: this = this
+  ): void {
     const source = libraryMethodsAndProperties as Partial<
       Record<string, unknown>
     >;
@@ -845,7 +866,7 @@ export class LocalSpace implements LocalSpaceInstance {
       const guardedMethod: RawDriverMethod = (...args: unknown[]) => {
         try {
           this._assertOpen(method);
-          return Promise.resolve(candidate.apply(this, args));
+          return Promise.resolve(candidate.apply(receiver, args));
         } catch (error) {
           return Promise.reject(error);
         }
@@ -1315,19 +1336,49 @@ export class LocalSpace implements LocalSpaceInstance {
     );
   }
 
-  private _createLifecycleGuardedInstance(lifecycle: LifecycleCallback): this {
+  private _createLifecycleInvocation(
+    lifecycle: LifecycleCallback
+  ): LifecycleInvocation<this> {
+    return {
+      instance: this._lifecycleReceiver,
+      invoke: async <T>(callback: () => T): Promise<Awaited<T>> => {
+        const token = {};
+        this._activeLifecycleInvocations.push({ token, lifecycle });
+        try {
+          return await this._invokeLifecycleCallback(lifecycle, callback);
+        } finally {
+          const index = this._activeLifecycleInvocations.findIndex(
+            (invocation) => invocation.token === token
+          );
+          if (index !== -1) {
+            this._activeLifecycleInvocations.splice(index, 1);
+          }
+        }
+      },
+    };
+  }
+
+  private _createLifecycleReceiver(): this {
     return new Proxy(this, {
       get: (target, property, receiver) => {
         if (property === LIFECYCLE_GUARD_TARGET) {
           return target;
         }
+        const activeInvocation =
+          this._activeLifecycleInvocations[
+            this._activeLifecycleInvocations.length - 1
+          ];
         if (
+          activeInvocation &&
           typeof property === 'string' &&
           LifecycleReentrantMethods.has(property)
         ) {
           return () =>
             Promise.reject(
-              target._lifecycleReentryError(property, lifecycle)
+              target._lifecycleReentryError(
+                property,
+                activeInvocation.lifecycle
+              )
             );
         }
         return Reflect.get(target, property, receiver);

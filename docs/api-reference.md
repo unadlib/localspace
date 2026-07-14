@@ -440,7 +440,9 @@ import localspace, { type Driver } from 'localspace';
 const values = new Map<string, unknown>();
 const customDriver: Driver = {
   _driver: 'customDriver',
-  _initStorage: async () => undefined,
+  async _initStorage() {
+    // `this` is the LocalSpaceInstance selecting this driver.
+  },
   getItem: async <T>(key: string) =>
     values.has(key) ? (values.get(key) as T) : null,
   setItem: async <T>(key: string, value: T) => {
@@ -469,6 +471,15 @@ const customDriver: Driver = {
 await localspace.defineDriver(customDriver);
 await localspace.setDriver('customDriver');
 ```
+
+`_initStorage()` and optional `_closeStorage()` are typed with the selecting
+`LocalSpaceInstance` as their `this` receiver. Use a method or a non-arrow
+function when the callback needs that receiver. It is lifecycle-guarded while
+the callback is pending, so same-instance storage and lifecycle calls reject
+with `details.reason === 'lifecycle-reentrancy'` instead of self-deadlocking.
+The same receiver object is used for initialization, driver operations, and
+cleanup, so identity-keyed driver state remains available throughout its
+lifetime.
 
 `_support`, batch methods, `runTransaction()`, and `dropInstance()` are optional
 driver capabilities. Calling an omitted capability through a selected instance
@@ -538,15 +549,24 @@ await store.close();
 
 Calling `close()` on an unused instance does not initialize its driver or
 plugins. Use `clear()` or `dropInstance()` when data should be deleted.
+If a concurrent legacy `destroy()` has already started plugin initialization,
+`close()` waits for that complete initialization pass before teardown.
 If the built-in TTL plugin is sweeping expired entries, `close()` stops its
 timer and waits for that sweep before releasing the driver.
 Call it only while the instance is idle. While a storage operation is active it
 rejects with `LocalSpaceError(OPERATION_FAILED)` and
 `details.reason === 'active-operations'`; await the operation and retry. The
 same rule prevents hooks, transaction runners, and custom drivers from awaiting
-a lifecycle transition that is waiting for their own operation. Plugin and
-custom-driver lifecycle callbacks also reject reentrant lifecycle or storage
-calls with `details.reason === 'lifecycle-reentrancy'`.
+a lifecycle transition that is waiting for their own operation. Plugin
+lifecycle callbacks must use `context.instance`, and custom-driver lifecycle
+callbacks must use their `this` receiver, instead of capturing the original
+instance across an async boundary. Those guarded receivers reject same-instance
+lifecycle and storage calls with `details.reason === 'lifecycle-reentrancy'`
+while the callback is pending, including across `await`. After settlement,
+retained receivers forward normally for later timer or event-handler work. A
+stable receiver is reused across plugin contexts and across each custom
+driver's lifecycle and operation methods, so identity-keyed state remains
+available; unrelated concurrent callers are not treated as lifecycle reentry.
 
 ### `destroy(): Promise<void>`
 

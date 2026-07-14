@@ -41,7 +41,15 @@
   returns, while preserving custom hook additions, reordering, replacements,
   and logical-value customization in `afterSetItems`.
 - Serialized overlapping `destroy()` and `close()` plugin teardown so each
-  initialized plugin receives exactly one `onDestroy` call.
+  initialized plugin receives exactly one `onDestroy` call, and made `close()`
+  wait for the complete plugin initialization pass started by `destroy()`.
+- Scoped lifecycle reentrancy protection to each asynchronous plugin or custom
+  driver callback, releasing its guarded receiver after settlement so retained
+  contexts can serve later background work without rejecting unrelated callers.
+- Reused stable guarded receivers across plugin contexts and custom-driver
+  lifecycle and operation methods so identity-keyed state remains available.
+- Typed custom driver `_initStorage()` and `_closeStorage()` receivers as the
+  selecting `LocalSpaceInstance`, matching the existing runtime contract.
 - Attempted cleanup when custom `_initStorage()` throws synchronously and kept
   that initialization failure even if `_closeStorage()` also throws.
 - Stabilized `LocalSpaceError` classification and retained original driver,

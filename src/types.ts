@@ -133,15 +133,26 @@ export interface Driver {
   _driver: string;
 
   /**
-   * Initialize storage with config
+   * Initialize storage with config. The callback receiver is the
+   * stable, lifecycle-guarded LocalSpace instance used by this driver's
+   * lifecycle and operation methods; same-instance storage and lifecycle calls
+   * reject while this callback is pending.
    */
   _initStorage(config: LocalSpaceConfig): Promise<void>;
+  _initStorage(
+    this: LocalSpaceInstance,
+    config: LocalSpaceConfig
+  ): Promise<void>;
 
   /**
    * Release resources owned by the current driver instance without deleting
-   * persisted data.
+   * persisted data. The callback receiver is the same stable,
+   * lifecycle-guarded LocalSpace instance used during initialization and
+   * operations; same-instance storage and lifecycle calls reject while this
+   * callback is pending.
    */
   _closeStorage?(): Promise<void>;
+  _closeStorage?(this: LocalSpaceInstance): Promise<void>;
 
   /**
    * Check if driver is supported (can be boolean or function)

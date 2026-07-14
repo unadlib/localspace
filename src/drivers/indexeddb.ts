@@ -2114,8 +2114,9 @@ const asyncStorage: Driver = {
   dropInstance,
 };
 
-// Expose limited internals for testing without altering public API surface
-if (process.env.NODE_ENV === 'test') {
+// Expose limited internals for testing without altering public API surface.
+// Browser-native ESM consumers do not provide Node's `process` global.
+if (typeof process !== 'undefined' && process?.env?.NODE_ENV === 'test') {
   (asyncStorage as any).__test__ = {
     createTransaction,
     getDbContext,

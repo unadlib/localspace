@@ -5,6 +5,8 @@ import localspace, {
   memoryDriver,
   ttlPlugin,
   type Driver,
+  type LocalSpaceConfig,
+  type LocalSpaceInstance,
   type LocalSpacePlugin,
 } from '../src';
 
@@ -143,6 +145,38 @@ describe('LocalSpace.close', () => {
     expect(onDestroy).toHaveBeenCalledTimes(1);
   });
 
+  it('shares plugin initialization with operations that arrive after it starts', async () => {
+    let releaseInitialization!: () => void;
+    let markInitializationStarted!: () => void;
+    const initializationGate = new Promise<void>((resolve) => {
+      releaseInitialization = resolve;
+    });
+    const initializationStarted = new Promise<void>((resolve) => {
+      markInitializationStarted = resolve;
+    });
+    const onInit = vi.fn(async () => {
+      markInitializationStarted();
+      await initializationGate;
+    });
+    const instance = localspace.createInstance({
+      name: uniqueName('concurrent-plugin-init'),
+      plugins: [{ name: 'concurrent-plugin-init', onInit }],
+    });
+    await instance.setDriver([instance.MEMORY]);
+
+    const firstWrite = instance.setItem('first', 'one');
+    await initializationStarted;
+    const secondWrite = instance.setItem('second', 'two');
+    releaseInitialization();
+
+    await expect(Promise.all([firstWrite, secondWrite])).resolves.toEqual([
+      'one',
+      'two',
+    ]);
+    expect(onInit).toHaveBeenCalledTimes(1);
+    await instance.close();
+  });
+
   it('waits for an active TTL sweep before closing', async () => {
     let releaseExpiration!: () => void;
     let markExpirationStarted!: () => void;
@@ -264,6 +298,89 @@ describe('LocalSpace.close', () => {
     expect(onDestroy).toHaveBeenCalledTimes(1);
   });
 
+  it('waits for the complete plugin initialization pass before closing', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let releaseFirstInit!: () => void;
+    let markFirstInitStarted!: () => void;
+    let releaseSecondInit!: () => void;
+    let markSecondInitStarted!: () => void;
+    const firstInitGate = new Promise<void>((resolve) => {
+      releaseFirstInit = resolve;
+    });
+    const firstInitStarted = new Promise<void>((resolve) => {
+      markFirstInitStarted = resolve;
+    });
+    const secondInitGate = new Promise<void>((resolve) => {
+      releaseSecondInit = resolve;
+    });
+    const secondInitStarted = new Promise<void>((resolve) => {
+      markSecondInitStarted = resolve;
+    });
+    const events: string[] = [];
+    const instance = localspace.createInstance({
+      name: uniqueName('close-complete-plugin-init'),
+      plugins: [
+        {
+          name: 'first-init',
+          onInit: async () => {
+            events.push('init:first:start');
+            markFirstInitStarted();
+            await firstInitGate;
+            events.push('init:first:end');
+          },
+          onDestroy: () => {
+            events.push('destroy:first');
+          },
+        },
+        {
+          name: 'second-init',
+          onInit: async () => {
+            events.push('init:second:start');
+            markSecondInitStarted();
+            await secondInitGate;
+            events.push('init:second:end');
+          },
+          onDestroy: () => {
+            events.push('destroy:second');
+          },
+        },
+      ],
+    });
+    await instance.setDriver([instance.MEMORY]);
+
+    const destroying = instance.destroy();
+    await firstInitStarted;
+    let closeSettled = false;
+    const closing = instance.close().then(() => {
+      closeSettled = true;
+      events.push('close:end');
+    });
+
+    releaseFirstInit();
+    await secondInitStarted;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(closeSettled).toBe(false);
+    expect(events).toEqual([
+      'init:first:start',
+      'init:first:end',
+      'init:second:start',
+    ]);
+
+    releaseSecondInit();
+    await Promise.all([destroying, closing]);
+
+    expect(events).toEqual([
+      'init:first:start',
+      'init:first:end',
+      'init:second:start',
+      'init:second:end',
+      'destroy:second',
+      'destroy:first',
+      'close:end',
+    ]);
+  });
+
   it('fails fast when plugin teardown tries to close the same instance', async () => {
     let instance!: LocalSpace;
     let capturedReentryError: unknown;
@@ -274,13 +391,13 @@ describe('LocalSpace.close', () => {
         {
           name: 'plugin-destroy-reentrant-close',
           onDestroy: async (context) => {
-            capturedReentryError = await instance.close().catch((error) =>
-              Promise.resolve(error)
-            );
+            capturedReentryError = await instance
+              .close()
+              .catch((error) => Promise.resolve(error));
             await Promise.resolve();
-            reentryError = await context.instance.close().catch((error) =>
-              Promise.resolve(error)
-            );
+            reentryError = await context.instance
+              .close()
+              .catch((error) => Promise.resolve(error));
           },
         },
       ],
@@ -306,6 +423,97 @@ describe('LocalSpace.close', () => {
         lifecycle: 'plugin-destroy',
       },
     });
+  });
+
+  it('fails fast when async plugin initialization reenters through its context', async () => {
+    let reentryError: unknown;
+    const instance = new LocalSpace({
+      name: uniqueName('plugin-init-context-reentry'),
+      plugins: [
+        {
+          name: 'plugin-init-context-reentry',
+          onInit: async (context) => {
+            await Promise.resolve();
+            reentryError = await context.instance
+              .getItem('nested')
+              .catch((error) => Promise.resolve(error));
+          },
+        },
+      ],
+    });
+    await instance.setDriver([instance.MEMORY]);
+
+    await expect(instance.setItem('key', 'value')).resolves.toBe('value');
+    expect(reentryError).toMatchObject({
+      code: 'OPERATION_FAILED',
+      details: {
+        operation: 'getItem',
+        reason: 'lifecycle-reentrancy',
+        lifecycle: 'plugin-init',
+      },
+    });
+    await instance.close();
+  });
+
+  it('releases the plugin lifecycle guard after initialization settles', async () => {
+    let lifecycleInstance!: LocalSpaceInstance;
+    const instance = new LocalSpace({
+      name: uniqueName('released-plugin-init-guard'),
+      plugins: [
+        {
+          name: 'released-plugin-init-guard',
+          onInit: async (context) => {
+            lifecycleInstance = context.instance;
+            await Promise.resolve();
+          },
+        },
+      ],
+    });
+    await instance.setDriver([instance.MEMORY]);
+    await instance.setItem('key', 'value');
+
+    await expect(lifecycleInstance.getItem('key')).resolves.toBe('value');
+    await instance.close();
+  });
+
+  it('preserves plugin instance identity across lifecycle and operation hooks', async () => {
+    const state = new WeakMap<LocalSpaceInstance, { writes: number }>();
+    let initInstance: LocalSpaceInstance | undefined;
+    let hookInstance: LocalSpaceInstance | undefined;
+    let destroyInstance: LocalSpaceInstance | undefined;
+    const instance = new LocalSpace({
+      name: uniqueName('stable-plugin-instance'),
+      pluginErrorPolicy: 'strict',
+      plugins: [
+        {
+          name: 'stable-plugin-instance',
+          onInit: (context) => {
+            initInstance = context.instance;
+            state.set(context.instance, { writes: 0 });
+          },
+          beforeSet: (_key, value, context) => {
+            hookInstance = context.instance;
+            const pluginState = state.get(context.instance);
+            if (!pluginState) {
+              throw new Error('Plugin instance state is missing.');
+            }
+            pluginState.writes++;
+            return value;
+          },
+          onDestroy: (context) => {
+            destroyInstance = context.instance;
+            expect(state.get(context.instance)?.writes).toBe(1);
+          },
+        },
+      ],
+    });
+    await instance.setDriver([instance.MEMORY]);
+
+    await expect(instance.setItem('key', 'value')).resolves.toBe('value');
+    await instance.close();
+
+    expect(hookInstance).toBe(initInstance);
+    expect(destroyInstance).toBe(initInstance);
   });
 
   it('fails fast when custom driver initialization reenters lifecycle', async () => {
@@ -339,6 +547,114 @@ describe('LocalSpace.close', () => {
       },
     });
     await instance.close();
+  });
+
+  it('shares driver initialization with ready calls that arrive after it starts', async () => {
+    let releaseInitialization!: () => void;
+    let markInitializationStarted!: () => void;
+    const initializationGate = new Promise<void>((resolve) => {
+      releaseInitialization = resolve;
+    });
+    const initializationStarted = new Promise<void>((resolve) => {
+      markInitializationStarted = resolve;
+    });
+    const initStorage = vi.fn(async function (
+      this: LocalSpace,
+      config: LocalSpaceConfig
+    ) {
+      markInitializationStarted();
+      await initializationGate;
+      await memoryDriver._initStorage.call(this, config);
+    });
+    const driver: Driver = {
+      ...memoryDriver,
+      _driver: uniqueName('concurrent-driver-init'),
+      _support: true,
+      _initStorage: initStorage,
+    };
+    const instance = new LocalSpace({
+      name: uniqueName('concurrent-driver-init'),
+    });
+    await instance.defineDriver(driver);
+    await instance.setDriver([driver._driver]);
+
+    const firstReady = instance.ready();
+    await initializationStarted;
+    const secondReady = instance.ready();
+    releaseInitialization();
+
+    await expect(Promise.all([firstReady, secondReady])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect(initStorage).toHaveBeenCalledTimes(1);
+    await instance.close();
+  });
+
+  it('releases the custom driver lifecycle guard after initialization settles', async () => {
+    let lifecycleInstance!: LocalSpaceInstance;
+    const driver: Driver = {
+      ...memoryDriver,
+      _driver: uniqueName('released-driver-init-guard'),
+      _support: true,
+      _initStorage: async function (config) {
+        lifecycleInstance = this as unknown as LocalSpaceInstance;
+        await Promise.resolve();
+        await memoryDriver._initStorage.call(this, config);
+      },
+    };
+    const instance = new LocalSpace({
+      name: uniqueName('released-driver-init-guard'),
+    });
+    await instance.defineDriver(driver);
+    await instance.setDriver([driver._driver]);
+    await instance.ready();
+    await instance.setItem('key', 'value');
+
+    await expect(lifecycleInstance.getItem('key')).resolves.toBe('value');
+    await instance.close();
+  });
+
+  it('preserves custom driver receiver identity across lifecycle and operations', async () => {
+    const state = new WeakMap<LocalSpaceInstance, { reads: number }>();
+    let initReceiver: LocalSpaceInstance | undefined;
+    let operationReceiver: LocalSpaceInstance | undefined;
+    let closeReceiver: LocalSpaceInstance | undefined;
+    const driver: Driver = {
+      ...memoryDriver,
+      _driver: uniqueName('stable-driver-receiver'),
+      _support: true,
+      _initStorage: async function (config) {
+        initReceiver = this;
+        state.set(this, { reads: 0 });
+        await memoryDriver._initStorage.call(this, config);
+      },
+      getItem: async function <T>(key: string): Promise<T | null> {
+        operationReceiver = this;
+        const driverState = state.get(this);
+        if (!driverState) {
+          throw new Error('Driver receiver state is missing.');
+        }
+        driverState.reads++;
+        return memoryDriver.getItem.call(this, key) as Promise<T | null>;
+      },
+      _closeStorage: async function () {
+        closeReceiver = this;
+        expect(state.get(this)?.reads).toBe(1);
+      },
+    };
+    const instance = new LocalSpace({
+      name: uniqueName('stable-driver-receiver'),
+    });
+    await instance.defineDriver(driver);
+    await instance.setDriver([driver._driver]);
+    await instance.setItem('key', 'value');
+
+    await expect(instance.getItem('key')).resolves.toBe('value');
+    await instance.close();
+
+    expect(operationReceiver).toBe(initReceiver);
+    expect(closeReceiver).toBe(initReceiver);
   });
 
   it('fails fast when custom driver cleanup starts a storage operation', async () => {

@@ -19,6 +19,43 @@ async function ensureFixtureReady(page: Page) {
 }
 
 test.describe('localspace browser interoperability', () => {
+  test('bundled ESM imports without Node globals', async ({ page }) => {
+    await page.goto('/');
+
+    const result = await page.evaluate(async () => {
+      const moduleUrl = '/dist/index.esm.js';
+      const localspaceModule = await import(moduleUrl);
+
+      return {
+        hasNodeProcess:
+          typeof (globalThis as { process?: unknown }).process !== 'undefined',
+        hasDefaultExport:
+          typeof localspaceModule.default?.createInstance === 'function',
+      };
+    });
+
+    expect(result).toEqual({
+      hasNodeProcess: false,
+      hasDefaultExport: true,
+    });
+  });
+
+  test('bundled ESM tolerates a partial process shim', async ({ page }) => {
+    await page.goto('/');
+
+    const hasDefaultExport = await page.evaluate(async () => {
+      const browserGlobal = globalThis as unknown as {
+        process?: { env?: Record<string, string> };
+      };
+      browserGlobal.process = {};
+      const moduleUrl = '/dist/index.esm.js';
+      const localspaceModule = await import(moduleUrl);
+      return typeof localspaceModule.default?.createInstance === 'function';
+    });
+
+    expect(hasDefaultExport).toBe(true);
+  });
+
   test('production browser bundle suppresses deprecation warnings', async ({
     page,
   }) => {

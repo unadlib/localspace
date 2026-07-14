@@ -41,6 +41,10 @@ describe('stable error contracts', () => {
     await instance.setDriver([firstName, secondName]);
 
     const error = await instance.ready().catch((cause) => cause);
+    const repeatedReadyError = await instance.ready().catch((cause) => cause);
+    const operationError = await instance
+      .getItem('key')
+      .catch((cause) => cause);
 
     expect(error).toBeInstanceOf(LocalSpaceError);
     expect(error).toMatchObject({
@@ -63,6 +67,8 @@ describe('stable error contracts', () => {
       },
       cause: [firstError, secondError],
     });
+    expect(repeatedReadyError).toBe(error);
+    expect(operationError).toBe(error);
   });
 
   it('cleans up synchronous driver initialization failures', async () => {
