@@ -185,11 +185,16 @@ driver connection; later operations reject with `INSTANCE_CLOSED`. Use
 If custom-driver cleanup rejects, the instance remains closed but retains the
 unfinished cleanup handle; call `close()` again to retry it. Concurrent calls
 share one attempt, and cleanup that already succeeded is not repeated.
+Cleanup that rejects after `_initStorage()` fails is retained as well; a later
+`setDriver()` or `close()` retries it without replacing the original
+initialization error.
 `destroy()` is deprecated and retains its legacy plugin-only behavior in 2.x.
 If a concurrent legacy `destroy()` has already started plugin initialization,
 `close()` waits for that complete initialization pass before teardown.
-An in-progress built-in TTL sweep is allowed to finish before cleanup, and its
-timer is stopped before the instance is marked closed.
+An in-progress built-in TTL storage sweep is allowed to finish before cleanup,
+and its timer is stopped before the instance is marked closed. User
+`onExpire` notifications started by a background sweep are not part of that
+barrier, so they may safely await `close()` or `destroy()` on the same instance.
 Call `close()` and `setDriver()` only while the instance is idle. If a storage
 operation is active, they reject with `OPERATION_FAILED` and
 `details.reason === 'active-operations'`; await the operation and retry. This

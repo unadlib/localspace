@@ -11,8 +11,10 @@ import {
   readPluginEnvelope,
 } from '../core/plugin-envelope.js';
 import {
+  hasPluginInternalOperation,
   markBuiltInStorageTransformPlugin,
   markPluginBackgroundTaskController,
+  TTL_BACKGROUND_CLEANUP_OPERATION,
   type PluginBackgroundTaskPause,
 } from '../core/plugin-capabilities.js';
 
@@ -28,7 +30,10 @@ export interface TTLPluginOptions {
    * Larger batches are more efficient but may cause longer pauses.
    */
   cleanupBatchSize?: number;
-  /** Callback invoked when a key expires */
+  /**
+   * Callback invoked after an expired key is removed. Background-sweep
+   * callbacks are notifications and are not part of the close/destroy barrier.
+   */
   onExpire?: (key: string, value: unknown) => Promise<void> | void;
 }
 
@@ -178,6 +183,18 @@ const notifyExpired = async (
   }
 };
 
+const notifyExpiredInBackground = (
+  key: string,
+  value: unknown,
+  context: PluginContext,
+  options: TTLPluginOptions
+): void => {
+  // A periodic sweep has no caller to receive notification failures. More
+  // importantly, keeping the sweep dependent on user code would deadlock when
+  // onExpire awaits close() or destroy() on this same instance.
+  void notifyExpired(key, value, context, options).catch(() => undefined);
+};
+
 const scheduleCleanup = (
   context: PluginContext,
   options: TTLPluginOptions,
@@ -266,12 +283,22 @@ const cleanupExpired = (
       try {
         // Use batch getItems for efficient cleanup.
         // The TTL afterGetItems hook will handle expiration and removal.
-        await context.instance.getItems(batch);
+        await (
+          context.instance.getItems as <T>(
+            keys: string[],
+            internalOperation: typeof TTL_BACKGROUND_CLEANUP_OPERATION
+          ) => Promise<BatchResponse<T>>
+        )(batch, TTL_BACKGROUND_CLEANUP_OPERATION);
       } catch {
         // If batch fails, fall back to individual gets
         for (const key of batch) {
           try {
-            await context.instance.getItem(key);
+            await (
+              context.instance.getItem as <T>(
+                itemKey: string,
+                internalOperation: typeof TTL_BACKGROUND_CLEANUP_OPERATION
+              ) => Promise<T | null>
+            )(key, TTL_BACKGROUND_CLEANUP_OPERATION);
           } catch {
             // Ignore individual key failures during cleanup.
           }
@@ -346,7 +373,13 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
         () => false
       );
       if (removed) {
-        await notifyExpired(key, payload.data, context, options);
+        if (
+          hasPluginInternalOperation(context, TTL_BACKGROUND_CLEANUP_OPERATION)
+        ) {
+          notifyExpiredInBackground(key, payload.data, context, options);
+        } else {
+          await notifyExpired(key, payload.data, context, options);
+        }
       }
       return null;
     }
@@ -405,7 +438,16 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
       if (removed) {
         // Notify only after every expired key has been removed.
         for (const entry of expiredEntries) {
-          await notifyExpired(entry.key, entry.value, context, options);
+          if (
+            hasPluginInternalOperation(
+              context,
+              TTL_BACKGROUND_CLEANUP_OPERATION
+            )
+          ) {
+            notifyExpiredInBackground(entry.key, entry.value, context, options);
+          } else {
+            await notifyExpired(entry.key, entry.value, context, options);
+          }
         }
       }
     }

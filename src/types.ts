@@ -150,8 +150,8 @@ export interface Driver {
    * lifecycle-guarded LocalSpace instance used during initialization and
    * operations; same-instance storage and lifecycle calls reject while this
    * callback is pending. If cleanup rejects, the same callback may be invoked
-   * again by a later lifecycle attempt, so implementations must make retries
-   * safe.
+   * again by a later lifecycle attempt, including after a failed
+   * `_initStorage()`, so implementations must make retries safe.
    */
   _closeStorage?(): Promise<void>;
   _closeStorage?(this: LocalSpaceInstance): Promise<void>;
@@ -351,8 +351,9 @@ export interface LocalSpaceInstance {
 
   /**
    * Set driver(s) to use. Rejects with OPERATION_FAILED while a storage
-   * operation is active; wait for the operation and retry. A rejected driver
-   * cleanup retains the current driver so a later setDriver() can retry it.
+   * operation is active; wait for the operation and retry. A rejected current
+   * or initialization-failure driver cleanup is retained so a later
+   * setDriver() can retry it.
    */
   setDriver(drivers: string | string[]): Promise<void>;
 

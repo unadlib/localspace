@@ -214,31 +214,39 @@ describe('LocalSpace.close', () => {
   });
 
   it('waits for an active TTL sweep before closing', async () => {
-    let releaseExpiration!: () => void;
-    let markExpirationStarted!: () => void;
-    const expirationGate = new Promise<void>((resolve) => {
-      releaseExpiration = resolve;
+    let releaseSweep!: () => void;
+    let markSweepStarted!: () => void;
+    const sweepGate = new Promise<void>((resolve) => {
+      releaseSweep = resolve;
     });
-    const expirationStarted = new Promise<void>((resolve) => {
-      markExpirationStarted = resolve;
+    const sweepStarted = new Promise<void>((resolve) => {
+      markSweepStarted = resolve;
     });
-    const onExpire = vi.fn(async () => {
-      markExpirationStarted();
-      await expirationGate;
-    });
+    const driver: Driver = {
+      ...memoryDriver,
+      _driver: uniqueName('slow-ttl-sweep-driver'),
+      _support: true,
+      getItems: async function <T>(keys: string[]) {
+        markSweepStarted();
+        await sweepGate;
+        return memoryDriver.getItems!.call(this, keys) as Promise<
+          Array<{ key: string; value: T | null }>
+        >;
+      },
+    };
     const instance = localspace.createInstance({
       name: uniqueName('close-active-ttl-sweep'),
       plugins: [
         ttlPlugin({
           defaultTTL: 1,
           cleanupInterval: 5,
-          onExpire,
         }),
       ],
     });
-    await instance.setDriver([instance.MEMORY]);
+    await instance.defineDriver(driver);
+    await instance.setDriver([driver._driver]);
     await instance.setItem('ephemeral', 'value');
-    await expirationStarted;
+    await sweepStarted;
 
     let closeSettled = false;
     const closing = instance.close().finally(() => {
@@ -247,11 +255,40 @@ describe('LocalSpace.close', () => {
     await Promise.resolve();
     expect(closeSettled).toBe(false);
 
-    releaseExpiration();
+    releaseSweep();
     await closing;
-    await new Promise<void>((resolve) => setTimeout(resolve, 15));
-    expect(onExpire).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['close', 'destroy'] as const)(
+    'allows a TTL background onExpire callback to await %s()',
+    async (lifecycleMethod) => {
+      let instance!: LocalSpaceInstance;
+      let callbackFinished = false;
+      const onExpire = vi.fn(async () => {
+        await instance[lifecycleMethod]();
+        callbackFinished = true;
+      });
+      instance = localspace.createInstance({
+        name: uniqueName(`ttl-on-expire-${lifecycleMethod}`),
+        plugins: [
+          ttlPlugin({
+            defaultTTL: 1,
+            cleanupInterval: 5,
+            onExpire,
+          }),
+        ],
+      });
+      await instance.setDriver([instance.MEMORY]);
+      await instance.setItem('ephemeral', 'value');
+
+      await vi.waitFor(() => expect(callbackFinished).toBe(true));
+      expect(onExpire).toHaveBeenCalledTimes(1);
+
+      if (lifecycleMethod === 'destroy') {
+        await instance.close();
+      }
+    }
+  );
 
   it('resumes TTL cleanup when close rejects for a foreground operation', async () => {
     let releaseWrite!: () => void;

@@ -97,7 +97,9 @@ Wraps values as `{ data, expiresAt }`, invalidates stale reads, and optionally r
 - `onExpire(key, value)` callback after the expired entry is removed. Under the
   lenient policy callback failures are reported and the read still returns
   `null`; under the strict policy the callback error is propagated after the
-  removal.
+  removal. Notifications started by a background sweep are detached from the
+  lifecycle barrier (there is no foreground caller to receive an error), so a
+  callback may safely await `close()` or `destroy()` on the same instance.
 
 ```ts
 // Cache API responses for 5 minutes

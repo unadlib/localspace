@@ -26,6 +26,9 @@
 - Removed expired TTL values before reporting `onExpire` failures, and skipped
   notifications when deletion fails, so callback side effects only describe
   data that has actually been removed.
+- Detached background TTL `onExpire` notifications from the lifecycle barrier
+  so callbacks can await same-instance `close()` or `destroy()` without making
+  the active sweep wait on itself.
 - Avoided unnecessary blob capability detection for readonly IndexedDB
   transactions while preserving the permissive 2.x runner contract.
 - Unified constructor and setter configuration validation while preserving the
@@ -54,6 +57,10 @@
   selecting `LocalSpaceInstance`, matching the existing runtime contract.
 - Attempted cleanup when custom `_initStorage()` throws synchronously and kept
   that initialization failure even if `_closeStorage()` also throws.
+- Retained cleanup that rejects after failed custom-driver initialization and
+  retried it during later `setDriver()` or `close()` attempts without repeating
+  cleanup that already succeeded, while preserving the failed driver's
+  callback-scoped receiver context across asynchronous retries.
 - Stabilized `LocalSpaceError` classification and retained original driver,
   quota, plugin, and browser errors through `cause` and structured details.
 - Keyed shared IndexedDB contexts by the resolved backend, deduplicated

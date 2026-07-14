@@ -8,6 +8,12 @@ const STORAGE_TRANSFORM_KIND = Symbol.for(
 const BACKGROUND_TASK_CONTROLLER = Symbol.for(
   'localspace.internal.background-task-controller'
 );
+const INTERNAL_OPERATION_STATE = Symbol.for(
+  'localspace.internal.plugin-operation'
+);
+export const TTL_BACKGROUND_CLEANUP_OPERATION = Symbol.for(
+  'localspace.internal.ttl-background-cleanup'
+);
 const STORAGE_TRANSFORM_KINDS = new Set<BuiltInStorageTransformKind>([
   'encryption',
   'compression',
@@ -28,6 +34,31 @@ export type PluginBackgroundTaskPause = {
 type PluginBackgroundTaskController = (
   context: PluginContext
 ) => PluginBackgroundTaskPause;
+
+export type PluginInternalOperation = typeof TTL_BACKGROUND_CLEANUP_OPERATION;
+
+export const markPluginInternalOperation = (
+  context: PluginContext,
+  operation: PluginInternalOperation | undefined
+): void => {
+  if (!operation) {
+    return;
+  }
+  Object.defineProperty(context.operationState, INTERNAL_OPERATION_STATE, {
+    value: operation,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+};
+
+export const hasPluginInternalOperation = (
+  context: PluginContext,
+  operation: PluginInternalOperation
+): boolean =>
+  (context.operationState as Record<PropertyKey, unknown>)[
+    INTERNAL_OPERATION_STATE
+  ] === operation;
 
 export const markBuiltInStorageTransformPlugin = <T extends LocalSpacePlugin>(
   plugin: T,
