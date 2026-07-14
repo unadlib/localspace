@@ -122,6 +122,60 @@ describe('versioned plugin envelope reader', () => {
     await expect(store.getItem('future')).resolves.toEqual({ source: '3.0' });
   });
 
+  it('preserves legacy TTL representations for undefined and infinite expiry', async () => {
+    const { store, raw } = await createStorePair(
+      'ttl-legacy-representations',
+      ttlPlugin({ defaultTTL: Number.POSITIVE_INFINITY })
+    );
+
+    await store.setItem('infinite', 'value');
+    await expect(store.getItem('infinite')).resolves.toBe('value');
+
+    await raw.setItem('undefined', {
+      __ls_ttl: true,
+      expiresAt: Date.now() + 60_000,
+    });
+    await expect(store.getItem('undefined')).resolves.toBeNull();
+  });
+
+  it('round-trips TTL-wrapped undefined through JSON-backed storage', async () => {
+    const store = localspace.createInstance({
+      name: uniqueName('ttl-undefined-localstorage'),
+      storeName: 'store',
+      plugins: [ttlPlugin({ defaultTTL: 60_000 })],
+    });
+    await store.setDriver([store.LOCALSTORAGE]);
+
+    await store.setItem('undefined', undefined);
+    await expect(store.getItem('undefined')).resolves.toBeNull();
+  });
+
+  it('keeps versioned TTL payload validation strict', async () => {
+    const { store, raw } = await createStorePair(
+      'ttl-versioned-validation',
+      ttlPlugin()
+    );
+
+    await raw.setItem(
+      'missing-data',
+      envelope('ttl', { expiresAt: Date.now() + 60_000 })
+    );
+    await expect(store.getItem('missing-data')).rejects.toMatchObject({
+      code: 'DESERIALIZATION_FAILED',
+    });
+
+    await raw.setItem(
+      'infinite-expiry',
+      envelope('ttl', {
+        data: 'value',
+        expiresAt: Number.POSITIVE_INFINITY,
+      })
+    );
+    await expect(store.getItem('infinite-expiry')).rejects.toMatchObject({
+      code: 'DESERIALIZATION_FAILED',
+    });
+  });
+
   it('keeps writing legacy compression payloads and reads the versioned form', async () => {
     const { store, raw } = await createStorePair(
       'compression-envelope-reader',
@@ -135,6 +189,28 @@ describe('versioned plugin envelope reader', () => {
     const { __ls_compressed: _marker, ...payload } = legacy!;
     await raw.setItem('future', envelope('compression', payload));
     await expect(store.getItem('future')).resolves.toEqual(original);
+  });
+
+  it('reads legacy empty compression labels but rejects them in versioned envelopes', async () => {
+    const { store, raw } = await createStorePair(
+      'compression-empty-algorithm',
+      compressionPlugin({ threshold: 0, algorithm: '' })
+    );
+    const original = { source: '2.x', text: 'x'.repeat(200) };
+
+    await store.setItem('legacy', original);
+    const legacy = await raw.getItem<Record<string, unknown>>('legacy');
+    expect(legacy).toMatchObject({
+      __ls_compressed: true,
+      algorithm: '',
+    });
+    await expect(store.getItem('legacy')).resolves.toEqual(original);
+
+    const { __ls_compressed: _marker, ...payload } = legacy!;
+    await raw.setItem('versioned', envelope('compression', payload));
+    await expect(store.getItem('versioned')).rejects.toMatchObject({
+      code: 'DESERIALIZATION_FAILED',
+    });
   });
 
   it('keeps writing legacy encryption payloads and reads the versioned form', async () => {

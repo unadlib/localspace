@@ -38,13 +38,16 @@ type CompressionPayload = CompressionPayloadBody & {
   __ls_compressed: true;
 };
 
-const validateCompressionPayload = (value: unknown): CompressionPayloadBody => {
+const validateCompressionPayload = (
+  value: unknown,
+  allowEmptyAlgorithm: boolean
+): CompressionPayloadBody => {
   const payload = value as Partial<CompressionPayloadBody>;
   if (
     !payload ||
     typeof payload !== 'object' ||
     typeof payload.algorithm !== 'string' ||
-    payload.algorithm.length === 0 ||
+    (!allowEmptyAlgorithm && payload.algorithm.length === 0) ||
     typeof payload.data !== 'string' ||
     typeof payload.originalSize !== 'number' ||
     !Number.isSafeInteger(payload.originalSize) ||
@@ -64,7 +67,7 @@ const parseCompressionPayload = (
 ): CompressionPayloadBody | null => {
   const envelope = readPluginEnvelope<unknown>(value, 'compression');
   if (envelope.matched) {
-    return validateCompressionPayload(envelope.payload);
+    return validateCompressionPayload(envelope.payload, false);
   }
 
   if (
@@ -82,7 +85,9 @@ const parseCompressionPayload = (
     return null;
   }
 
-  return validateCompressionPayload(value);
+  // The 2.x writer accepted an empty custom algorithm label. The label is
+  // informational, so retain that representation only for legacy payloads.
+  return validateCompressionPayload(value, true);
 };
 
 const defaultCodec: CompressionCodec = {

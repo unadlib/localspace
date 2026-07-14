@@ -37,8 +37,8 @@ failure is `QUOTA_EXCEEDED`, and other driver operation failure is
 
 LocalSpace 2.1 emits each deprecation category at most once in non-production
 runtimes. Warnings do not alter stored values or fallback order. They can be
-disabled for the current package copy when an application has its own migration
-telemetry:
+disabled across all localspace entry points in the current runtime realm when
+an application has its own migration telemetry:
 
 ```ts
 import { setDeprecationWarnings } from 'localspace';

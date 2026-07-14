@@ -10,7 +10,12 @@ import {
   hasOwnPayloadField,
   readPluginEnvelope,
 } from '../core/plugin-envelope.js';
-import { markBuiltInStorageTransformPlugin } from '../core/plugin-capabilities.js';
+import {
+  getLifecycleGuardTarget,
+  markBuiltInStorageTransformPlugin,
+  markPluginBackgroundTaskController,
+  type PluginBackgroundTaskPause,
+} from '../core/plugin-capabilities.js';
 
 export interface TTLPluginOptions {
   /** Default TTL in milliseconds applied when key-specific TTL is not defined */
@@ -30,7 +35,9 @@ export interface TTLPluginOptions {
 
 type TTLMetadata = {
   timer?: ReturnType<typeof setInterval> | null;
-  running?: boolean;
+  cleanupPromise?: Promise<void> | null;
+  paused?: boolean;
+  stopped?: boolean;
 };
 
 type TtlPayloadBody<T> = {
@@ -44,7 +51,15 @@ type TtlPayload<T> = TtlPayloadBody<T> & {
 
 const TTL_METADATA_KEY = '__localspace_ttl_metadata';
 
-const validateTtlPayload = (value: unknown): TtlPayloadBody<unknown> => {
+const invalidTtlPayload = () =>
+  createLocalSpaceError(
+    'DESERIALIZATION_FAILED',
+    'Failed to read TTL payload: invalid TTL payload.'
+  );
+
+const validateVersionedTtlPayload = (
+  value: unknown
+): TtlPayloadBody<unknown> => {
   const payload = value as Partial<TtlPayloadBody<unknown>>;
   if (
     !payload ||
@@ -53,18 +68,38 @@ const validateTtlPayload = (value: unknown): TtlPayloadBody<unknown> => {
     typeof payload.expiresAt !== 'number' ||
     !Number.isFinite(payload.expiresAt)
   ) {
-    throw createLocalSpaceError(
-      'DESERIALIZATION_FAILED',
-      'Failed to read TTL payload: invalid TTL payload.'
-    );
+    throw invalidTtlPayload();
   }
   return payload as TtlPayloadBody<unknown>;
+};
+
+const validateLegacyTtlPayload = (
+  value: unknown
+): TtlPayloadBody<unknown> => {
+  const payload = value as Partial<TtlPayloadBody<unknown>>;
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    !hasOwnPayloadField(payload, 'expiresAt') ||
+    typeof payload.expiresAt !== 'number' ||
+    (!Number.isFinite(payload.expiresAt) &&
+      payload.expiresAt !== Number.POSITIVE_INFINITY)
+  ) {
+    throw invalidTtlPayload();
+  }
+
+  // JSON serialization omits an own `data: undefined` field. Legacy 2.x
+  // readers treated that representation as a valid TTL-wrapped undefined.
+  return {
+    data: payload.data,
+    expiresAt: payload.expiresAt,
+  };
 };
 
 const parseTtlPayload = (value: unknown): TtlPayloadBody<unknown> | null => {
   const envelope = readPluginEnvelope<unknown>(value, 'ttl');
   if (envelope.matched) {
-    return validateTtlPayload(envelope.payload);
+    return validateVersionedTtlPayload(envelope.payload);
   }
 
   if (
@@ -82,8 +117,11 @@ const parseTtlPayload = (value: unknown): TtlPayloadBody<unknown> | null => {
     return null;
   }
 
-  return validateTtlPayload(value);
+  return validateLegacyTtlPayload(value);
 };
+
+const unwrapTtlData = <T>(payload: TtlPayloadBody<unknown>): T | null =>
+  (typeof payload.data === 'undefined' ? null : payload.data) as T | null;
 
 const getMetadata = (context: PluginContext): TTLMetadata => {
   const existing = context.metadata[TTL_METADATA_KEY] as
@@ -92,7 +130,12 @@ const getMetadata = (context: PluginContext): TTLMetadata => {
   if (existing) {
     return existing;
   }
-  const created: TTLMetadata = { timer: null, running: false };
+  const created: TTLMetadata = {
+    timer: null,
+    cleanupPromise: null,
+    paused: false,
+    stopped: false,
+  };
   context.metadata[TTL_METADATA_KEY] = created;
   return created;
 };
@@ -143,6 +186,9 @@ const scheduleCleanup = (
   options: TTLPluginOptions,
   metadata: TTLMetadata
 ) => {
+  if (metadata.paused || metadata.stopped) {
+    return;
+  }
   if (!options.cleanupInterval || options.cleanupInterval <= 0) {
     return;
   }
@@ -150,8 +196,48 @@ const scheduleCleanup = (
     return;
   }
   metadata.timer = setInterval(() => {
-    void cleanupExpired(context, options, metadata);
+    if (!metadata.paused && !metadata.stopped) {
+      void cleanupExpired(context, options, metadata);
+    }
   }, options.cleanupInterval);
+};
+
+const stopCleanupTimer = (metadata: TTLMetadata): boolean => {
+  if (!metadata.timer) {
+    return false;
+  }
+  clearInterval(metadata.timer);
+  metadata.timer = null;
+  return true;
+};
+
+const pauseCleanup = (
+  context: PluginContext,
+  options: TTLPluginOptions
+): PluginBackgroundTaskPause => {
+  const metadata = getMetadata(context);
+  metadata.paused = true;
+  const shouldResume = stopCleanupTimer(metadata);
+  const cleanupPromise = metadata.cleanupPromise;
+  let resumed = false;
+
+  return {
+    pending: cleanupPromise !== null && cleanupPromise !== undefined,
+    settled: cleanupPromise?.catch(() => undefined) ?? Promise.resolve(),
+    resume: () => {
+      if (resumed) {
+        return;
+      }
+      resumed = true;
+      if (metadata.stopped) {
+        return;
+      }
+      metadata.paused = false;
+      if (shouldResume) {
+        scheduleCleanup(context, options, metadata);
+      }
+    },
+  };
 };
 
 /**
@@ -166,18 +252,16 @@ const chunkArray = <T>(arr: T[], size: number): T[][] => {
   return chunks;
 };
 
-const cleanupExpired = async (
+const cleanupExpired = (
   context: PluginContext,
   options: TTLPluginOptions,
   metadata: TTLMetadata
 ): Promise<void> => {
-  if (metadata.running) {
-    return;
+  if (metadata.cleanupPromise) {
+    return metadata.cleanupPromise;
   }
-  metadata.running = true;
-  const batchSize = options.cleanupBatchSize ?? 100;
-
-  try {
+  const cleanupPromise = (async () => {
+    const batchSize = options.cleanupBatchSize ?? 100;
     const keys = await context.instance.keys();
     const batches = chunkArray(keys, batchSize);
 
@@ -197,9 +281,17 @@ const cleanupExpired = async (
         }
       }
     }
-  } finally {
-    metadata.running = false;
-  }
+  })();
+
+  metadata.cleanupPromise = cleanupPromise;
+  void cleanupPromise
+    .catch(() => undefined)
+    .finally(() => {
+      if (metadata.cleanupPromise === cleanupPromise) {
+        metadata.cleanupPromise = null;
+      }
+    });
+  return cleanupPromise;
 };
 
 const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
@@ -207,14 +299,20 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
   priority: 10,
   onInit: async (context) => {
     const metadata = getMetadata(context);
-    scheduleCleanup(context, options, metadata);
+    metadata.stopped = false;
+    metadata.paused = false;
+    scheduleCleanup(
+      { ...context, instance: getLifecycleGuardTarget(context.instance) },
+      options,
+      metadata
+    );
   },
   onDestroy: async (context) => {
     const metadata = getMetadata(context);
-    if (metadata.timer) {
-      clearInterval(metadata.timer);
-      metadata.timer = null;
-    }
+    metadata.stopped = true;
+    metadata.paused = true;
+    stopCleanupTimer(metadata);
+    await metadata.cleanupPromise?.catch(() => undefined);
   },
   beforeSet: async <T>(
     key: string,
@@ -255,7 +353,7 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
       return null;
     }
 
-    return payload.data as T;
+    return unwrapTtlData<T>(payload);
   },
   beforeSetItems: async <T>(
     entries: BatchItems<T>,
@@ -297,7 +395,7 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
         expiredEntries.push({ key, value: payload.data });
         return { key, value: null };
       }
-      return { key, value: payload.data as T };
+      return { key, value: unwrapTtlData<T>(payload) };
     });
 
     // Remove expired keys in batch
@@ -313,7 +411,12 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
   },
 });
 
-export const ttlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin =>
-  markBuiltInStorageTransformPlugin(createTtlPlugin(options), 'ttl');
+export const ttlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => {
+  const plugin = markPluginBackgroundTaskController(
+    createTtlPlugin(options),
+    (context) => pauseCleanup(context, options)
+  );
+  return markBuiltInStorageTransformPlugin(plugin, 'ttl');
+};
 
 export default ttlPlugin;

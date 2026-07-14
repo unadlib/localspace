@@ -29,6 +29,10 @@ import memoryDriver from './drivers/memory.js';
 import { PluginManager } from './core/plugin-manager.js';
 import { normalizeConfigOptions } from './core/config.js';
 import { warnDeprecation } from './utils/deprecations.js';
+import {
+  LIFECYCLE_GUARD_TARGET,
+  type PluginBackgroundTaskPause,
+} from './core/plugin-capabilities.js';
 
 // Shared drivers across all instances
 const DefinedDrivers: DefinedDriversMap = {};
@@ -84,6 +88,22 @@ const PluginAwareMethods = [
 type PluginAwareMethod = (typeof PluginAwareMethods)[number];
 type RawDriverMethod = (...args: any[]) => Promise<unknown>;
 const PluginAwareMethodSet = new Set<string>(PluginAwareMethods);
+
+type LifecycleCallback =
+  | 'plugin-init'
+  | 'plugin-destroy'
+  | 'driver-init'
+  | 'driver-close';
+
+const LifecycleReentrantMethods = new Set<string>([
+  ...LibraryMethods,
+  'ready',
+  'setDriver',
+  'close',
+  'destroy',
+]);
+
+const DefaultDriverSet = new Set<Driver>(Object.values(DefaultDrivers));
 
 type DriverInitializationFailure = {
   driver: string;
@@ -206,6 +226,7 @@ export class LocalSpace implements LocalSpaceInstance {
   private _operationPause: Promise<void> | null = null;
   private _operationsStarting = 0;
   private readonly _activeOperations = new Set<Promise<unknown>>();
+  private _invokingLifecycleCallback: LifecycleCallback | null = null;
   private _pluginManager: PluginManager;
   private _rawDriverMethods: Partial<
     Record<PluginAwareMethod, RawDriverMethod>
@@ -243,13 +264,12 @@ export class LocalSpace implements LocalSpaceInstance {
 
     this._defaultConfig = extend({}, DefaultConfig);
     this._config = extend({}, this._defaultConfig, normalizedOverrides);
-    this._pluginManager = new PluginManager(
-      this as LocalSpaceInstance & {
-        _config: LocalSpaceConfig;
-        _dbInfo: DbInfo | null;
-      },
-      plugins
-    );
+    this._pluginManager = new PluginManager(this, plugins, {
+      createGuardedInstance: (lifecycle) =>
+        this._createLifecycleGuardedInstance(lifecycle),
+      invoke: (lifecycle, callback) =>
+        this._invokeLifecycleCallback(lifecycle, callback),
+    });
 
     this._wrapLibraryMethodsWithReady();
 
@@ -358,67 +378,103 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   close(): Promise<void> {
+    try {
+      this._assertNotLifecycleReentrant('close');
+    } catch (error) {
+      return Promise.reject(error);
+    }
     if (this._closePromise) {
       return this._closePromise;
     }
 
+    let backgroundTasks: PluginBackgroundTaskPause;
     try {
-      this._assertLifecycleIdle('close');
+      backgroundTasks = this._pluginManager.pauseBackgroundTasks();
     } catch (error) {
       return Promise.reject(error);
     }
 
-    this._closed = true;
+    if (!backgroundTasks.pending) {
+      try {
+        this._assertLifecycleIdle('close');
+      } catch (error) {
+        backgroundTasks.resume();
+        return Promise.reject(error);
+      }
+      this._closed = true;
+      this._closePromise = this._performCloseCleanup();
+      return this._closePromise;
+    }
+
+    let closeAttempt!: Promise<void>;
+    closeAttempt = (async () => {
+      try {
+        await backgroundTasks.settled;
+        this._assertLifecycleIdle('close');
+      } catch (error) {
+        backgroundTasks.resume();
+        throw error;
+      }
+
+      this._closed = true;
+      await this._performCloseCleanup();
+    })().finally(() => {
+      if (!this._closed && this._closePromise === closeAttempt) {
+        this._closePromise = null;
+      }
+    });
+    this._closePromise = closeAttempt;
+    return closeAttempt;
+  }
+
+  private async _performCloseCleanup(): Promise<void> {
     const initializationInProgress = this._ready;
     const driverSelectionInProgress = this._pendingDriverInitialization;
     const driverTransitionInProgress = this._driverTransition;
     const driverChangeInProgress = this._driverSet;
 
-    this._closePromise = (async () => {
-      let cleanupError: LocalSpaceError | undefined;
+    let cleanupError: LocalSpaceError | undefined;
 
-      await Promise.allSettled(
-        [
-          driverSelectionInProgress,
-          driverTransitionInProgress,
-          driverChangeInProgress,
-          initializationInProgress,
-        ].filter((promise): promise is Promise<void> => promise !== null)
+    await Promise.allSettled(
+      [
+        driverSelectionInProgress,
+        driverTransitionInProgress,
+        driverChangeInProgress,
+        initializationInProgress,
+      ].filter((promise): promise is Promise<void> => promise !== null)
+    );
+
+    await this._drainActiveOperations();
+
+    try {
+      await this._pluginManager.destroyInitialized();
+    } catch (error) {
+      cleanupError = toLocalSpaceError(
+        error,
+        'OPERATION_FAILED',
+        'Failed to close LocalSpace plugins.',
+        { operation: 'close' }
       );
+    }
 
-      await this._drainActiveOperations();
+    try {
+      await this._releaseActiveDriver();
+    } catch (error) {
+      cleanupError ??= toLocalSpaceError(
+        error,
+        'OPERATION_FAILED',
+        'Failed to close LocalSpace driver.',
+        { driver: this.driver() ?? undefined, operation: 'close' }
+      );
+    }
 
-      try {
-        await this._pluginManager.destroyInitialized();
-      } catch (error) {
-        cleanupError = toLocalSpaceError(
-          error,
-          'OPERATION_FAILED',
-          'Failed to close LocalSpace plugins.',
-          { operation: 'close' }
-        );
-      }
-
-      try {
-        await this._releaseActiveDriver();
-      } catch (error) {
-        cleanupError ??= toLocalSpaceError(
-          error,
-          'OPERATION_FAILED',
-          'Failed to close LocalSpace driver.',
-          { driver: this.driver() ?? undefined, operation: 'close' }
-        );
-      }
-
-      if (cleanupError) {
-        throw cleanupError;
-      }
-    })();
-
-    return this._closePromise;
+    if (cleanupError) {
+      throw cleanupError;
+    }
   }
 
   async destroy(): Promise<void> {
+    this._assertNotLifecycleReentrant('destroy');
     warnDeprecation(
       'destroy',
       '`destroy()` is deprecated; use `close()` to release plugins and the active driver.'
@@ -529,6 +585,7 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   async ready(): Promise<void> {
+    this._assertNotLifecycleReentrant('ready');
     this._assertOpen('ready');
     const driverInitialization =
       this._driverTransition ??
@@ -548,6 +605,7 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   async setDriver(drivers: string | string[]): Promise<void> {
+    this._assertNotLifecycleReentrant('setDriver');
     this._assertOpen('setDriver');
     const isDefaultDriverSelection = this._isRunningDefaultDriverSelection;
     if (!isDefaultDriverSelection) {
@@ -601,9 +659,19 @@ export class LocalSpace implements LocalSpaceInstance {
     };
 
     const extendSelfWithDriver = async (driver: Driver) => {
+      const lifecycleInstance = DefaultDriverSet.has(driver)
+        ? this
+        : this._createLifecycleGuardedInstance('driver-init');
       const closeStorage =
         typeof driver._closeStorage === 'function'
-          ? () => driver._closeStorage!.call(this)
+          ? () => {
+              const closeInstance = DefaultDriverSet.has(driver)
+                ? this
+                : this._createLifecycleGuardedInstance('driver-close');
+              return this._invokeLifecycleCallback('driver-close', () =>
+                driver._closeStorage!.call(closeInstance)
+              );
+            }
           : null;
       this._activeDriverClose = closeStorage;
       this._driverInitialized = false;
@@ -615,7 +683,11 @@ export class LocalSpace implements LocalSpaceInstance {
       const initStorage = driverInstance._initStorage;
       this._ready =
         typeof initStorage === 'function'
-          ? Promise.resolve().then(() => initStorage.call(this, this._config))
+          ? Promise.resolve().then(() =>
+              this._invokeLifecycleCallback('driver-init', () =>
+                initStorage.call(lifecycleInstance, this._config)
+              )
+            )
           : Promise.resolve();
 
       try {
@@ -858,6 +930,7 @@ export class LocalSpace implements LocalSpaceInstance {
     executor: () => unknown
   ): Promise<unknown> {
     try {
+      this._assertNotLifecycleReentrant(operation);
       this._assertOpen(operation);
     } catch (error) {
       return Promise.reject(error);
@@ -1239,6 +1312,60 @@ export class LocalSpace implements LocalSpaceInstance {
       'OPERATION_FAILED',
       `Cannot ${operation} while storage operations are active.`,
       { operation, reason: 'active-operations' }
+    );
+  }
+
+  private _createLifecycleGuardedInstance(lifecycle: LifecycleCallback): this {
+    return new Proxy(this, {
+      get: (target, property, receiver) => {
+        if (property === LIFECYCLE_GUARD_TARGET) {
+          return target;
+        }
+        if (
+          typeof property === 'string' &&
+          LifecycleReentrantMethods.has(property)
+        ) {
+          return () =>
+            Promise.reject(
+              target._lifecycleReentryError(property, lifecycle)
+            );
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+  }
+
+  private _invokeLifecycleCallback<T>(
+    lifecycle: LifecycleCallback,
+    callback: () => T
+  ): T {
+    const previousLifecycle = this._invokingLifecycleCallback;
+    this._invokingLifecycleCallback = lifecycle;
+    try {
+      return callback();
+    } finally {
+      this._invokingLifecycleCallback = previousLifecycle;
+    }
+  }
+
+  private _assertNotLifecycleReentrant(operation: string): void {
+    if (!this._invokingLifecycleCallback) {
+      return;
+    }
+    throw this._lifecycleReentryError(
+      operation,
+      this._invokingLifecycleCallback
+    );
+  }
+
+  private _lifecycleReentryError(
+    operation: string,
+    lifecycle: LifecycleCallback
+  ): LocalSpaceError {
+    return createLocalSpaceError(
+      'OPERATION_FAILED',
+      `Cannot call ${operation} from a LocalSpace lifecycle callback.`,
+      { operation, reason: 'lifecycle-reentrancy', lifecycle }
     );
   }
 

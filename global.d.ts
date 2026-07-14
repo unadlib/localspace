@@ -1,8 +1,7 @@
 export {};
 
-declare var __DEV__: boolean;
-
 declare global {
+  var __DEV__: boolean;
   var webkitIndexedDB: Window['indexedDB'];
   var mozIndexedDB: Window['indexedDB'];
   var OIndexedDB: Window['indexedDB'];

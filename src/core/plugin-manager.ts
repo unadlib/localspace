@@ -15,7 +15,9 @@ import { normalizeBatchEntries } from '../utils/helpers.js';
 import { warnDeprecation } from '../utils/deprecations.js';
 import {
   getBuiltInStorageTransformKind,
+  getPluginBackgroundTaskController,
   type BuiltInStorageTransformKind,
+  type PluginBackgroundTaskPause,
 } from './plugin-capabilities.js';
 
 export class PluginAbortError extends Error {
@@ -28,6 +30,16 @@ export class PluginAbortError extends Error {
 type PluginHost = LocalSpaceInstance & {
   _config: LocalSpaceConfig;
   _dbInfo: DbInfo | null;
+};
+
+type PluginLifecycleBridge = {
+  createGuardedInstance(
+    lifecycle: 'plugin-init' | 'plugin-destroy'
+  ): LocalSpaceInstance;
+  invoke<T>(
+    lifecycle: 'plugin-init' | 'plugin-destroy',
+    callback: () => T
+  ): T;
 };
 
 type RegisteredPlugin = {
@@ -141,6 +153,8 @@ const PLUGIN_WARNINGS = {
 export class PluginManager {
   private readonly host: PluginHost;
 
+  private readonly lifecycleBridge: PluginLifecycleBridge;
+
   private readonly sharedMetadata: Record<string, unknown> =
     sharedMetadataFor();
 
@@ -166,8 +180,13 @@ export class PluginManager {
 
   private warningsEmitted = new Set<string>();
 
-  constructor(host: PluginHost, initialPlugins: LocalSpacePlugin[] = []) {
+  constructor(
+    host: PluginHost,
+    initialPlugins: LocalSpacePlugin[],
+    lifecycleBridge: PluginLifecycleBridge
+  ) {
     this.host = host;
+    this.lifecycleBridge = lifecycleBridge;
     if (initialPlugins.length) {
       this.registerPlugins(initialPlugins);
     }
@@ -296,10 +315,12 @@ export class PluginManager {
         continue;
       }
 
-      const context = this.createContext(null);
+      const context = this.createContext(null, 'plugin-init');
       const initPromise = (async () => {
         try {
-          await plugin.onInit!(context);
+          await this.lifecycleBridge.invoke('plugin-init', () =>
+            plugin.onInit!(context)
+          );
           this.initialized.add(plugin);
         } catch (error) {
           await this.dispatchPluginError(
@@ -326,9 +347,14 @@ export class PluginManager {
     }
   }
 
-  createContext(operation: PluginOperation | null): PluginContext {
+  createContext(
+    operation: PluginOperation | null,
+    lifecycle?: 'plugin-init' | 'plugin-destroy'
+  ): PluginContext {
     return {
-      instance: this.host,
+      instance: lifecycle
+        ? this.lifecycleBridge.createGuardedInstance(lifecycle)
+        : this.host,
       driver: this.host.driver ? this.host.driver() : null,
       dbInfo: this.host._dbInfo ?? null,
       config: this.host._config,
@@ -589,6 +615,43 @@ export class PluginManager {
     await this.destroyPlugins(true);
   }
 
+  pauseBackgroundTasks(): PluginBackgroundTaskPause {
+    const pauses: PluginBackgroundTaskPause[] = [];
+    try {
+      for (const { plugin } of this.pluginRegistry) {
+        if (!this.initialized.has(plugin) || this.destroyed.has(plugin)) {
+          continue;
+        }
+        const controller = getPluginBackgroundTaskController(plugin);
+        if (controller) {
+          pauses.push(controller(this.createContext(null)));
+        }
+      }
+    } catch (error) {
+      for (const pause of pauses.slice().reverse()) {
+        pause.resume();
+      }
+      throw error;
+    }
+
+    let resumed = false;
+    return {
+      pending: pauses.some((pause) => pause.pending),
+      settled: Promise.all(pauses.map((pause) => pause.settled)).then(
+        () => undefined
+      ),
+      resume: () => {
+        if (resumed) {
+          return;
+        }
+        resumed = true;
+        for (const pause of pauses.slice().reverse()) {
+          pause.resume();
+        }
+      },
+    };
+  }
+
   private async destroyPlugins(initializedOnly: boolean): Promise<void> {
     const plugins = this.pluginRegistry
       .map((entry) => entry.plugin)
@@ -610,10 +673,12 @@ export class PluginManager {
         this.destroyed.add(plugin);
         continue;
       }
-      const context = this.createContext(null);
+      const context = this.createContext(null, 'plugin-destroy');
       const destroyPromise = Promise.resolve().then(async () => {
         try {
-          await plugin.onDestroy!(context);
+          await this.lifecycleBridge.invoke('plugin-destroy', () =>
+            plugin.onDestroy!(context)
+          );
         } catch (error) {
           await this.dispatchPluginError(
             plugin,

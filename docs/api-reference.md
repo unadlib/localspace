@@ -538,11 +538,15 @@ await store.close();
 
 Calling `close()` on an unused instance does not initialize its driver or
 plugins. Use `clear()` or `dropInstance()` when data should be deleted.
+If the built-in TTL plugin is sweeping expired entries, `close()` stops its
+timer and waits for that sweep before releasing the driver.
 Call it only while the instance is idle. While a storage operation is active it
 rejects with `LocalSpaceError(OPERATION_FAILED)` and
 `details.reason === 'active-operations'`; await the operation and retry. The
 same rule prevents hooks, transaction runners, and custom drivers from awaiting
-a lifecycle transition that is waiting for their own operation.
+a lifecycle transition that is waiting for their own operation. Plugin and
+custom-driver lifecycle callbacks also reject reentrant lifecycle or storage
+calls with `details.reason === 'lifecycle-reentrancy'`.
 
 ### `destroy(): Promise<void>`
 

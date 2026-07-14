@@ -10,18 +10,27 @@ const globalName = pkg.name
   .map(([s, ...rest]) => [s.toUpperCase(), ...rest].join(''))
   .join('');
 
-const environment = process.env.NODE_ENV || 'production';
-
 const sharedOptions = {
-  platform: 'browser',
   transform: {
     target: 'es2020',
     define: {
       __DEV__: 'false',
-      'process.env.NODE_ENV': JSON.stringify(environment),
     },
   },
   treeshake: true,
+} satisfies Partial<RolldownOptions>;
+
+const universalOptions = {
+  ...sharedOptions,
+  platform: 'neutral',
+  resolve: {
+    mainFields: ['module', 'main'],
+  },
+} satisfies Partial<RolldownOptions>;
+
+const browserOptions = {
+  ...sharedOptions,
+  platform: 'browser',
 } satisfies Partial<RolldownOptions>;
 
 const minifiedOutput = {
@@ -31,7 +40,7 @@ const minifiedOutput = {
 
 export default defineConfig([
   {
-    ...sharedOptions,
+    ...universalOptions,
     input: './dist/index.js',
     output: [
       {
@@ -45,17 +54,21 @@ export default defineConfig([
         format: 'es',
         file: 'dist/index.esm.js',
       },
-      {
-        ...minifiedOutput,
-        format: 'umd',
-        name: globalName,
-        file: pkg.unpkg,
-        exports: 'named',
-      },
     ],
   },
   {
-    ...sharedOptions,
+    ...browserOptions,
+    input: './dist/index.js',
+    output: {
+      ...minifiedOutput,
+      format: 'umd',
+      name: globalName,
+      file: pkg.unpkg,
+      exports: 'named',
+    },
+  },
+  {
+    ...universalOptions,
     input: './dist/react-native.js',
     output: [
       {

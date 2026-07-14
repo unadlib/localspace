@@ -19,6 +19,34 @@ async function ensureFixtureReady(page: Page) {
 }
 
 test.describe('localspace browser interoperability', () => {
+  test('production browser bundle suppresses deprecation warnings', async ({
+    page,
+  }) => {
+    await ensureFixtureReady(page);
+
+    const warnings = await page.evaluate(async () => {
+      const localspace = (window as any).localspace;
+      const originalWarn = console.warn;
+      const messages: string[] = [];
+      console.warn = (...args: unknown[]) => {
+        messages.push(args.map(String).join(' '));
+      };
+      try {
+        const instance = localspace.createInstance({
+          name: 'production-warning-check',
+          size: 1,
+        });
+        instance.config();
+        await instance.close();
+      } finally {
+        console.warn = originalWarn;
+      }
+      return messages;
+    });
+
+    expect(warnings).toEqual([]);
+  });
+
   test('setItem/getItem/iterate mirror localForage behaviour', async ({ page }) => {
     await ensureFixtureReady(page);
 

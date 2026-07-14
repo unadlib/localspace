@@ -143,6 +143,90 @@ describe('LocalSpace.close', () => {
     expect(onDestroy).toHaveBeenCalledTimes(1);
   });
 
+  it('waits for an active TTL sweep before closing', async () => {
+    let releaseExpiration!: () => void;
+    let markExpirationStarted!: () => void;
+    const expirationGate = new Promise<void>((resolve) => {
+      releaseExpiration = resolve;
+    });
+    const expirationStarted = new Promise<void>((resolve) => {
+      markExpirationStarted = resolve;
+    });
+    const onExpire = vi.fn(async () => {
+      markExpirationStarted();
+      await expirationGate;
+    });
+    const instance = localspace.createInstance({
+      name: uniqueName('close-active-ttl-sweep'),
+      plugins: [
+        ttlPlugin({
+          defaultTTL: 1,
+          cleanupInterval: 5,
+          onExpire,
+        }),
+      ],
+    });
+    await instance.setDriver([instance.MEMORY]);
+    await instance.setItem('ephemeral', 'value');
+    await expirationStarted;
+
+    let closeSettled = false;
+    const closing = instance.close().finally(() => {
+      closeSettled = true;
+    });
+    await Promise.resolve();
+    expect(closeSettled).toBe(false);
+
+    releaseExpiration();
+    await closing;
+    await new Promise<void>((resolve) => setTimeout(resolve, 15));
+    expect(onExpire).toHaveBeenCalledTimes(1);
+  });
+
+  it('resumes TTL cleanup when close rejects for a foreground operation', async () => {
+    let releaseWrite!: () => void;
+    let markWriteStarted!: () => void;
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    const writeStarted = new Promise<void>((resolve) => {
+      markWriteStarted = resolve;
+    });
+    const onExpire = vi.fn();
+    const instance = localspace.createInstance({
+      name: uniqueName('resume-ttl-after-close-rejection'),
+      plugins: [
+        {
+          name: 'slow-write',
+          priority: 20,
+          beforeSet: async (_key, value) => {
+            markWriteStarted();
+            await writeGate;
+            return value;
+          },
+        },
+        ttlPlugin({
+          defaultTTL: 5,
+          cleanupInterval: 10,
+          onExpire,
+        }),
+      ],
+    });
+    await instance.setDriver([instance.MEMORY]);
+
+    const write = instance.setItem('ephemeral', 'value');
+    await writeStarted;
+    await expect(instance.close()).rejects.toMatchObject({
+      code: 'OPERATION_FAILED',
+      details: { operation: 'close', reason: 'active-operations' },
+    });
+
+    releaseWrite();
+    await write;
+    await vi.waitFor(() => expect(onExpire).toHaveBeenCalledTimes(1));
+    await instance.close();
+  });
+
   it('shares plugin teardown between concurrent destroy and close calls', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     let releaseDestroy!: () => void;
@@ -178,6 +262,116 @@ describe('LocalSpace.close', () => {
 
     await Promise.all([destroying, closing]);
     expect(onDestroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails fast when plugin teardown tries to close the same instance', async () => {
+    let instance!: LocalSpace;
+    let capturedReentryError: unknown;
+    let reentryError: unknown;
+    instance = new LocalSpace({
+      name: uniqueName('plugin-destroy-reentrant-close'),
+      plugins: [
+        {
+          name: 'plugin-destroy-reentrant-close',
+          onDestroy: async (context) => {
+            capturedReentryError = await instance.close().catch((error) =>
+              Promise.resolve(error)
+            );
+            await Promise.resolve();
+            reentryError = await context.instance.close().catch((error) =>
+              Promise.resolve(error)
+            );
+          },
+        },
+      ],
+    });
+    await instance.setDriver([instance.MEMORY]);
+    await instance.setItem('key', 'value');
+
+    await instance.close();
+
+    expect(capturedReentryError).toMatchObject({
+      code: 'OPERATION_FAILED',
+      details: {
+        operation: 'close',
+        reason: 'lifecycle-reentrancy',
+        lifecycle: 'plugin-destroy',
+      },
+    });
+    expect(reentryError).toMatchObject({
+      code: 'OPERATION_FAILED',
+      details: {
+        operation: 'close',
+        reason: 'lifecycle-reentrancy',
+        lifecycle: 'plugin-destroy',
+      },
+    });
+  });
+
+  it('fails fast when custom driver initialization reenters lifecycle', async () => {
+    let reentryError: unknown;
+    const driver: Driver = {
+      ...memoryDriver,
+      _driver: uniqueName('driver-init-reentrant-close'),
+      _support: true,
+      _initStorage: async function (config) {
+        await Promise.resolve();
+        reentryError = await this.close().catch((error) =>
+          Promise.resolve(error)
+        );
+        await memoryDriver._initStorage.call(this, config);
+      },
+    };
+    const instance = new LocalSpace({
+      name: uniqueName('driver-init-reentrant-close'),
+    });
+    await instance.defineDriver(driver);
+    await instance.setDriver([driver._driver]);
+
+    await instance.ready();
+
+    expect(reentryError).toMatchObject({
+      code: 'OPERATION_FAILED',
+      details: {
+        operation: 'close',
+        reason: 'lifecycle-reentrancy',
+        lifecycle: 'driver-init',
+      },
+    });
+    await instance.close();
+  });
+
+  it('fails fast when custom driver cleanup starts a storage operation', async () => {
+    let reentryError: unknown;
+    const oldDriver: Driver = {
+      ...memoryDriver,
+      _driver: uniqueName('driver-close-reentrant-read'),
+      _support: true,
+      _closeStorage: async function () {
+        await Promise.resolve();
+        reentryError = await this.getItem('key').catch((error) =>
+          Promise.resolve(error)
+        );
+      },
+    };
+    const instance = new LocalSpace({
+      name: uniqueName('driver-close-reentrant-read'),
+    });
+    await instance.defineDriver(oldDriver);
+    await instance.setDriver([oldDriver._driver]);
+    await instance.ready();
+
+    await instance.setDriver([instance.MEMORY]);
+
+    expect(reentryError).toMatchObject({
+      code: 'OPERATION_FAILED',
+      details: {
+        operation: 'getItem',
+        reason: 'lifecycle-reentrancy',
+        lifecycle: 'driver-close',
+      },
+    });
+    await instance.close();
   });
 
   it('does not initialize plugins or run hooks after close', async () => {
