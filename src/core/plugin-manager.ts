@@ -361,10 +361,11 @@ export class PluginManager {
 
   createContext(
     operation: PluginOperation | null,
-    instance: LocalSpaceInstance = this.host
+    lifecycleInstance?: LocalSpaceInstance
   ): PluginContext {
     return {
-      instance,
+      instance: this.host,
+      ...(lifecycleInstance ? { lifecycleInstance } : {}),
       driver: this.host.driver ? this.host.driver() : null,
       dbInfo: this.host._dbInfo ?? null,
       config: this.host._config,

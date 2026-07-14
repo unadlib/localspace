@@ -56,6 +56,43 @@ test.describe('localspace browser interoperability', () => {
     expect(hasDefaultExport).toBe(true);
   });
 
+  test('production ESM suppresses warnings with an empty process.env shim', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const result = await page.evaluate(async () => {
+      const browserGlobal = globalThis as unknown as {
+        process?: { env?: Record<string, string> };
+      };
+      browserGlobal.process = { env: {} };
+      const originalWarn = console.warn;
+      const warnings: string[] = [];
+      console.warn = (...args: unknown[]) => {
+        warnings.push(args.map(String).join(' '));
+      };
+      try {
+        const moduleUrl = `/dist/index.esm.js?empty-process-env=${Date.now()}`;
+        const localspaceModule = await import(moduleUrl);
+        const instance = localspaceModule.default.createInstance({
+          name: 'empty-process-env-warning-check',
+          size: 1,
+        });
+        instance.config();
+        await instance.close();
+        return {
+          hasDefaultExport:
+            typeof localspaceModule.default?.createInstance === 'function',
+          warnings,
+        };
+      } finally {
+        console.warn = originalWarn;
+      }
+    });
+
+    expect(result).toEqual({ hasDefaultExport: true, warnings: [] });
+  });
+
   test('production browser bundle suppresses deprecation warnings', async ({
     page,
   }) => {

@@ -1,6 +1,33 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import localspace, { ttlPlugin } from '../src';
+import localspace, { memoryDriver, ttlPlugin, type Driver } from '../src';
 import { LocalSpaceError } from '../src/errors';
+
+const uniqueName = (prefix: string) =>
+  `${prefix}-${Math.random().toString(36).slice(2)}`;
+
+const createRemovalFailingStore = async (
+  removeItem: Driver['removeItem'],
+  removeItems: NonNullable<Driver['removeItems']>,
+  onExpire: (key: string, value: unknown) => Promise<void> | void
+) => {
+  const name = uniqueName('ttl-removal-failure');
+  const driver: Driver = {
+    ...memoryDriver,
+    _driver: uniqueName('ttl-removal-failure-driver'),
+    _support: true,
+    removeItem,
+    removeItems,
+  };
+  const store = localspace.createInstance({
+    name,
+    storeName: 'ttl',
+    plugins: [ttlPlugin({ defaultTTL: 10, onExpire })],
+    pluginErrorPolicy: 'lenient',
+  });
+  await store.defineDriver(driver);
+  await store.setDriver([driver._driver]);
+  return store;
+};
 
 const createMemoryPair = async (
   name: string,
@@ -137,5 +164,56 @@ describe('TTL expiration callback errors', () => {
       { key: 'first', value: null },
       { key: 'second', value: null },
     ]);
+  });
+
+  it('does not notify when an expired item cannot be removed', async () => {
+    const expire = expireAfterWrite();
+    const removeItem = vi.fn(async () => {
+      throw new Error('removal failed');
+    });
+    const removeItems = vi.fn(memoryDriver.removeItems!);
+    const onExpire = vi.fn();
+    const store = await createRemovalFailingStore(
+      removeItem,
+      removeItems,
+      onExpire
+    );
+    await store.setItem('session', 'secret');
+    expire();
+
+    await expect(store.getItem('session')).resolves.toBeNull();
+    await expect(store.getItem('session')).resolves.toBeNull();
+    expect(removeItem).toHaveBeenCalledTimes(2);
+    expect(onExpire).not.toHaveBeenCalled();
+    await store.close();
+  });
+
+  it('does not notify when an expired batch cannot be removed', async () => {
+    const expire = expireAfterWrite();
+    const removeItem = vi.fn(memoryDriver.removeItem);
+    const removeItems = vi.fn(async () => {
+      throw new Error('batch removal failed');
+    });
+    const onExpire = vi.fn();
+    const store = await createRemovalFailingStore(
+      removeItem,
+      removeItems,
+      onExpire
+    );
+    await store.setItems([
+      { key: 'first', value: 'one' },
+      { key: 'second', value: 'two' },
+    ]);
+    expire();
+
+    const expired = [
+      { key: 'first', value: null },
+      { key: 'second', value: null },
+    ];
+    await expect(store.getItems(['first', 'second'])).resolves.toEqual(expired);
+    await expect(store.getItems(['first', 'second'])).resolves.toEqual(expired);
+    expect(removeItems).toHaveBeenCalledTimes(2);
+    expect(onExpire).not.toHaveBeenCalled();
+    await store.close();
   });
 });

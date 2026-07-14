@@ -8,9 +8,6 @@ const STORAGE_TRANSFORM_KIND = Symbol.for(
 const BACKGROUND_TASK_CONTROLLER = Symbol.for(
   'localspace.internal.background-task-controller'
 );
-export const LIFECYCLE_GUARD_TARGET = Symbol.for(
-  'localspace.internal.lifecycle-guard-target'
-);
 const STORAGE_TRANSFORM_KINDS = new Set<BuiltInStorageTransformKind>([
   'encryption',
   'compression',
@@ -69,10 +66,3 @@ export const getPluginBackgroundTaskController = (
   plugin: LocalSpacePlugin
 ): PluginBackgroundTaskController | null =>
   (plugin as MarkedPlugin)[BACKGROUND_TASK_CONTROLLER] ?? null;
-
-export const getLifecycleGuardTarget = (
-  instance: PluginContext['instance']
-): PluginContext['instance'] =>
-  ((instance as unknown as Record<PropertyKey, unknown>)[
-    LIFECYCLE_GUARD_TARGET
-  ] as PluginContext['instance'] | undefined) ?? instance;

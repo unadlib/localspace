@@ -75,6 +75,13 @@ While an operation is active they reject with `OPERATION_FAILED` and
 Lifecycle calls from hooks, transaction runners, and custom drivers follow the
 same rule instead of waiting on themselves.
 
+`context.instance` remains the stable public instance in every plugin hook.
+Inside a plugin lifecycle callback, use that callback's
+`context.lifecycleInstance` for same-instance storage or lifecycle calls,
+especially across `await`; it rejects lifecycle reentry while the callback is
+pending and resumes normal forwarding after the callback settles. Custom-driver
+lifecycle callbacks use their stable `this` receiver for the same purpose.
+
 `destroy()` remains available during 2.x with its historical plugin-only
 cleanup behavior, but is deprecated. Use `clear()` or `dropInstance()` only
 when the intent is to delete data.

@@ -191,16 +191,18 @@ Call `close()` and `setDriver()` only while the instance is idle. If a storage
 operation is active, they reject with `OPERATION_FAILED` and
 `details.reason === 'active-operations'`; await the operation and retry. This
 also prevents lifecycle calls made inside hooks, transaction runners, or custom
-drivers from waiting on themselves. Plugin lifecycle callbacks must use
-`context.instance`, and custom-driver lifecycle callbacks must use their `this`
-receiver, instead of capturing the original instance across an async boundary.
-Those guarded receivers reject same-instance storage and lifecycle calls with
-`details.reason === 'lifecycle-reentrancy'` while the callback is pending,
-including across `await`. After it settles, retained receivers forward normally
-for later timer or event-handler work. The same receiver object is reused across
-plugin contexts and across a custom driver's lifecycle and operation methods,
-so identity-keyed state remains available. Unrelated concurrent callers are
-never treated as lifecycle reentry.
+drivers from waiting on themselves. `context.instance` remains the public
+instance with stable identity across every plugin hook. Plugin lifecycle
+callbacks must use the callback-scoped `context.lifecycleInstance` for
+same-instance calls across an async boundary; custom-driver lifecycle callbacks
+must use their `this` receiver. Those guarded receivers reject same-instance
+storage and lifecycle calls with `details.reason === 'lifecycle-reentrancy'`
+while the callback is pending, including across `await`. After they settle,
+retained receivers forward normally for later timer or event-handler work. A
+custom driver uses the same receiver object for its lifecycle and operation
+methods, so identity-keyed state remains available. Guard state is isolated per
+plugin lifecycle callback and per selected custom driver, so unrelated retained
+receivers and concurrent callers are never treated as lifecycle reentry.
 
 ### React Native AsyncStorage
 

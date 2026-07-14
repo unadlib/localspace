@@ -29,10 +29,7 @@ import memoryDriver from './drivers/memory.js';
 import { PluginManager } from './core/plugin-manager.js';
 import { normalizeConfigOptions } from './core/config.js';
 import { warnDeprecation } from './utils/deprecations.js';
-import {
-  LIFECYCLE_GUARD_TARGET,
-  type PluginBackgroundTaskPause,
-} from './core/plugin-capabilities.js';
+import type { PluginBackgroundTaskPause } from './core/plugin-capabilities.js';
 
 // Shared drivers across all instances
 const DefinedDrivers: DefinedDriversMap = {};
@@ -98,6 +95,14 @@ type LifecycleCallback =
 type LifecycleInvocation<TInstance> = {
   instance: TInstance;
   invoke<T>(callback: () => T): Promise<Awaited<T>>;
+};
+
+type LifecycleScope<TInstance> = {
+  instance: TInstance;
+  invoke<T>(
+    lifecycle: LifecycleCallback,
+    callback: () => T
+  ): Promise<Awaited<T>>;
 };
 
 type ActiveLifecycleInvocation = {
@@ -237,9 +242,6 @@ export class LocalSpace implements LocalSpaceInstance {
   private _operationsStarting = 0;
   private readonly _activeOperations = new Set<Promise<unknown>>();
   private _invokingLifecycleCallback: LifecycleCallback | null = null;
-  private readonly _activeLifecycleInvocations: ActiveLifecycleInvocation[] =
-    [];
-  private readonly _lifecycleReceiver: this;
   private _pluginManager: PluginManager;
   private _rawDriverMethods: Partial<
     Record<PluginAwareMethod, RawDriverMethod>
@@ -277,8 +279,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
     this._defaultConfig = extend({}, DefaultConfig);
     this._config = extend({}, this._defaultConfig, normalizedOverrides);
-    this._lifecycleReceiver = this._createLifecycleReceiver();
-    this._pluginManager = new PluginManager(this._lifecycleReceiver, plugins, {
+    this._pluginManager = new PluginManager(this, plugins, {
       createInvocation: (lifecycle) =>
         this._createLifecycleInvocation(lifecycle),
     });
@@ -672,6 +673,10 @@ export class LocalSpace implements LocalSpaceInstance {
 
     const extendSelfWithDriver = async (driver: Driver) => {
       const isDefaultDriver = DefaultDriverSet.has(driver);
+      const lifecycleScope = isDefaultDriver
+        ? null
+        : this._createLifecycleScope();
+      const driverReceiver = lifecycleScope?.instance ?? this;
       const closeStorage =
         typeof driver._closeStorage === 'function'
           ? () => {
@@ -680,15 +685,14 @@ export class LocalSpace implements LocalSpaceInstance {
                   driver._closeStorage!.call(this)
                 );
               }
-              const lifecycle = this._createLifecycleInvocation('driver-close');
-              return lifecycle.invoke(() =>
-                driver._closeStorage!.call(lifecycle.instance)
+              return lifecycleScope!.invoke('driver-close', () =>
+                driver._closeStorage!.call(driverReceiver)
               );
             }
           : null;
       this._activeDriverClose = closeStorage;
       this._driverInitialized = false;
-      this._extend(driver, isDefaultDriver ? this : this._lifecycleReceiver);
+      this._extend(driver, driverReceiver);
       this._driver = driver._driver;
       setDriverToConfig();
 
@@ -702,9 +706,8 @@ export class LocalSpace implements LocalSpaceInstance {
                   initStorage.call(this, this._config)
                 );
               }
-              const lifecycle = this._createLifecycleInvocation('driver-init');
-              return lifecycle.invoke(() =>
-                initStorage.call(lifecycle.instance, this._config)
+              return lifecycleScope!.invoke('driver-init', () =>
+                initStorage.call(driverReceiver, this._config)
               );
             })
           : Promise.resolve();
@@ -1339,35 +1342,20 @@ export class LocalSpace implements LocalSpaceInstance {
   private _createLifecycleInvocation(
     lifecycle: LifecycleCallback
   ): LifecycleInvocation<this> {
+    const scope = this._createLifecycleScope();
     return {
-      instance: this._lifecycleReceiver,
-      invoke: async <T>(callback: () => T): Promise<Awaited<T>> => {
-        const token = {};
-        this._activeLifecycleInvocations.push({ token, lifecycle });
-        try {
-          return await this._invokeLifecycleCallback(lifecycle, callback);
-        } finally {
-          const index = this._activeLifecycleInvocations.findIndex(
-            (invocation) => invocation.token === token
-          );
-          if (index !== -1) {
-            this._activeLifecycleInvocations.splice(index, 1);
-          }
-        }
-      },
+      instance: scope.instance,
+      invoke: <T>(callback: () => T): Promise<Awaited<T>> =>
+        scope.invoke(lifecycle, callback),
     };
   }
 
-  private _createLifecycleReceiver(): this {
-    return new Proxy(this, {
+  private _createLifecycleScope(): LifecycleScope<this> {
+    const activeInvocations: ActiveLifecycleInvocation[] = [];
+    const instance = new Proxy(this, {
       get: (target, property, receiver) => {
-        if (property === LIFECYCLE_GUARD_TARGET) {
-          return target;
-        }
         const activeInvocation =
-          this._activeLifecycleInvocations[
-            this._activeLifecycleInvocations.length - 1
-          ];
+          activeInvocations[activeInvocations.length - 1];
         if (
           activeInvocation &&
           typeof property === 'string' &&
@@ -1384,6 +1372,26 @@ export class LocalSpace implements LocalSpaceInstance {
         return Reflect.get(target, property, receiver);
       },
     });
+    return {
+      instance,
+      invoke: async <T>(
+        lifecycle: LifecycleCallback,
+        callback: () => T
+      ): Promise<Awaited<T>> => {
+        const token = {};
+        activeInvocations.push({ token, lifecycle });
+        try {
+          return await this._invokeLifecycleCallback(lifecycle, callback);
+        } finally {
+          const index = activeInvocations.findIndex(
+            (invocation) => invocation.token === token
+          );
+          if (index !== -1) {
+            activeInvocations.splice(index, 1);
+          }
+        }
+      },
+    };
   }
 
   private _invokeLifecycleCallback<T>(

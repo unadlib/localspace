@@ -1996,10 +1996,9 @@ function dropInstance(
         .then(() => {
           if (dbContext) {
             dbContext.db = null;
-            for (const forage of forages) {
-              advanceReadiness(forage._dbInfo);
-            }
-            delete dbContexts[contextKey];
+            dbContext.prewarmed = false;
+            advanceReadiness(dropDbInfo);
+            disposeDbContextIfUnused(dropDbInfo, dbContext);
           }
         })
         .catch((err) => {

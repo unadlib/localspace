@@ -105,6 +105,46 @@ describe('IndexedDB shared context lifecycle', () => {
     await cleanup.close();
   });
 
+  it('keeps live registrations after dropping a shared database', async () => {
+    const name = uniqueName('shared-drop');
+    const first = localspace.createInstance({
+      name,
+      storeName: 'store',
+      prewarmTransactions: false,
+    });
+    const second = localspace.createInstance({
+      name,
+      storeName: 'store',
+      prewarmTransactions: false,
+    });
+    await first.setDriver([first.INDEXEDDB]);
+    await second.setDriver([second.INDEXEDDB]);
+    await first.ready();
+    await second.ready();
+
+    const dbInfo = first._dbInfo!;
+    const context = testHooks.getDbContext(dbInfo);
+    expect(context?.forages).toEqual([first, second]);
+
+    await first.dropInstance({ name });
+    expect(testHooks.getDbContext(dbInfo)).toBe(context);
+    expect(context?.forages).toEqual([first, second]);
+
+    await first.setItem('first', 'one');
+    expect(first._dbInfo?.db).toBe(second._dbInfo?.db);
+    await second.setItem('second', 'two');
+    await expect(first.getItem('second')).resolves.toBe('two');
+    await expect(second.getItem('first')).resolves.toBe('one');
+
+    await first.close();
+    expect(testHooks.getDbContext(dbInfo)?.forages).toEqual([second]);
+
+    const secondDbInfo = second._dbInfo!;
+    await second.dropInstance({ name });
+    await second.close();
+    expect(testHooks.getDbContext(secondDbInfo)).toBeUndefined();
+  });
+
   it('uses the default context identity after a bucket fallback', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const restoreBuckets = installStorageBuckets(async () => {

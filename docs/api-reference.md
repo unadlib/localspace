@@ -557,16 +557,19 @@ Call it only while the instance is idle. While a storage operation is active it
 rejects with `LocalSpaceError(OPERATION_FAILED)` and
 `details.reason === 'active-operations'`; await the operation and retry. The
 same rule prevents hooks, transaction runners, and custom drivers from awaiting
-a lifecycle transition that is waiting for their own operation. Plugin
-lifecycle callbacks must use `context.instance`, and custom-driver lifecycle
-callbacks must use their `this` receiver, instead of capturing the original
-instance across an async boundary. Those guarded receivers reject same-instance
-lifecycle and storage calls with `details.reason === 'lifecycle-reentrancy'`
-while the callback is pending, including across `await`. After settlement,
-retained receivers forward normally for later timer or event-handler work. A
-stable receiver is reused across plugin contexts and across each custom
-driver's lifecycle and operation methods, so identity-keyed state remains
-available; unrelated concurrent callers are not treated as lifecycle reentry.
+a lifecycle transition that is waiting for their own operation.
+`context.instance` remains the public instance with stable identity across all
+plugin hooks. Plugin lifecycle callbacks must use the callback-scoped
+`context.lifecycleInstance` for same-instance calls across an async boundary;
+custom-driver lifecycle callbacks must use their `this` receiver. Those guarded
+receivers reject same-instance lifecycle and storage calls with
+`details.reason === 'lifecycle-reentrancy'` while the callback is pending,
+including across `await`. After settlement, retained receivers forward normally
+for later timer or event-handler work. A custom driver reuses a stable receiver
+for its lifecycle and operation methods, so identity-keyed state remains
+available. Guard state is isolated per plugin lifecycle callback and per
+selected custom driver, so unrelated retained receivers and concurrent callers
+are not treated as lifecycle reentry.
 
 ### `destroy(): Promise<void>`
 

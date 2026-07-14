@@ -395,8 +395,8 @@ describe('LocalSpace.close', () => {
               .close()
               .catch((error) => Promise.resolve(error));
             await Promise.resolve();
-            reentryError = await context.instance
-              .close()
+            reentryError = await context
+              .lifecycleInstance!.close()
               .catch((error) => Promise.resolve(error));
           },
         },
@@ -434,8 +434,8 @@ describe('LocalSpace.close', () => {
           name: 'plugin-init-context-reentry',
           onInit: async (context) => {
             await Promise.resolve();
-            reentryError = await context.instance
-              .getItem('nested')
+            reentryError = await context
+              .lifecycleInstance!.getItem('nested')
               .catch((error) => Promise.resolve(error));
           },
         },
@@ -457,22 +457,53 @@ describe('LocalSpace.close', () => {
 
   it('releases the plugin lifecycle guard after initialization settles', async () => {
     let lifecycleInstance!: LocalSpaceInstance;
+    let releaseSecondInitialization!: () => void;
+    let markSecondInitializationStarted!: () => void;
+    const secondInitializationGate = new Promise<void>((resolve) => {
+      releaseSecondInitialization = resolve;
+    });
+    const secondInitializationStarted = new Promise<void>((resolve) => {
+      markSecondInitializationStarted = resolve;
+    });
     const instance = new LocalSpace({
       name: uniqueName('released-plugin-init-guard'),
       plugins: [
         {
           name: 'released-plugin-init-guard',
           onInit: async (context) => {
-            lifecycleInstance = context.instance;
+            lifecycleInstance = context.lifecycleInstance!;
             await Promise.resolve();
+          },
+        },
+        {
+          name: 'later-plugin-init-guard',
+          onInit: async () => {
+            markSecondInitializationStarted();
+            await secondInitializationGate;
           },
         },
       ],
     });
     await instance.setDriver([instance.MEMORY]);
-    await instance.setItem('key', 'value');
+    const write = instance.setItem('key', 'value');
+    await secondInitializationStarted;
 
-    await expect(lifecycleInstance.getItem('key')).resolves.toBe('value');
+    let retainedCallState: 'pending' | 'fulfilled' | 'rejected' = 'pending';
+    const retainedCall = lifecycleInstance.getItem('key').then(
+      () => {
+        retainedCallState = 'fulfilled';
+      },
+      () => {
+        retainedCallState = 'rejected';
+      }
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(retainedCallState).toBe('pending');
+    releaseSecondInitialization();
+    await Promise.all([write, retainedCall]);
+
+    expect(retainedCallState).toBe('fulfilled');
     await instance.close();
   });
 
@@ -488,10 +519,12 @@ describe('LocalSpace.close', () => {
         {
           name: 'stable-plugin-instance',
           onInit: (context) => {
+            expect(context.lifecycleInstance).toBeDefined();
             initInstance = context.instance;
             state.set(context.instance, { writes: 0 });
           },
           beforeSet: (_key, value, context) => {
+            expect(context.lifecycleInstance).toBeUndefined();
             hookInstance = context.instance;
             const pluginState = state.get(context.instance);
             if (!pluginState) {
@@ -501,6 +534,7 @@ describe('LocalSpace.close', () => {
             return value;
           },
           onDestroy: (context) => {
+            expect(context.lifecycleInstance).toBeDefined();
             destroyInstance = context.instance;
             expect(state.get(context.instance)?.writes).toBe(1);
           },
@@ -514,6 +548,7 @@ describe('LocalSpace.close', () => {
 
     expect(hookInstance).toBe(initInstance);
     expect(destroyInstance).toBe(initInstance);
+    expect(initInstance).toBe(instance);
   });
 
   it('fails fast when custom driver initialization reenters lifecycle', async () => {

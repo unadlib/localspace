@@ -11,7 +11,6 @@ import {
   readPluginEnvelope,
 } from '../core/plugin-envelope.js';
 import {
-  getLifecycleGuardTarget,
   markBuiltInStorageTransformPlugin,
   markPluginBackgroundTaskController,
   type PluginBackgroundTaskPause,
@@ -73,9 +72,7 @@ const validateVersionedTtlPayload = (
   return payload as TtlPayloadBody<unknown>;
 };
 
-const validateLegacyTtlPayload = (
-  value: unknown
-): TtlPayloadBody<unknown> => {
+const validateLegacyTtlPayload = (value: unknown): TtlPayloadBody<unknown> => {
   const payload = value as Partial<TtlPayloadBody<unknown>>;
   if (
     !payload ||
@@ -301,11 +298,7 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
     const metadata = getMetadata(context);
     metadata.stopped = false;
     metadata.paused = false;
-    scheduleCleanup(
-      { ...context, instance: getLifecycleGuardTarget(context.instance) },
-      options,
-      metadata
-    );
+    scheduleCleanup(context, options, metadata);
   },
   onDestroy: async (context) => {
     const metadata = getMetadata(context);
@@ -348,8 +341,13 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
     }
 
     if (payload.expiresAt <= Date.now()) {
-      await context.instance.removeItem(key).catch(() => undefined);
-      await notifyExpired(key, payload.data, context, options);
+      const removed = await context.instance.removeItem(key).then(
+        () => true,
+        () => false
+      );
+      if (removed) {
+        await notifyExpired(key, payload.data, context, options);
+      }
       return null;
     }
 
@@ -400,10 +398,15 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
 
     // Remove expired keys in batch
     if (expiredKeys.length > 0) {
-      await context.instance.removeItems(expiredKeys).catch(() => undefined);
-      // Notify only after every expired key has been removed.
-      for (const entry of expiredEntries) {
-        await notifyExpired(entry.key, entry.value, context, options);
+      const removed = await context.instance.removeItems(expiredKeys).then(
+        () => true,
+        () => false
+      );
+      if (removed) {
+        // Notify only after every expired key has been removed.
+        for (const entry of expiredEntries) {
+          await notifyExpired(entry.key, entry.value, context, options);
+        }
       }
     }
 

@@ -490,7 +490,14 @@ export type PluginOperation =
 export type PluginStage = 'init' | 'before' | 'after' | 'destroy' | 'error';
 
 export interface PluginContext {
+  /** The public LocalSpace instance. Its identity is stable across all hooks. */
   instance: LocalSpaceInstance;
+  /**
+   * A callback-scoped receiver for same-instance calls made by `onInit` or
+   * `onDestroy`. It rejects storage and lifecycle reentry while that callback
+   * is pending, including across `await`, and is omitted from operation hooks.
+   */
+  lifecycleInstance?: LocalSpaceInstance;
   driver: string | null;
   dbInfo: DbInfo | null;
   config: LocalSpaceConfig;

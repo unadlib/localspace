@@ -46,8 +46,12 @@ const getDeprecationState = (): DeprecationState => {
 const deprecationState = getDeprecationState();
 
 const isProductionRuntime = (): boolean => {
-  if (typeof process !== 'undefined' && process.env) {
-    return process.env.NODE_ENV === 'production';
+  const nodeEnv =
+    typeof process !== 'undefined' && process.env
+      ? process.env.NODE_ENV
+      : undefined;
+  if (typeof nodeEnv === 'string') {
+    return nodeEnv === 'production';
   }
 
   // Direct browser bundles have no standard runtime environment flag. They
