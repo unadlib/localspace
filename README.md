@@ -4,19 +4,13 @@
 [![npm](https://img.shields.io/npm/v/localspace.svg)](https://www.npmjs.com/package/localspace)
 ![license](https://img.shields.io/npm/l/localspace)
 
-localspace is a Promise-first storage toolkit for IndexedDB, localStorage, and
-React Native AsyncStorage, with TypeScript types and a focused plugin system.
+localspace is a Promise-first storage toolkit for IndexedDB, localStorage, and React Native AsyncStorage, with TypeScript types and a focused plugin system.
 
 ## Motivation
 
-localspace keeps the familiar key-value shape of localForage while making
-Promise semantics, explicit batching, and driver capabilities the actual
-contract. It adds first-class TypeScript types, IndexedDB transactions,
-multi-platform drivers, and a plugin architecture.
+localspace keeps the familiar key-value shape of localForage while making Promise semantics, explicit batching, and driver capabilities the actual contract. It adds first-class TypeScript types, IndexedDB transactions, multi-platform drivers, and a plugin architecture.
 
-It is not a callback-compatible drop-in replacement. Existing Promise-based
-localForage usage is usually straightforward to migrate; callback-based code
-must be converted to `await` or `.then()`.
+It is not a callback-compatible drop-in replacement. Existing Promise-based localForage usage is usually straightforward to migrate; callback-based code must be converted to `await` or `.then()`.
 
 ## Quick Start
 
@@ -154,8 +148,7 @@ console.log(localspace.driver());
 
 ### In-Memory Fallback
 
-When browser persistent storage is unavailable (for example, cookies/site data
-are blocked), opt in to the memory driver explicitly:
+When browser persistent storage is unavailable (for example, cookies/site data are blocked), opt in to the memory driver explicitly:
 
 ```ts
 await localspace.setDriver([
@@ -165,9 +158,7 @@ await localspace.setDriver([
 ]);
 ```
 
-The memory driver is runtime-only: data is shared by `name`/`storeName` while the
-page is alive and is lost on reload. It is not part of the default fallback order
-so persistent-storage failures remain visible unless you opt in.
+The memory driver is runtime-only: data is shared by `name`/`storeName` while the page is alive and is lost on reload. It is not part of the default fallback order so persistent-storage failures remain visible unless you opt in.
 
 ### Instance Lifecycle
 
@@ -179,38 +170,15 @@ await cache.setItem('token', 'abc123');
 await cache.close();
 ```
 
-`close()` is idempotent. It cleans initialized plugins and releases the active
-driver connection; later operations reject with `INSTANCE_CLOSED`. Use
-`clear()` or `dropInstance()` only when stored data should be removed.
-If custom-driver cleanup rejects, the instance remains closed but retains the
-unfinished cleanup handle; call `close()` again to retry it. Concurrent calls
-share one attempt, and cleanup that already succeeded is not repeated.
-Cleanup that rejects after `_initStorage()` fails is retained as well; a later
-`setDriver()` or `close()` retries it without replacing the original
-initialization error.
-`destroy()` is deprecated and retains its legacy plugin-only behavior in 2.x.
-If a concurrent legacy `destroy()` has already started plugin initialization,
-`close()` waits for that complete initialization pass before teardown.
-An in-progress built-in TTL storage sweep is allowed to finish before cleanup,
-and its timer is stopped before the instance is marked closed. User
-`onExpire` notifications started by a background sweep are not part of that
-barrier, so they may safely await `close()` or `destroy()` on the same instance.
-Call `close()` and `setDriver()` only while the instance is idle. If a storage
-operation is active, they reject with `OPERATION_FAILED` and
-`details.reason === 'active-operations'`; await the operation and retry. This
-also prevents lifecycle calls made inside hooks, transaction runners, or custom
-drivers from waiting on themselves. `context.instance` remains the public
-instance with stable identity across every plugin hook. Plugin lifecycle
-callbacks must use the callback-scoped `context.lifecycleInstance` for
-same-instance calls across an async boundary; custom-driver lifecycle callbacks
-must use their `this` receiver. Those guarded receivers reject same-instance
-storage and lifecycle calls with `details.reason === 'lifecycle-reentrancy'`
-while the callback is pending, including across `await`. After they settle,
-retained receivers forward normally for later timer or event-handler work. A
-custom driver uses the same receiver object for its lifecycle and operation
-methods, so identity-keyed state remains available. Guard state is isolated per
-plugin lifecycle callback and per selected custom driver, so unrelated retained
-receivers and concurrent callers are never treated as lifecycle reentry.
+`close()` is idempotent. It cleans initialized plugins and releases the active driver connection; later operations reject with `INSTANCE_CLOSED`. Use `clear()` or `dropInstance()` only when stored data should be removed.
+
+If custom-driver cleanup rejects, the instance remains closed but retains the unfinished cleanup handle; call `close()` again to retry it. Concurrent calls share one attempt, and cleanup that already succeeded is not repeated. Cleanup that rejects after `_initStorage()` fails is retained as well; a later `setDriver()` or `close()` retries it without replacing the original initialization error.
+
+`destroy()` is deprecated and retains its legacy plugin-only behavior in 2.x. If a concurrent legacy `destroy()` has already started plugin initialization, `close()` waits for that complete initialization pass before teardown.
+
+An in-progress built-in TTL storage sweep is allowed to finish before cleanup, and its timer is stopped before the instance is marked closed. User `onExpire` notifications started by a background sweep are not part of that barrier, so they may safely await `close()` or `destroy()` on the same instance.
+
+Call `close()` and `setDriver()` only while the instance is idle. If a storage operation is active, they reject with `OPERATION_FAILED` and `details.reason === 'active-operations'`; await the operation and retry. This also prevents lifecycle calls made inside hooks, transaction runners, or custom drivers from waiting on themselves. `context.instance` remains the public instance with stable identity across every plugin hook. Plugin lifecycle callbacks must use the callback-scoped `context.lifecycleInstance` for same-instance calls across an async boundary; custom-driver lifecycle callbacks must use their `this` receiver. Those guarded receivers reject same-instance storage and lifecycle calls with `details.reason === 'lifecycle-reentrancy'` while the callback is pending, including across `await`. After they settle, retained receivers forward normally for later timer or event-handler work. A custom driver uses the same receiver object for its lifecycle and operation methods, so identity-keyed state remains available. Guard state is isolated per plugin lifecycle callback and per selected custom driver, so unrelated retained receivers and concurrent callers are never treated as lifecycle reentry.
 
 ### React Native AsyncStorage
 
@@ -258,9 +226,7 @@ Manual Detox smoke workflow (real simulator/emulator runtime):
 
 ## Batch Operations
 
-Use batch APIs for better performance. IndexedDB runs each batch chunk inside a
-transaction; when `maxBatchSize` is unset, the entire call is one chunk. Other
-drivers expose the same API but may perform grouped work sequentially.
+Use batch APIs for better performance. IndexedDB runs each batch chunk inside a transaction; when `maxBatchSize` is unset, the entire call is one chunk. Other drivers expose the same API but may perform grouped work sequentially.
 
 ```ts
 // One transaction on IndexedDB when maxBatchSize is unset
@@ -289,9 +255,7 @@ await localspace.runTransaction('readwrite', async (tx) => {
 });
 ```
 
-`runTransaction()` is supported by the IndexedDB and memory drivers. On
-localStorage and React Native AsyncStorage it rejects with
-`UNSUPPORTED_OPERATION`; use explicit operations when atomicity is unnecessary.
+`runTransaction()` is supported by the IndexedDB and memory drivers. On localStorage and React Native AsyncStorage it rejects with `UNSUPPORTED_OPERATION`; use explicit operations when atomicity is unnecessary.
 
 ---
 
@@ -325,21 +289,11 @@ const store = localspace.createInstance({
 | **Encryption**  | AES-GCM encryption via Web Crypto API                |
 | **Compression** | LZ-string compression for large values               |
 
-Encryption always fails closed in 2.1, including under the default lenient
-plugin policy. When encryption, compression, or TTL is active,
-`runTransaction()` and `iterate()` reject with `UNSUPPORTED_OPERATION` rather
-than bypassing transformations or exposing internal payloads. Use item/batch
-methods; plugin-aware transactions are planned for 3.0.
+Encryption always fails closed in 2.1, including under the default lenient plugin policy. When encryption, compression, or TTL is active, `runTransaction()` and `iterate()` reject with `UNSUPPORTED_OPERATION` rather than bypassing transformations or exposing internal payloads. Use item/batch methods; plugin-aware transactions are planned for 3.0.
 
-Cross-context replication is intentionally not built in. For best-effort
-single-item notifications, adapt
-[`examples/broadcast-notification-plugin.ts`](./examples/broadcast-notification-plugin.ts)
-to your application-level synchronization protocol.
+Cross-context replication is intentionally not built in. For best-effort single-item notifications, adapt [`examples/broadcast-notification-plugin.ts`](./examples/broadcast-notification-plugin.ts) to your application-level synchronization protocol.
 
-Serialized-size limits are also application policy rather than browser quota
-management. The non-published
-[`examples/size-limit-plugin.ts`](./examples/size-limit-plugin.ts) example
-shows a best-effort guard without automatic data eviction.
+Serialized-size limits are also application policy rather than browser quota management. The non-published [`examples/size-limit-plugin.ts`](./examples/size-limit-plugin.ts) example shows a best-effort guard without automatic data eviction.
 
 📖 **Full Plugin Documentation:** [docs/plugins.md](./docs/plugins.md)
 📖 **Real-World Examples:** [docs/examples.md](./docs/examples.md)
