@@ -1,6 +1,4 @@
-export type LocalSpaceDeprecation =
-  | 'react-native-auto-detection'
-  | 'weak-memory-transaction';
+export type LocalSpaceDeprecation = 'weak-memory-transaction';
 
 type DeprecationState = {
   emitted: Set<LocalSpaceDeprecation>;

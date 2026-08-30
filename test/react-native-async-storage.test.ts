@@ -239,7 +239,7 @@ describe('react native async storage driver', () => {
     expect(await external.getItem('key')).toBe('three');
   });
 
-  it('falls back to other drivers when injected adapter is malformed', async () => {
+  it('rejects a malformed adapter without falling back to another driver', async () => {
     const instance = new LocalSpace({
       name: 'rn-invalid',
       storeName: 'rn_invalid',
@@ -251,10 +251,52 @@ describe('react native async storage driver', () => {
       instance.REACTNATIVEASYNCSTORAGE,
       instance.LOCALSTORAGE,
     ]);
-    await instance.ready();
+    await expect(instance.ready()).rejects.toMatchObject({
+      code: 'INVALID_CONFIG',
+      details: {
+        configKey: 'reactNativeAsyncStorage',
+        operation: 'initialize',
+        reason: 'adapter-invalid',
+      },
+    });
+    expect(instance.driver()).toBe(instance.REACTNATIVEASYNCSTORAGE);
+    await instance.close();
+  });
 
-    expect(instance.driver()).toBe(instance.LOCALSTORAGE);
-    await instance.setItem('fallback', 'ok');
-    expect(await instance.getItem('fallback')).toBe('ok');
+  it('reports adapter-dependent query and drop capabilities explicitly', async () => {
+    const values = new Map<string, string>();
+    const minimalAdapter: ReactNativeAsyncStorage = {
+      getItem: async (key) => values.get(key) ?? null,
+      setItem: async (key, value) => {
+        values.set(key, value);
+      },
+      removeItem: async (key) => {
+        values.delete(key);
+      },
+    };
+    const instance = new LocalSpace({
+      name: 'rn-minimal-capabilities',
+      storeName: 'rn_minimal_capabilities',
+      reactNativeAsyncStorage: minimalAdapter,
+      drivers: [reactNativeAsyncStorageDriver],
+    });
+
+    await instance.setDriver([instance.REACTNATIVEASYNCSTORAGE]);
+    await instance.ready();
+    expect(instance.capabilities()).toMatchObject({
+      transactions: false,
+      dropInstance: false,
+    });
+    await instance.setItem('supported', 'yes');
+    await expect(instance.getItem('supported')).resolves.toBe('yes');
+    await expect(instance.keys()).rejects.toMatchObject({
+      code: 'UNSUPPORTED_OPERATION',
+      details: { operation: 'keys' },
+    });
+    await expect(instance.dropInstance()).rejects.toMatchObject({
+      code: 'UNSUPPORTED_OPERATION',
+      details: { operation: 'dropInstance' },
+    });
+    await instance.close();
   });
 });

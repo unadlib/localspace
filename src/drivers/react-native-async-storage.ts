@@ -16,7 +16,6 @@ import {
   chunkArray,
 } from '../utils/helpers.js';
 import serializer from '../utils/serializer.js';
-import { warnDeprecation } from '../utils/deprecations.js';
 
 type ReactNativeAsyncStorageDbInfo = DbInfo & {
   keyPrefix: string;
@@ -34,13 +33,6 @@ type ReactNativeAsyncStorageDriverContext = LocalSpaceInstance &
   };
 
 const DRIVER_NAME = 'reactNativeAsyncStorageWrapper';
-const OPTIONAL_RN_MODULES = [
-  '@react-native-async-storage/async-storage',
-  'react-native',
-] as const;
-
-let cachedRuntimeAsyncStorage: Promise<ReactNativeAsyncStorage | null> | null =
-  null;
 
 const withAsyncStorageErrorContext = <T>(
   promise: Promise<T>,
@@ -86,116 +78,21 @@ function getKeyPrefix(
   return keyPrefix;
 }
 
-function resolveRuntimeRequire(): ((moduleName: string) => unknown) | null {
-  if (typeof globalThis !== 'undefined') {
-    const runtimeRequire = (globalThis as Record<string, unknown>).require;
-    if (typeof runtimeRequire === 'function') {
-      return runtimeRequire as (moduleName: string) => unknown;
-    }
-  }
-
-  try {
-    return Function(
-      'return typeof require === "function" ? require : null;'
-    )() as ((moduleName: string) => unknown) | null;
-  } catch {
-    return null;
-  }
-}
-
-async function importOptionalModule(moduleName: string): Promise<unknown> {
-  const runtimeRequire = resolveRuntimeRequire();
-
-  if (runtimeRequire) {
-    try {
-      return runtimeRequire(moduleName);
-    } catch {
-      // Ignore and continue to dynamic import fallback.
-    }
-  }
-
-  try {
-    const dynamicImport = Function(
-      'moduleName',
-      'return import(moduleName);'
-    ) as (moduleName: string) => Promise<unknown>;
-    return await dynamicImport(moduleName);
-  } catch {
-    return null;
-  }
-}
-
-function extractAsyncStorageFromModule(
-  moduleValue: unknown
-): ReactNativeAsyncStorage | null {
-  if (!moduleValue || typeof moduleValue !== 'object') {
-    return null;
-  }
-
-  const moduleRecord = moduleValue as Record<string, unknown>;
-  const defaultRecord =
-    moduleRecord.default && typeof moduleRecord.default === 'object'
-      ? (moduleRecord.default as Record<string, unknown>)
-      : undefined;
-
-  const candidates: unknown[] = [
-    moduleValue,
-    moduleRecord.default,
-    moduleRecord.AsyncStorage,
-    defaultRecord?.default,
-    defaultRecord?.AsyncStorage,
-  ];
-
-  for (const candidate of candidates) {
-    if (isAsyncStorageLike(candidate)) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-async function resolveRuntimeAsyncStorage(): Promise<ReactNativeAsyncStorage | null> {
-  if (cachedRuntimeAsyncStorage) {
-    return cachedRuntimeAsyncStorage;
-  }
-
-  cachedRuntimeAsyncStorage = (async () => {
-    if (typeof globalThis !== 'undefined') {
-      const globalRecord = globalThis as Record<string, unknown>;
-      const globalCandidates: unknown[] = [
-        globalRecord.AsyncStorage,
-        globalRecord.ReactNativeAsyncStorage,
-        globalRecord.__LOCALSPACE_ASYNC_STORAGE__,
-      ];
-
-      for (const candidate of globalCandidates) {
-        if (isAsyncStorageLike(candidate)) {
-          return candidate;
-        }
-      }
-    }
-
-    for (const moduleName of OPTIONAL_RN_MODULES) {
-      const moduleValue = await importOptionalModule(moduleName);
-      const resolved = extractAsyncStorageFromModule(moduleValue);
-      if (resolved) {
-        return resolved;
-      }
-    }
-
-    return null;
-  })();
-
-  return cachedRuntimeAsyncStorage;
-}
-
 function resolveConfiguredAsyncStorage(
   config: LocalSpaceConfig
-): ReactNativeAsyncStorage | null {
+): ReactNativeAsyncStorage {
   const configuredStorage = config.reactNativeAsyncStorage;
   if (configuredStorage == null) {
-    return null;
+    throw createLocalSpaceError(
+      'DRIVER_UNAVAILABLE',
+      'React Native AsyncStorage requires an explicit reactNativeAsyncStorage adapter.',
+      {
+        configKey: 'reactNativeAsyncStorage',
+        driver: DRIVER_NAME,
+        operation: 'initialize',
+        reason: 'adapter-not-configured',
+      }
+    );
   }
 
   if (!isAsyncStorageLike(configuredStorage)) {
@@ -205,36 +102,13 @@ function resolveConfiguredAsyncStorage(
       {
         configKey: 'reactNativeAsyncStorage',
         driver: DRIVER_NAME,
+        operation: 'initialize',
+        reason: 'adapter-invalid',
       }
     );
   }
 
   return configuredStorage;
-}
-
-async function resolveAsyncStorage(
-  config: LocalSpaceConfig
-): Promise<ReactNativeAsyncStorage> {
-  const configured = resolveConfiguredAsyncStorage(config);
-  if (configured) {
-    return configured;
-  }
-
-  warnDeprecation(
-    'react-native-auto-detection',
-    'automatic React Native AsyncStorage detection is deprecated; inject `reactNativeAsyncStorage` explicitly.'
-  );
-
-  const detected = await resolveRuntimeAsyncStorage();
-  if (detected) {
-    return detected;
-  }
-
-  throw createLocalSpaceError(
-    'DRIVER_UNAVAILABLE',
-    'React Native AsyncStorage unavailable. Provide config.reactNativeAsyncStorage or install @react-native-async-storage/async-storage.',
-    { driver: DRIVER_NAME }
-  );
 }
 
 async function getAllKeysFromStorage(
@@ -300,7 +174,7 @@ async function _initStorage(
   this: ReactNativeAsyncStorageDriverContext,
   config: LocalSpaceConfig
 ): Promise<void> {
-  const asyncStorage = await resolveAsyncStorage(config);
+  const asyncStorage = resolveConfiguredAsyncStorage(config);
   const dbInfo: ReactNativeAsyncStorageDbInfo = {
     ...config,
     keyPrefix: getKeyPrefix(config, this._defaultConfig),
@@ -665,17 +539,15 @@ function dropInstance(
 const reactNativeAsyncStorageWrapper: Driver = {
   _driver: DRIVER_NAME,
   _initStorage,
-  _support: async () => {
-    const detected = await resolveRuntimeAsyncStorage();
-    return detected !== null;
-  },
-  _capabilities: {
+  _support: true,
+  _capabilities: (config) => ({
     transactions: false,
     atomicBatch: false,
-    dropInstance: true,
+    dropInstance:
+      typeof config.reactNativeAsyncStorage?.getAllKeys === 'function',
     persistent: true,
     storageBuckets: false,
-  },
+  }),
   iterate,
   getItem,
   getItems,

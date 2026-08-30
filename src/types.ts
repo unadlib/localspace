@@ -70,9 +70,9 @@ export interface LocalSpaceConfig {
   driver?: string | string[];
 
   /**
-   * Optional React Native AsyncStorage adapter.
-   * When provided, the React Native AsyncStorage driver can be used even when
-   * automatic runtime detection is unavailable.
+   * Explicit React Native AsyncStorage adapter. This is required whenever the
+   * React Native driver is selected; runtime globals and modules are not
+   * auto-detected.
    */
   reactNativeAsyncStorage?: ReactNativeAsyncStorage;
 

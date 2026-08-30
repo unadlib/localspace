@@ -664,6 +664,9 @@ export class LocalSpace implements LocalSpaceInstance {
               ) {
                 throw error;
               }
+              if (driverName === this.REACTNATIVEASYNCSTORAGE) {
+                throw error;
+              }
             }
           }
 

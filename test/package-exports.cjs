@@ -98,54 +98,48 @@ async function main() {
   );
   assert.equal(typeof cjsReactNative.setDeprecationWarnings, 'function');
 
-  const sharedWarnings = [];
   const originalRuntimeStorage = global.__LOCALSPACE_ASYNC_STORAGE__;
   const runtimeStorage = {
     getItem: async () => null,
     setItem: async () => undefined,
     removeItem: async () => undefined,
   };
-  console.warn = (message) => sharedWarnings.push(String(message));
+  const configuredStorage = {
+    getItem: async () => null,
+    setItem: async () => undefined,
+    removeItem: async () => undefined,
+  };
+  const context = {
+    _defaultConfig: { storeName: 'keyvaluepairs' },
+    _dbInfo: null,
+  };
   try {
-    process.env.NODE_ENV = 'development';
     global.__LOCALSPACE_ASYNC_STORAGE__ = runtimeStorage;
-    const context = {
-      _defaultConfig: { storeName: 'keyvaluepairs' },
-      _dbInfo: null,
-    };
-
-    cjs.setDeprecationWarnings(false);
-    await cjsReactNative.reactNativeAsyncStorageDriver._initStorage.call(
-      context,
-      { name: 'shared-warning-disabled', storeName: 'store' }
-    );
-
-    cjs.setDeprecationWarnings(true);
-    await cjsReactNative.reactNativeAsyncStorageDriver._initStorage.call(
-      context,
-      { name: 'shared-warning-enabled', storeName: 'store' }
+    await assert.rejects(
+      cjsReactNative.reactNativeAsyncStorageDriver._initStorage.call(context, {
+        name: 'runtime-global-must-be-ignored',
+        storeName: 'store',
+      }),
+      (error) =>
+        error?.code === 'DRIVER_UNAVAILABLE' &&
+        error?.details?.reason === 'adapter-not-configured'
     );
     await cjsReactNative.reactNativeAsyncStorageDriver._initStorage.call(
       context,
-      { name: 'shared-warning-once', storeName: 'store' }
+      {
+        name: 'explicit-adapter',
+        storeName: 'store',
+        reactNativeAsyncStorage: configuredStorage,
+      }
     );
+    assert.equal(context._dbInfo.asyncStorage, configuredStorage);
   } finally {
-    cjs.setDeprecationWarnings(true);
     if (originalRuntimeStorage === undefined) {
       delete global.__LOCALSPACE_ASYNC_STORAGE__;
     } else {
       global.__LOCALSPACE_ASYNC_STORAGE__ = originalRuntimeStorage;
     }
-    if (originalNodeEnv === undefined) {
-      delete process.env.NODE_ENV;
-    } else {
-      process.env.NODE_ENV = originalNodeEnv;
-    }
-    console.warn = originalWarn;
   }
-  assert.deepEqual(sharedWarnings, [
-    '[localspace] Deprecation: automatic React Native AsyncStorage detection is deprecated; inject `reactNativeAsyncStorage` explicitly.',
-  ]);
 
   const esm = await import('localspace');
   assert.equal(typeof esm.LocalSpace, 'function');

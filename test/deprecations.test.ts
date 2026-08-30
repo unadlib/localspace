@@ -3,9 +3,7 @@ import {
   LocalSpace,
   setDeprecationWarnings,
   type LocalSpacePlugin,
-  type ReactNativeAsyncStorage,
 } from '../src';
-import reactNativeAsyncStorageDriver from '../src/drivers/react-native-async-storage';
 import {
   resetDeprecationWarningsForTests,
   warnDeprecation,
@@ -48,47 +46,6 @@ describe('migration deprecation warnings', () => {
     new LocalSpace({ plugins: [plugin] });
 
     expect(warnings()).toEqual([]);
-  });
-
-  it('warns once when React Native storage is auto-detected', async () => {
-    const values = new Map<string, string>();
-    const adapter: ReactNativeAsyncStorage = {
-      getItem: async (key) => values.get(key) ?? null,
-      setItem: async (key, value) => {
-        values.set(key, value);
-      },
-      removeItem: async (key) => {
-        values.delete(key);
-      },
-    };
-    const globalRecord = globalThis as Record<string, unknown>;
-    const previous = globalRecord.__LOCALSPACE_ASYNC_STORAGE__;
-    globalRecord.__LOCALSPACE_ASYNC_STORAGE__ = adapter;
-    const context = {
-      _defaultConfig: { storeName: 'keyvaluepairs' },
-      _dbInfo: null,
-    };
-
-    try {
-      await reactNativeAsyncStorageDriver._initStorage.call(context, {
-        name: 'rn-auto-deprecation',
-        storeName: 'store',
-      });
-      await reactNativeAsyncStorageDriver._initStorage.call(context, {
-        name: 'rn-auto-deprecation-2',
-        storeName: 'store',
-      });
-    } finally {
-      if (previous === undefined) {
-        delete globalRecord.__LOCALSPACE_ASYNC_STORAGE__;
-      } else {
-        globalRecord.__LOCALSPACE_ASYNC_STORAGE__ = previous;
-      }
-    }
-
-    expect(warnings()).toEqual([
-      '[localspace] Deprecation: automatic React Native AsyncStorage detection is deprecated; inject `reactNativeAsyncStorage` explicitly.',
-    ]);
   });
 
   it('can disable all deprecation warnings', async () => {
