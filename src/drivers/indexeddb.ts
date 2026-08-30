@@ -1552,18 +1552,15 @@ function runTransaction<T>(
               complete(): void;
               abort(error: unknown): void;
             };
+            type ActiveRequestTask = {
+              run(): void;
+              abort(error: unknown): void;
+            };
             const pendingScopeSettlements: ScopeOperationSettlement[] = [];
+            const pendingActiveRequestTasks: ActiveRequestTask[] = [];
 
-            const isTransactionActive = (): boolean => {
-              if (transactionFinished) {
-                return false;
-              }
-              try {
-                transaction.objectStore(storeName);
-                return true;
-              } catch {
-                return false;
-              }
+            const isTransactionOpen = (): boolean => {
+              return !transactionFinished;
             };
 
             const transactionInactiveError = (
@@ -1581,10 +1578,10 @@ function runTransaction<T>(
                 }
               );
 
-            const assertTransactionActive = (
+            const assertTransactionOpen = (
               scopeOperation: keyof TransactionScope
             ): void => {
-              if (!isTransactionActive()) {
+              if (!isTransactionOpen()) {
                 throw transactionInactiveError(scopeOperation);
               }
             };
@@ -1593,7 +1590,7 @@ function runTransaction<T>(
               if (
                 keepAliveDepth === 0 ||
                 keepAliveRequestPending ||
-                !isTransactionActive()
+                !isTransactionOpen()
               ) {
                 return;
               }
@@ -1603,13 +1600,31 @@ function runTransaction<T>(
                 const request = store.count();
                 const continueKeepAlive = (): void => {
                   keepAliveRequestPending = false;
-                  pendingScopeSettlements.shift()?.complete();
-                  if (keepAliveDepth > 0 && isTransactionActive()) {
+                  for (const task of pendingActiveRequestTasks.splice(0)) {
+                    task.run();
+                  }
+
+                  const settlement = pendingScopeSettlements.shift();
+                  if (settlement && keepAliveDepth > 0) {
+                    // Queue one bridge request before settling the public
+                    // Promise. Firefox marks a transaction inactive before
+                    // Promise reactions run; the bridge gives an immediately
+                    // chained scope operation one active request event in which
+                    // to enqueue its native request. It is not continued when
+                    // the runner awaits unrelated work.
+                    issueKeepAliveRequest();
+                  }
+                  settlement?.complete();
+                  if (keepAliveDepth > 0 && isTransactionOpen()) {
                     issueKeepAliveRequest();
                   }
                 };
                 request.onsuccess = continueKeepAlive;
-                request.onerror = continueKeepAlive;
+                request.onerror = () => {
+                  keepAliveRequestPending = false;
+                  // The corresponding abort event provides the stable failure
+                  // and releases pending scope work.
+                };
               } catch {
                 keepAliveRequestPending = false;
               }
@@ -1619,7 +1634,7 @@ function runTransaction<T>(
               scopeOperation: keyof TransactionScope,
               operation: () => Promise<U> | U
             ): Promise<U> => {
-              assertTransactionActive(scopeOperation);
+              assertTransactionOpen(scopeOperation);
               keepAliveDepth += 1;
               issueKeepAliveRequest();
               return new Promise<U>((resolveOperation, rejectOperation) => {
@@ -1678,6 +1693,32 @@ function runTransaction<T>(
               for (const settlement of pendingScopeSettlements.splice(0)) {
                 settlement.abort(error);
               }
+              for (const task of pendingActiveRequestTasks.splice(0)) {
+                task.abort(error);
+              }
+            };
+
+            const runInActiveRequestTask = <U>(
+              scopeOperation: keyof TransactionScope,
+              operation: () => PromiseLike<U> | U
+            ): Promise<U> => {
+              if (transactionFinished) {
+                return Promise.reject(transactionInactiveError(scopeOperation));
+              }
+
+              return new Promise<U>((resolveOperation, rejectOperation) => {
+                pendingActiveRequestTasks.push({
+                  run: () => {
+                    try {
+                      resolveOperation(operation());
+                    } catch (error) {
+                      rejectOperation(error);
+                    }
+                  },
+                  abort: rejectOperation,
+                });
+                issueKeepAliveRequest();
+              });
             };
 
             const ensureBlobSupport = async (): Promise<boolean> => {
@@ -1705,24 +1746,25 @@ function runTransaction<T>(
 
             const scope = markDriverTransactionScope(
               {
-                get: <V>(key: string) => {
-                  assertTransactionActive('get');
-                  return new Promise<V | null>((res, rej) => {
-                    const req = store.get(normalizeKey(key));
-                    req.onsuccess = () => {
-                      let value = req.result;
-                      if (value === undefined) value = null;
-                      if (isEncodedBlob(value)) {
-                        value = decodeBlob(value);
-                      }
-                      res(value);
-                    };
-                    req.onerror = () => rej(req.error);
-                  });
-                },
+                get: <V>(key: string) =>
+                  runInActiveRequestTask(
+                    'get',
+                    () =>
+                      new Promise<V | null>((res, rej) => {
+                        const req = store.get(normalizeKey(key));
+                        req.onsuccess = () => {
+                          let value = req.result;
+                          if (value === undefined) value = null;
+                          if (isEncodedBlob(value)) {
+                            value = decodeBlob(value);
+                          }
+                          res(value);
+                        };
+                        req.onerror = () => rej(req.error);
+                      })
+                  ),
                 set: async <V>(key: string, value: V) => {
                   makeReadOnlyGuard();
-                  assertTransactionActive('set');
                   let actual: V | null | undefined = value;
                   if (actual === undefined) actual = null;
 
@@ -1735,39 +1777,47 @@ function runTransaction<T>(
                     }
                   }
 
-                  assertTransactionActive('set');
-                  return new Promise<V>((res, rej) => {
-                    const req = store.put(actual, normalizeKey(key));
-                    req.onsuccess = () => res(actual as V);
-                    req.onerror = () => rej(req.error);
-                  });
+                  return runInActiveRequestTask(
+                    'set',
+                    () =>
+                      new Promise<V>((res, rej) => {
+                        const req = store.put(actual, normalizeKey(key));
+                        req.onsuccess = () => res(actual as V);
+                        req.onerror = () => rej(req.error);
+                      })
+                  );
                 },
                 remove: (key: string) => {
                   makeReadOnlyGuard();
-                  assertTransactionActive('remove');
-                  return new Promise<void>((res, rej) => {
-                    const req = store.delete(normalizeKey(key));
-                    req.onsuccess = () => res();
-                    req.onerror = () => rej(req.error);
-                  });
+                  return runInActiveRequestTask(
+                    'remove',
+                    () =>
+                      new Promise<void>((res, rej) => {
+                        const req = store.delete(normalizeKey(key));
+                        req.onsuccess = () => res();
+                        req.onerror = () => rej(req.error);
+                      })
+                  );
                 },
-                keys: () => {
-                  assertTransactionActive('keys');
-                  return new Promise<string[]>((res, rej) => {
-                    const all: string[] = [];
-                    const req = store.openKeyCursor();
-                    req.onsuccess = () => {
-                      const cursor = req.result;
-                      if (!cursor) {
-                        res(all);
-                        return;
-                      }
-                      all.push(cursor.key as string);
-                      cursor.continue();
-                    };
-                    req.onerror = () => rej(req.error);
-                  });
-                },
+                keys: () =>
+                  runInActiveRequestTask(
+                    'keys',
+                    () =>
+                      new Promise<string[]>((res, rej) => {
+                        const all: string[] = [];
+                        const req = store.openKeyCursor();
+                        req.onsuccess = () => {
+                          const cursor = req.result;
+                          if (!cursor) {
+                            res(all);
+                            return;
+                          }
+                          all.push(cursor.key as string);
+                          cursor.continue();
+                        };
+                        req.onerror = () => rej(req.error);
+                      })
+                  ),
                 iterate: async <V, U>(
                   fn: (
                     value: V,
@@ -1775,28 +1825,31 @@ function runTransaction<T>(
                     iteration: number
                   ) => U | Promise<U>
                 ) => {
-                  assertTransactionActive('iterate');
-                  const entries = await new Promise<
-                    Array<{ key: string; value: V }>
-                  >((res, rej) => {
-                    const all: Array<{ key: string; value: V }> = [];
-                    const req = store.openCursor();
-                    req.onsuccess = () => {
-                      const cursor = req.result;
-                      if (!cursor) {
-                        res(all);
-                        return;
-                      }
-                      let value = cursor.value;
-                      if (value === undefined) value = null;
-                      if (isEncodedBlob(value)) {
-                        value = decodeBlob(value);
-                      }
-                      all.push({ key: cursor.key as string, value });
-                      cursor.continue();
-                    };
-                    req.onerror = () => rej(req.error);
-                  });
+                  const entries = await runInActiveRequestTask(
+                    'iterate',
+                    () =>
+                      new Promise<Array<{ key: string; value: V }>>(
+                        (res, rej) => {
+                          const all: Array<{ key: string; value: V }> = [];
+                          const req = store.openCursor();
+                          req.onsuccess = () => {
+                            const cursor = req.result;
+                            if (!cursor) {
+                              res(all);
+                              return;
+                            }
+                            let value = cursor.value;
+                            if (value === undefined) value = null;
+                            if (isEncodedBlob(value)) {
+                              value = decodeBlob(value);
+                            }
+                            all.push({ key: cursor.key as string, value });
+                            cursor.continue();
+                          };
+                          req.onerror = () => rej(req.error);
+                        }
+                      )
+                  );
 
                   let iteration = 1;
                   for (const entry of entries) {
@@ -1813,12 +1866,15 @@ function runTransaction<T>(
                 },
                 clear: () => {
                   makeReadOnlyGuard();
-                  assertTransactionActive('clear');
-                  return new Promise<void>((res, rej) => {
-                    const req = store.clear();
-                    req.onsuccess = () => res();
-                    req.onerror = () => rej(req.error);
-                  });
+                  return runInActiveRequestTask(
+                    'clear',
+                    () =>
+                      new Promise<void>((res, rej) => {
+                        const req = store.clear();
+                        req.onsuccess = () => res();
+                        req.onerror = () => rej(req.error);
+                      })
+                  );
                 },
               },
               runScopeOperation

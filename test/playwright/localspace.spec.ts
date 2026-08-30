@@ -177,13 +177,33 @@ test.describe('localspace browser interoperability', () => {
       await instance.setDriver([instance.INDEXEDDB]);
       await instance.ready();
 
-      const transactionResult = await instance.runTransaction(
-        'readwrite',
-        async (scope) => {
-          await scope.set('secret', { message: 'transaction-webcrypto' });
-          return scope.get('secret');
-        }
-      );
+      let transactionResult: unknown;
+      try {
+        transactionResult = await instance.runTransaction(
+          'readwrite',
+          async (scope) => {
+            await scope.set('secret', { message: 'transaction-webcrypto' });
+            return scope.get('secret');
+          }
+        );
+      } catch (error) {
+        const failure = error as any;
+        transactionResult = {
+          error: {
+            code: failure.code,
+            message: failure.message,
+            details: failure.details,
+            cause: failure.cause
+              ? {
+                  name: failure.cause.name,
+                  message: failure.cause.message,
+                  code: failure.cause.code,
+                  details: failure.cause.details,
+                }
+              : undefined,
+          },
+        };
+      }
       const restored = await instance.getItem('secret');
       await instance.dropInstance();
       return { transactionResult, restored };

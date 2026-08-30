@@ -5,12 +5,16 @@ on:
   pull_request:
 
 jobs:
-  build:
+  node:
+    name: Node.js ${{ matrix.node-version }}
     runs-on: ubuntu-latest
+    env:
+      CI: 'true'
 
     strategy:
+      fail-fast: false
       matrix:
-        node-version: [20.x, 22.x]
+        node-version: [22.x, 24.x]
 
     steps:
       - uses: actions/checkout@v4
@@ -22,11 +26,51 @@ jobs:
         run: corepack enable
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-        env:
-          CI: true
-      - name: Install Playwright Browsers
-        run: pnpm exec playwright install --with-deps chromium
-      - name: Run tests
-        run: pnpm test
-        env:
-          CI: true
+      - name: Lint
+        run: pnpm lint
+      - name: Check types
+        run: pnpm check:type
+      - name: Run unit tests
+        run: pnpm test:unit
+      - name: Build package
+        run: pnpm build
+      - name: Verify package exports
+        run: node test/package-exports.cjs
+      - name: Verify package declaration consumers
+        run: pnpm test:types:package
+
+  browsers:
+    name: Playwright ${{ matrix.browser }}
+    runs-on: ubuntu-latest
+    env:
+      CI: 'true'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 24.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright ${{ matrix.browser }}
+        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+      - name: Build package
+        run: pnpm build
+      - name: Run ${{ matrix.browser }} tests
+        run: pnpm exec playwright test --project=${{ matrix.browser }}
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-${{ matrix.browser }}-traces
+          path: test-results
+          if-no-files-found: ignore

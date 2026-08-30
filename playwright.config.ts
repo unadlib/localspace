@@ -1,4 +1,8 @@
-import { defineConfig, type PlaywrightTestConfig } from '@playwright/test';
+import {
+  defineConfig,
+  devices,
+  type PlaywrightTestConfig,
+} from '@playwright/test';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,7 +30,23 @@ export const sharedPlaywrightConfig = {
   },
 } satisfies PlaywrightTestConfig;
 
+export const supportedBrowserProjects = [
+  {
+    name: 'chromium',
+    use: { ...devices['Desktop Chrome'] },
+  },
+  {
+    name: 'firefox',
+    use: { ...devices['Desktop Firefox'] },
+  },
+  {
+    name: 'webkit',
+    use: { ...devices['Desktop Safari'] },
+  },
+] satisfies NonNullable<PlaywrightTestConfig['projects']>;
+
 export default defineConfig({
   ...sharedPlaywrightConfig,
+  projects: supportedBrowserProjects,
   testIgnore: '**/*benchmark.spec.ts',
 });
