@@ -54,7 +54,8 @@
   smaller than the raw representation.
 - Restricted normal encryption to AES-GCM. AES-CBC/AES-CTR remain available only
   through a read-only legacy migration plugin. The AES-GCM writer owns its
-  per-write IV; the public algorithm type exposes only the remaining parameters.
+  per-write IV; the public algorithm type exposes only the remaining parameters,
+  and key material versus PBKDF2 derivation is an enforced exclusive choice.
 - Made Storage Bucket configuration an explicit placement requirement. Bucket
   unavailability/open failure no longer falls back to default IndexedDB or the
   next driver. Invalid bucket shapes reject before selection, and IndexedDB

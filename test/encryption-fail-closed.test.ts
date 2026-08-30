@@ -357,6 +357,20 @@ describe('encryption plugin fail-closed behavior', () => {
     expect(() =>
       encryptionPlugin({
         key: VALID_KEY,
+        keyDerivation: {
+          passphrase: 'passphrase',
+          salt: '0123456789abcdef',
+        },
+      } as never)
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'INVALID_CONFIG',
+        details: expect.objectContaining({ reason: 'ambiguous-key-source' }),
+      })
+    );
+    expect(() =>
+      encryptionPlugin({
+        key: VALID_KEY,
         algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
       } as never)
     ).toThrowError(

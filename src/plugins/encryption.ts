@@ -17,10 +17,26 @@ import {
 } from '../core/plugin-envelope.js';
 import { markBuiltInStorageTransformPlugin } from '../core/plugin-capabilities.js';
 
+type EncryptionKeySource =
+  | {
+      /** Pre-shared CryptoKey (usage checked per operation) or raw key material */
+      key: CryptoKey | ArrayBuffer | string;
+      keyDerivation?: never;
+    }
+  | {
+      key?: never;
+      /** Derive a key using PBKDF2 */
+      keyDerivation: {
+        passphrase: string | ArrayBuffer;
+        salt: string | ArrayBuffer;
+        iterations?: number;
+        hash?: string;
+        length?: number;
+      };
+    };
+
 interface EncryptionKeyOptions {
-  /** Pre-shared CryptoKey (usage checked per operation) or raw key material */
   key?: CryptoKey | ArrayBuffer | string;
-  /** Derive a key using PBKDF2 */
   keyDerivation?: {
     passphrase: string | ArrayBuffer;
     salt: string | ArrayBuffer;
@@ -36,7 +52,9 @@ export type EncryptionAlgorithm = Omit<AesGcmParams, 'name' | 'iv'> & {
   name: 'AES-GCM';
 };
 
-export interface EncryptionPluginOptions extends EncryptionKeyOptions {
+export type EncryptionPluginOptions = EncryptionKeySource & {
+  /** Provide a custom SubtleCrypto implementation (e.g., from node:crypto) */
+  subtle?: SubtleCrypto;
   /** AES-GCM parameters. The writer always supplies a fresh IV. */
   algorithm?: EncryptionAlgorithm;
   /** IV length in bytes (default 12) */
@@ -45,7 +63,7 @@ export interface EncryptionPluginOptions extends EncryptionKeyOptions {
   ivGenerator?: () => Uint8Array;
   /** Custom secure random filler, useful for non-standard runtimes */
   randomSource?: (buffer: Uint8Array) => Uint8Array;
-}
+};
 
 export type LegacyEncryptionMigrationAlgorithm =
   | { name: 'AES-CBC' }
@@ -57,10 +75,12 @@ export type LegacyEncryptionMigrationAlgorithm =
       length: number;
     };
 
-export interface LegacyEncryptionMigrationOptions extends EncryptionKeyOptions {
+export type LegacyEncryptionMigrationOptions = EncryptionKeySource & {
+  /** Provide a custom SubtleCrypto implementation (e.g., from node:crypto) */
+  subtle?: SubtleCrypto;
   /** Legacy read algorithm. This API never encrypts new values. */
   algorithm: LegacyEncryptionMigrationAlgorithm;
-}
+};
 
 type EncryptedPayloadBody = {
   algorithm: string;
@@ -340,6 +360,17 @@ const parseEncryptedPayload = (value: unknown): EncryptedPayloadBody | null => {
 type EncryptionPluginMode = 'gcm' | 'legacy-migration';
 
 const validateKeyOptions = (options: EncryptionKeyOptions): void => {
+  if (options.key !== undefined && options.keyDerivation !== undefined) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Encryption configuration must provide exactly one of `key` or `keyDerivation`.',
+      {
+        configKey: 'key',
+        conflictingConfigKey: 'keyDerivation',
+        reason: 'ambiguous-key-source',
+      }
+    );
+  }
   if (options.key === undefined && !options.keyDerivation) {
     throw createLocalSpaceError(
       'INVALID_CONFIG',

@@ -165,6 +165,16 @@ const typecheckRemovedApis = (): void => {
       iv: new Uint8Array(12),
     },
   };
+  // @ts-expect-error encryption requires exactly one key source
+  const missingKeySource: EncryptionPluginOptions = {};
+  // @ts-expect-error key and keyDerivation are mutually exclusive
+  const ambiguousKeySource: EncryptionPluginOptions = {
+    key: '0123456789abcdef0123456789abcdef',
+    keyDerivation: {
+      passphrase: 'passphrase',
+      salt: '0123456789abcdef',
+    },
+  };
   void instance.runTransaction('readwrite', (transaction) => {
     // @ts-expect-error transaction writes use the same StorageValue contract
     return transaction.set('date', new Date());
@@ -173,6 +183,8 @@ const typecheckRemovedApis = (): void => {
   void strictTransactionOptions;
   void legacyAlgorithm;
   void callerOwnedIv;
+  void missingKeySource;
+  void ambiguousKeySource;
 };
 setDeprecationWarnings(false);
 void registerDriver(customDriver, { overwrite: true });
