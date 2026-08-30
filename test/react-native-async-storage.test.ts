@@ -130,6 +130,65 @@ describe('react native async storage driver', () => {
     ).toBe(true);
   });
 
+  it('validates every write before adapter side effects', async () => {
+    const setItemSpy = vi.spyOn(asyncStorage, 'setItem');
+    const multiSetSpy = vi.spyOn(asyncStorage, 'multiSet');
+    const instance = await createReactNativeInstance(localspace, {
+      name: 'rn-storage-value-validation',
+      storeName: 'rn_storage_value_validation',
+      reactNativeAsyncStorage: asyncStorage,
+    });
+
+    await expect(
+      instance.setItem('date', new Date() as never)
+    ).rejects.toMatchObject({
+      code: 'SERIALIZATION_FAILED',
+      details: expect.objectContaining({ valuePath: '$' }),
+    });
+    await expect(
+      instance.setItems([
+        { key: 'valid', value: 'not-written' },
+        { key: 'map', value: new Map() as never },
+      ])
+    ).rejects.toMatchObject({
+      code: 'SERIALIZATION_FAILED',
+      details: expect.objectContaining({ key: 'map', valuePath: '$' }),
+    });
+
+    expect(setItemSpy).not.toHaveBeenCalled();
+    expect(multiSetSpy).not.toHaveBeenCalled();
+    expect(asyncStorage.dumpKeys()).toEqual([]);
+    await instance.close();
+  });
+
+  it('round-trips canonical binary StorageValues through AsyncStorage', async () => {
+    const instance = await createReactNativeInstance(localspace, {
+      name: 'rn-storage-value-binary',
+      storeName: 'rn_storage_value_binary',
+      reactNativeAsyncStorage: asyncStorage,
+    });
+    const source = new Uint8Array([9, 1, 2, 8]);
+
+    await instance.setItem('binary', {
+      buffer: source.buffer,
+      view: source.subarray(1, 3),
+      signed: new Int16Array([-2, 3]),
+    });
+    const result = await instance.getItem<{
+      buffer: ArrayBuffer;
+      view: Uint8Array;
+      signed: Int16Array;
+    }>('binary');
+
+    expect(result?.buffer).toBeInstanceOf(ArrayBuffer);
+    expect([...new Uint8Array(result!.buffer)]).toEqual([9, 1, 2, 8]);
+    expect(result?.view).toBeInstanceOf(Uint8Array);
+    expect([...result!.view]).toEqual([1, 2]);
+    expect(result?.signed).toBeInstanceOf(Int16Array);
+    expect([...result!.signed]).toEqual([-2, 3]);
+    await instance.close();
+  });
+
   it('uses multi* methods for batch APIs when available', async () => {
     const multiSetSpy = vi.spyOn(asyncStorage, 'multiSet');
     const multiGetSpy = vi.spyOn(asyncStorage, 'multiGet');

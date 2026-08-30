@@ -37,7 +37,8 @@ function normalizeDriverOrder(driver?: string | string[]): string[] {
 
 /**
  * Create a LocalSpace instance configured for React Native in one step.
- * This installs the RN driver, selects it as primary, and awaits readiness.
+ * This adds the RN driver only to the new instance, selects it as primary, and
+ * awaits readiness. It does not mutate the realm-wide driver registry.
  */
 export async function createReactNativeInstance(
   baseInstance: LocalSpaceInstance,
