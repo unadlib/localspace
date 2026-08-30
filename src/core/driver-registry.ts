@@ -68,7 +68,34 @@ const cloneDriverDefinition = (driver: Driver): Readonly<Driver> => {
     throw complianceError(driver, '_support must be a boolean or function');
   }
 
-  const descriptors = Object.getOwnPropertyDescriptors(driver);
+  const prototypeChain: object[] = [];
+  for (
+    let current: object | null = driver;
+    current && current !== Object.prototype;
+    current = Object.getPrototypeOf(current)
+  ) {
+    prototypeChain.unshift(current);
+  }
+
+  // Flatten the visible definition surface so later writes to a class or
+  // object-literal prototype cannot change an already registered driver.
+  // Build the final descriptor map before defining properties so a derived
+  // non-configurable member can still shadow a base member in the snapshot.
+  const descriptors = Object.create(null) as Record<
+    PropertyKey,
+    PropertyDescriptor
+  >;
+  for (const current of prototypeChain) {
+    const currentDescriptors = Object.getOwnPropertyDescriptors(current);
+    for (const property of Reflect.ownKeys(currentDescriptors)) {
+      Object.defineProperty(descriptors, property, {
+        configurable: true,
+        enumerable: true,
+        value: currentDescriptors[property as keyof typeof currentDescriptors],
+        writable: true,
+      });
+    }
+  }
   const capabilityDeclaration = snapshotCapabilityDeclaration(driver);
   if (capabilityDeclaration !== undefined) {
     descriptors._capabilities = {
@@ -78,10 +105,7 @@ const cloneDriverDefinition = (driver: Driver): Readonly<Driver> => {
       writable: true,
     };
   }
-  const snapshot = Object.create(
-    Object.getPrototypeOf(driver),
-    descriptors
-  ) as Driver;
+  const snapshot = Object.create(null, descriptors) as Driver;
   return Object.freeze(snapshot);
 };
 

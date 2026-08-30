@@ -454,9 +454,11 @@ await registerDriver(replacement, { overwrite: true });
 ```
 
 `instance.defineDriver()` no longer exists. LocalSpace snapshots and freezes a
-driver definition without modifying the caller's object. Each selected
-instance receives a distinct session receiver shared by `_initStorage`,
-operations, and `_closeStorage`.
+driver definition without modifying the caller's object. Inherited definition
+members are copied into that snapshot, so later mutation of the caller's object
+or prototype does not reconfigure registered behavior. Each selected instance
+receives a distinct session receiver shared by `_initStorage`, operations, and
+`_closeStorage`.
 
 A driver requires `_driver`, `_initStorage`, `clear`, `getItem`, `iterate`,
 `key`, `keys`, `length`, `removeItem`, and `setItem`. `dropInstance`, batch

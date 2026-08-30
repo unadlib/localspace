@@ -220,6 +220,53 @@ describe('driver registry and sessions', () => {
     await instance.close();
   });
 
+  it('detaches inherited driver members from later prototype mutation', async () => {
+    const driverName = uniqueDriverName('prototype-definition');
+    const driver = createSessionDriver(driverName);
+    const originalSetItem = driver.setItem;
+    const prototype = Object.create(Object.getPrototypeOf(driver), {
+      setItem: {
+        configurable: true,
+        enumerable: false,
+        value: originalSetItem,
+        writable: true,
+      },
+      inheritedMetadata: {
+        configurable: true,
+        enumerable: false,
+        value: 'original',
+        writable: true,
+      },
+    }) as {
+      setItem: Driver['setItem'];
+      inheritedMetadata: string;
+    };
+    delete (driver as Partial<Driver>).setItem;
+    Object.setPrototypeOf(driver, prototype);
+
+    const instance = new LocalSpace({ driver: driverName, drivers: [driver] });
+    prototype.setItem = async () => {
+      throw new Error('mutated prototype method must not be observed');
+    };
+    prototype.inheritedMetadata = 'mutated';
+
+    await instance.ready();
+    await expect(instance.setItem('key', 'value')).resolves.toBe('value');
+    await expect(instance.getItem('key')).resolves.toBe('value');
+
+    const snapshot = (await instance.getDriver(driverName)) as Readonly<
+      Driver & { inheritedMetadata: string }
+    >;
+    expect(snapshot.setItem).toBe(originalSetItem);
+    expect(snapshot.inheritedMetadata).toBe('original');
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(
+      Object.getOwnPropertyDescriptor(snapshot, 'setItem')?.enumerable
+    ).toBe(false);
+
+    await instance.close();
+  });
+
   it('gives each instance a private stable receiver for one selected session', async () => {
     const driverName = uniqueDriverName('session-receiver');
     const receivers: ReceiverLog = {

@@ -468,7 +468,9 @@ const store = new LocalSpace({
 await registerDriver(customDriver);
 ```
 
-LocalSpace snapshots definitions without injecting missing methods or state.
+LocalSpace snapshots definitions, including inherited members, without
+injecting missing methods or state. Mutating either the original object or its
+prototype after registration does not reconfigure the registered driver.
 Every selection creates an instance-owned session receiver.
 
 Custom drivers should declare `_capabilities`. Optional operations remain
