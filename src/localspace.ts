@@ -514,9 +514,9 @@ export class LocalSpace implements LocalSpaceInstance {
     return this._driver || null;
   }
 
-  async getDriver(driverName: string): Promise<Driver> {
+  async getDriver(driverName: string): Promise<Readonly<Driver>> {
     const driver = this._driverRegistry.get(driverName);
-    if (driver) return driver as Driver;
+    if (driver) return driver;
     throw createLocalSpaceError('DRIVER_NOT_FOUND', 'Driver not found.', {
       driver: driverName,
     });

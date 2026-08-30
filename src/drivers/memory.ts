@@ -218,7 +218,7 @@ function getItems<T>(
 function iterate<T, U>(
   this: MemoryDriverContext,
   iterator: (value: T, key: string, iterationNumber: number) => U | Promise<U>
-): Promise<U> {
+): Promise<U | undefined> {
   const promise = withMemoryErrorContext(
     this.ready().then(() =>
       runStoreOperation(this._dbInfo.store, async () => {
@@ -235,7 +235,7 @@ function iterate<T, U>(
           }
         }
 
-        return undefined as U;
+        return undefined;
       })
     ),
     'iterate'

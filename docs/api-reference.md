@@ -407,7 +407,7 @@ initialization it throws `DRIVER_NOT_INITIALIZED`; after close it throws
 | memory          | `true`         | `false`         | `true`                   | `false`      | `false`                        |
 | RN AsyncStorage | `false`        | `false`         | adapter has `getAllKeys` | `true`       | `false`                        |
 
-### `getDriver(name): Promise<Driver>`
+### `getDriver(name): Promise<Readonly<Driver>>`
 
 Returns the immutable registered definition, not the active private session.
 Unknown names reject with `DRIVER_NOT_FOUND`.

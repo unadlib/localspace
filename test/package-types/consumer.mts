@@ -73,6 +73,11 @@ const iterateResult: Promise<string | undefined> = instance.iterate<
   StorageValue,
   string
 >(async () => 'done');
+const driverDefinition = instance.getDriver('package-types-esm');
+void driverDefinition.then((definition) => {
+  // @ts-expect-error registered definitions are exposed as readonly snapshots
+  definition._driver = 'changed';
+});
 const observerPlugin: LocalSpacePlugin = {
   name: 'package-types-observer',
   afterIterate(summary: Readonly<PluginIterateSummary>) {
@@ -110,6 +115,11 @@ const customDriver: Driver = {
     void lifecycleInstance.getItem;
   },
 };
+// @ts-expect-error a raw driver iteration can finish without a callback result
+const narrowDriverIteration: Promise<string> = customDriver.iterate<
+  StorageValue,
+  string
+>(() => 'done');
 const typecheckDirectLifecycleCalls = (
   driver: Driver,
   config: LocalSpaceConfig
@@ -172,8 +182,10 @@ void [
   legacyEncryptionOptions,
   legacyEncryption,
   iterateResult,
+  driverDefinition,
   observerPlugin,
   customDriver,
+  narrowDriverIteration,
   typecheckDirectLifecycleCalls,
   typecheckRemovedApis,
   createReactNativeInstance,

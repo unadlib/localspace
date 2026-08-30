@@ -994,10 +994,10 @@ function getItems<T>(
 function iterate<T, U>(
   this: IndexedDBDriverContext,
   iterator: (value: T, key: string, iterationNumber: number) => U
-): Promise<U> {
+): Promise<U | undefined> {
   const self = this;
 
-  const promise = new Promise<U>((resolve, reject) => {
+  const promise = new Promise<U | undefined>((resolve, reject) => {
     self
       .ready()
       .then(() => {
@@ -1034,7 +1034,7 @@ function iterate<T, U>(
                     cursor.continue();
                   }
                 } else {
-                  resolve(undefined as U);
+                  resolve(undefined);
                 }
               };
 

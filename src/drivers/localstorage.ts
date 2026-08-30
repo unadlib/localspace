@@ -166,7 +166,7 @@ function getItem<T>(
 function iterate<T, U>(
   this: LocalStorageDriverContext,
   iterator: (value: T, key: string, iterationNumber: number) => U
-): Promise<U> {
+): Promise<U | undefined> {
   const promise = withLocalStorageErrorContext(
     this.ready().then(() => {
       const dbInfo = this._dbInfo;
@@ -198,7 +198,7 @@ function iterate<T, U>(
         }
       }
 
-      return undefined as unknown as U;
+      return undefined;
     }),
     'iterate'
   );

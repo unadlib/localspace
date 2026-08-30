@@ -77,14 +77,14 @@ const createSessionDriver = (
     async iterate<T, U>(
       this: SessionReceiver,
       iterator: (value: T, key: string, iterationNumber: number) => U
-    ): Promise<U> {
+    ): Promise<U | undefined> {
       receivers.operated.push(this);
       let iteration = 1;
       for (const [key, value] of this.sessionValues) {
         const result = iterator(value as T, key, iteration++);
         if (result !== undefined) return result;
       }
-      return undefined as U;
+      return undefined;
     },
   }) as Driver;
 

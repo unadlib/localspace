@@ -210,7 +210,7 @@ export interface Driver {
    */
   iterate<T extends StorageValue = StorageValue, U = void>(
     iteratorCallback: (value: T, key: string, iterationNumber: number) => U
-  ): Promise<U>;
+  ): Promise<U | undefined>;
 
   /**
    * Get item by key
@@ -362,7 +362,7 @@ export interface LocalSpaceInstance {
   /**
    * Get driver object
    */
-  getDriver(driverName: string): Promise<Driver>;
+  getDriver(driverName: string): Promise<Readonly<Driver>>;
 
   /**
    * Get serializer
