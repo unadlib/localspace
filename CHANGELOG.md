@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-08-31
+
 ### Added
 
 - Added the exported recursive `StorageValue` type plus development diagnostics

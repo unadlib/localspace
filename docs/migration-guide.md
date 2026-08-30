@@ -3,7 +3,7 @@
 ## Upgrade From 2.0.x To 2.1
 
 ```bash
-pnpm add localspace@^2.1.0
+pnpm add localspace@^2.1.1
 ```
 
 ### Validate Configuration Before Driver Selection
