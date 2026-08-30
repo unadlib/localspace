@@ -66,11 +66,19 @@ cycles, `SharedArrayBuffer`, shared-memory views, `DataView`, `Blob`, `Date`,
 Accepted values are copied and normalized before persistence; for example,
 negative zero is read back as zero.
 
-LocalSpace encodes every accepted logical value in a versioned StoredRecord.
-It still reads unwrapped 2.x values. A user object with a `__localspace__`
-property is wrapped like any other value and therefore cannot collide with the
-record marker. Unknown LocalSpace record versions fail with
-`DESERIALIZATION_FAILED` instead of being guessed.
+LocalSpace encodes every accepted 3.0 logical write in a versioned
+StoredRecord. It still reads unwrapped 2.x values. A 3.0-written user object
+with a `__localspace__` property—even one exactly shaped like a valid record—is
+wrapped as payload and therefore cannot collide with the outer marker. Unknown
+LocalSpace record versions fail with `DESERIALIZATION_FAILED` instead of being
+guessed.
+
+A raw value written before 3.0 that is already _exactly_ identical to the full
+reserved StoredRecord grammar is inherently ambiguous because 2.x did not
+escape that future marker. Marker-like objects with another namespace/shape
+remain ordinary values. Audit this exceptional exact-shape case before deploying
+the bridge forward reader; no reader can infer the original intent from the
+persisted bytes alone.
 
 ## Creating instances
 

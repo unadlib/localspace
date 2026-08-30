@@ -29,7 +29,7 @@ unconditionally and rejects the option itself.
 ### Breaking-change summary
 
 | 2.1.x API or behavior                                                  | 3.0 migration                                                                          |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ---------- |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | `config(options)` setter                                               | pass all options to `new LocalSpace()` or `createInstance()`                           |
 | mutable objects returned from `config()`                               | treat the detached, deeply frozen snapshot as readonly                                 |
 | `instance.defineDriver()`                                              | use construction-scoped `drivers` or exported realm-wide `registerDriver()`            |
@@ -42,7 +42,7 @@ unconditionally and rejects the option itself.
 | `prewarmTransactions`, `connectionIdleMs`, `maxConcurrentTransactions` | remove them; supplying them is `INVALID_CONFIG`                                        |
 | matching single and batch hooks both executing                         | remove `isBatch` dedup guards; 3.0 chooses the batch hook or maps the single hook      |
 | plugins not covering query/iteration/clear/drop                        | adopt dedicated observers and logical views                                            |
-| synchronous-only/always-`U` iterate assumptions                        | callbacks may be async; result is `U                                                   | undefined` |
+| synchronous-only/always-`U` iterate assumptions                        | callbacks may be async; result is either `U` or `undefined`                            |
 | RN adapter auto-detection                                              | import `localspace/react-native` and inject AsyncStorage explicitly                    |
 | Storage Bucket fallback to default backend                             | handle readiness failure; a requested bucket never falls back                          |
 | AES-CBC/AES-CTR normal encryption config                               | use the read-only legacy migration plugin, then write AES-GCM data elsewhere           |
@@ -176,6 +176,16 @@ lost during fallback). Use the 2.1 bridge to enumerate representative data,
 convert it to explicit plain DTOs, and write those DTOs before depending on the
 3.0 contract. Reading an old value does not automatically rewrite it.
 
+One collision boundary cannot be automated: 2.x stored application values
+without an outer record. If such a raw value is already exactly identical to
+the complete reserved StoredRecord v1 grammar (`localspace.record`, version 1,
+exact header/payload shape and codec), a forward reader cannot distinguish it
+from a real 3.0 record. Ordinary objects that merely contain `__localspace__`,
+or use another namespace/shape, remain safe. Audit or raw-migrate this rare
+exact-shape value before deploying the bridge reader. Every value written by
+3.0—including that exact application shape—is collision-safe because 3.0 wraps
+it once and decodes exactly one layer.
+
 ## Migrate transactions
 
 The 2.1 runner allowed ordinary instance operations while a driver transaction
@@ -297,6 +307,38 @@ reentry while the callback is pending rejects instead of deadlocking.
 Unexpected custom-plugin errors are swallowed only under `pluginErrorPolicy:
 'lenient'` after `onError`/console reporting. Built-in transformations fail
 closed.
+
+`PluginOperation` now includes query, destructive, transaction, and lifecycle
+operations. Do not treat the 2.1 union as exhaustive. `PluginStage` no longer
+contains the synthetic `'error'` stage; `PluginErrorInfo.stage` identifies the
+actual `init`, `before`, `after`, or `destroy` phase that failed. Underscored
+facade fields and extension helpers were never supported driver state and are
+no longer present on `LocalSpaceInstance`; custom drivers must use their
+session receiver and documented methods.
+
+## Migrate custom compression codecs
+
+The 2.1 custom codec accepted text and could return text or bytes. The 3.0
+contract is bytes-to-bytes only:
+
+```ts
+const codec = {
+  compress(input: Uint8Array): Uint8Array {
+    return compressBytes(input);
+  },
+  decompress(input: Uint8Array): Uint8Array {
+    return decompressBytes(input);
+  },
+};
+
+compressionPlugin({ codec, algorithm: 'application-codec-v1' });
+```
+
+Both methods must return a real `Uint8Array`; LocalSpace validates and copies
+the result. Use a stable, non-empty algorithm label that the same codec can
+recognize during reads. The threshold is measured against canonical
+uncompressed bytes, and 3.0 writes a compression envelope only when the
+complete stored representation is smaller.
 
 ## Migrate encryption
 
