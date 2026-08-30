@@ -350,13 +350,21 @@ test.describe('localspace browser interoperability', () => {
 
     expect(new Set(result.keys)).toEqual(new Set(['stored-null', 'live']));
     expect(result.length).toBe(2);
-    expect(result.indexedKeys.slice(0, 2)).toEqual(result.keys);
+    // The first logical scan lazily removes the expired Web Storage entry.
+    // Web Storage may reorder the remaining physical keys after that mutation,
+    // so separate query snapshots must agree on membership rather than order.
+    // Stable-state key(n)/keys() ordering is covered by its dedicated test.
+    expect(new Set(result.indexedKeys.slice(0, 2))).toEqual(
+      new Set(result.keys)
+    );
     expect(result.indexedKeys[2]).toBeNull();
-    expect(result.iterated).toEqual(
-      result.keys.map((key) => ({
-        key,
-        value: key === 'stored-null' ? null : 'present',
-      }))
+    expect(
+      new Map(result.iterated.map(({ key, value }) => [key, value]))
+    ).toEqual(
+      new Map<string, unknown>([
+        ['stored-null', null],
+        ['live', 'present'],
+      ])
     );
     expect(result.iterateResult).toBeNull();
     expect(result.summaries).toEqual([{ iterations: 2, stopped: false }]);

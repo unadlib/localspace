@@ -13,7 +13,9 @@ export const sharedPlaywrightConfig = {
   timeout: 30 * 1000,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: 2,
+  // CI treats a first-attempt failure as a release signal. Local retries remain
+  // useful for collecting traces while diagnosing workstation-only failures.
+  retries: process.env.CI ? 0 : 2,
   workers: process.env.CI ? 1 : undefined,
   use: {
     headless: true,
