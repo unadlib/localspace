@@ -19,7 +19,6 @@ const createStore = async (
   const store = localspace.createInstance({
     name: `transaction-contract-${driver}-${Math.random().toString(36).slice(2)}`,
     storeName: 'store',
-    prewarmTransactions: false,
   });
   await store.setDriver([
     driver === 'memory' ? store.MEMORY : store.INDEXEDDB,

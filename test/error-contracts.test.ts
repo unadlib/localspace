@@ -338,7 +338,6 @@ describe('stable error contracts', () => {
     const store = localspace.createInstance({
       name: `indexeddb-quota-${Math.random().toString(36).slice(2)}`,
       storeName: 'store',
-      prewarmTransactions: false,
     });
     await store.setDriver([store.INDEXEDDB]);
     await store.ready();
@@ -372,7 +371,6 @@ describe('stable error contracts', () => {
     const store = localspace.createInstance({
       name: `indexeddb-error-${Math.random().toString(36).slice(2)}`,
       storeName: 'store',
-      prewarmTransactions: false,
     });
     await store.setDriver([store.INDEXEDDB]);
     await store.ready();

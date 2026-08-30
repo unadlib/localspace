@@ -477,7 +477,6 @@ test.describe('localspace vs localforage benchmarks', () => {
               ? localspace.createInstance({
                   name: 'playwright-localspace-startup',
                   storeName,
-                  prewarmTransactions: true,
                 })
               : localforage.createInstance({
                   name: 'playwright-localforage-startup',

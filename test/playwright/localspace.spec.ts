@@ -167,7 +167,6 @@ test.describe('localspace browser interoperability', () => {
       const instance = localspaceModule.default.createInstance({
         name: 'playwright-transaction-webcrypto',
         storeName,
-        prewarmTransactions: false,
         plugins: [
           localspaceModule.encryptionPlugin({
             key: '0123456789abcdef0123456789abcdef',
@@ -424,7 +423,6 @@ test.describe('localspace browser interoperability', () => {
       const instance = localspace.createInstance({
         name: 'playwright-suite',
         storeName,
-        prewarmTransactions: false,
       });
 
       await instance.setDriver([instance.INDEXEDDB]);
@@ -483,7 +481,6 @@ test.describe('localspace browser interoperability', () => {
       const instance = localspaceModule.default.createInstance({
         name: 'playwright-transaction-pages',
         storeName: targetStoreName,
-        prewarmTransactions: false,
       });
       await instance.setDriver([instance.INDEXEDDB]);
       await instance.ready();
@@ -495,7 +492,6 @@ test.describe('localspace browser interoperability', () => {
       const instance = localspaceModule.default.createInstance({
         name: 'playwright-transaction-pages',
         storeName: targetStoreName,
-        prewarmTransactions: false,
       });
       await instance.setDriver([instance.INDEXEDDB]);
       await instance.ready();
@@ -593,7 +589,6 @@ test.describe('localspace browser interoperability', () => {
       const cleanup = localspaceModule.default.createInstance({
         name: 'playwright-transaction-pages',
         storeName: targetStoreName,
-        prewarmTransactions: false,
       });
       await cleanup.setDriver([cleanup.INDEXEDDB]);
       await cleanup.dropInstance();
@@ -611,7 +606,6 @@ test.describe('localspace browser interoperability', () => {
       const instance = localspace.createInstance({
         name: 'playwright-suite',
         storeName,
-        prewarmTransactions: false,
       });
       await instance.setDriver([instance.INDEXEDDB]);
       await instance.setItem('persisted', 'value');
@@ -628,7 +622,6 @@ test.describe('localspace browser interoperability', () => {
       const observer = localspace.createInstance({
         name: 'playwright-suite',
         storeName,
-        prewarmTransactions: false,
       });
       await observer.setDriver([observer.INDEXEDDB]);
       const persisted = await observer.getItem('persisted');
@@ -651,7 +644,6 @@ test.describe('localspace browser interoperability', () => {
       const options = {
         name: 'playwright-suite',
         storeName,
-        prewarmTransactions: false,
       };
       const first = localspace.createInstance(options);
       const second = localspace.createInstance(options);

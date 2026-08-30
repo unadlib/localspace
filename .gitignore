@@ -130,4 +130,6 @@ vite.config.ts.timestamp-*
 
 test-results
 /generated-docs/
-/benchmark-results/
+/benchmark-results/*
+!/benchmark-results/e4-before-removal.json
+!/benchmark-results/e4-after-removal.json

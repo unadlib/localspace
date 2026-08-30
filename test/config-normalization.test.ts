@@ -55,17 +55,20 @@ describe('immutable configuration', () => {
     expect(instance.config('maxBatchSize')).toBe(50);
   });
 
-  it('does not expose internal IndexedDB tuning state in config snapshots', () => {
-    const instance = new LocalSpace({
-      prewarmTransactions: false,
-      connectionIdleMs: 10,
-      maxConcurrentTransactions: 1,
-    } as never);
-    const snapshot = instance.config() as Record<string, unknown>;
-
-    expect(snapshot).not.toHaveProperty('prewarmTransactions');
-    expect(snapshot).not.toHaveProperty('connectionIdleMs');
-    expect(snapshot).not.toHaveProperty('maxConcurrentTransactions');
+  it.each([
+    ['prewarmTransactions', false],
+    ['connectionIdleMs', 10],
+    ['maxConcurrentTransactions', 1],
+  ] as const)('rejects the removed IndexedDB option %s', (key, value) => {
+    expect(() => new LocalSpace({ [key]: value } as never)).toThrowError(
+      expect.objectContaining<Partial<LocalSpaceError>>({
+        code: 'INVALID_CONFIG',
+        details: expect.objectContaining({
+          configKey: key,
+          reason: 'removed-option',
+        }),
+      })
+    );
   });
 
   it('detaches and deeply freezes every nested public config value', () => {

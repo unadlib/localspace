@@ -6,19 +6,23 @@ import type {
 import { createLocalSpaceError } from '../errors.js';
 
 export type InternalConfigOptions = Partial<LocalSpaceConfig> & {
-  prewarmTransactions?: boolean;
-  connectionIdleMs?: number;
-  maxConcurrentTransactions?: number;
   size?: unknown;
   strictValues?: unknown;
+  prewarmTransactions?: unknown;
+  connectionIdleMs?: unknown;
+  maxConcurrentTransactions?: unknown;
 };
 
 const INTEGER_OPTIONS = [
   'version',
   'maxBatchSize',
+] as const satisfies ReadonlyArray<keyof InternalConfigOptions>;
+
+const REMOVED_INDEXEDDB_OPTIONS = [
+  'prewarmTransactions',
   'connectionIdleMs',
   'maxConcurrentTransactions',
-] as const satisfies ReadonlyArray<keyof InternalConfigOptions>;
+] as const;
 
 const validateIntegerOption = (
   key: (typeof INTEGER_OPTIONS)[number],
@@ -67,6 +71,15 @@ export function normalizeConfigOptions(
       'Configuration option "strictValues" was removed because LocalSpace 3.0 always validates StorageValue writes.',
       { configKey: 'strictValues', reason: 'removed-option' }
     );
+  }
+  for (const key of REMOVED_INDEXEDDB_OPTIONS) {
+    if (Object.prototype.hasOwnProperty.call(options, key)) {
+      throw createLocalSpaceError(
+        'INVALID_CONFIG',
+        `Configuration option "${key}" was removed in LocalSpace 3.0.`,
+        { configKey: key, reason: 'removed-option' }
+      );
+    }
   }
 
   const normalized: InternalConfigOptions = { ...options };
@@ -155,9 +168,6 @@ export function createConfigSnapshot(
     ...(config.bucket ? { bucket: Object.freeze({ ...config.bucket }) } : {}),
   };
   const snapshotRecord = snapshot as LocalSpaceConfig & Record<string, unknown>;
-  delete snapshotRecord.prewarmTransactions;
-  delete snapshotRecord.connectionIdleMs;
-  delete snapshotRecord.maxConcurrentTransactions;
   delete snapshotRecord.size;
   delete snapshotRecord.strictValues;
 

@@ -316,12 +316,6 @@ export interface DbInfo extends LocalSpaceConfig {
   keyPrefix?: string;
   idbFactory?: IDBFactory | null;
   idbContextId?: string;
-  /** @internal Pending removal with the legacy IndexedDB prewarm mechanism. */
-  prewarmTransactions?: boolean;
-  /** @internal Pending removal with the legacy IndexedDB idle-close mechanism. */
-  connectionIdleMs?: number;
-  /** @internal Pending removal with the legacy IndexedDB transaction queue. */
-  maxConcurrentTransactions?: number;
 }
 
 /**

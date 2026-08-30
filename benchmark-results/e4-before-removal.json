@@ -1,0 +1,654 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-31T05:21:14.157Z",
+  "baseline": {
+    "id": "localspace-2.1.0-published",
+    "gitRef": "v2.1.0",
+    "gitCommit": "0e860f32726676ea481d0056c7df03e688fd93b1",
+    "npm": "localspace@2.1.0"
+  },
+  "candidate": {
+    "gitCommit": "21211bd617784202e03da8981e73020f3360fb38",
+    "dirty": true,
+    "packageVersion": "2.1.0"
+  },
+  "environment": {
+    "node": "v24.16.0",
+    "playwright": "1.60.0",
+    "chromium": "148.0.7778.96",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "contract": {
+    "browser": "chromium",
+    "warmups": 1,
+    "samples": 7,
+    "main": {
+      "itemCount": 240,
+      "payloadBytes": 256,
+      "maxBatchSize": 48,
+      "transactionCount": 96
+    },
+    "legacyFeatureProbes": {
+      "concurrencyCount": 80,
+      "idleMs": 20,
+      "idleWaitMs": 40
+    }
+  },
+  "performance": {
+    "baseline": {
+      "main.readyMs": {
+        "median": 0.40000003576278687,
+        "p25": 0.4000000059604645,
+        "p75": 0.45000001788139343,
+        "min": 0.3999999761581421,
+        "max": 0.5
+      },
+      "main.single.setMs": {
+        "median": 26.599999964237213,
+        "p25": 26,
+        "p75": 26.900000005960464,
+        "min": 25.19999998807907,
+        "max": 27.19999998807907
+      },
+      "main.single.getMs": {
+        "median": 16.400000035762787,
+        "p25": 16.150000005960464,
+        "p75": 16.55000001192093,
+        "min": 16.099999964237213,
+        "max": 16.80000001192093
+      },
+      "main.single.iterateMs": {
+        "median": 1.5,
+        "p25": 1.5,
+        "p75": 1.550000011920929,
+        "min": 1.5,
+        "max": 1.699999988079071
+      },
+      "main.batch.setMs": {
+        "median": 6,
+        "p25": 5.800000011920929,
+        "p75": 6.0999999940395355,
+        "min": 5.700000047683716,
+        "max": 6.300000011920929
+      },
+      "main.batch.getMs": {
+        "median": 2.399999976158142,
+        "p25": 2.3499999940395355,
+        "p75": 2.5,
+        "min": 2.300000011920929,
+        "max": 2.5
+      },
+      "main.batch.removeMs": {
+        "median": 12.899999976158142,
+        "p25": 11.699999988079071,
+        "p75": 14,
+        "min": 9.600000023841858,
+        "max": 14.300000011920929
+      },
+      "main.transactionMs": {
+        "median": 8.600000023841858,
+        "p25": 8.399999976158142,
+        "p75": 8.800000011920929,
+        "min": 8.300000011920929,
+        "max": 8.900000035762787
+      },
+      "legacy.prewarmOffReadyMs": {
+        "median": 0.5,
+        "p25": 0.3999999761581421,
+        "p75": 0.5,
+        "min": 0.3999999761581421,
+        "max": 0.5
+      },
+      "legacy.prewarmOnReadyMs": {
+        "median": 0.40000003576278687,
+        "p25": 0.3999999761581421,
+        "p75": 0.45000001788139343,
+        "min": 0.30000001192092896,
+        "max": 0.5
+      },
+      "legacy.unlimitedConcurrencyMs": {
+        "median": 7.399999976158142,
+        "p25": 7.149999976158142,
+        "p75": 7.75,
+        "min": 6.899999976158142,
+        "max": 8.299999952316284
+      },
+      "legacy.cappedConcurrencyMs": {
+        "median": 8.900000035762787,
+        "p25": 8.899999976158142,
+        "p75": 9.25,
+        "min": 8.099999964237213,
+        "max": 9.699999988079071
+      },
+      "legacy.idleReopenMs": {
+        "median": 0.2999999523162842,
+        "p25": 0.19999998807907104,
+        "p75": 0.29999998211860657,
+        "min": 0.19999998807907104,
+        "max": 0.3999999761581421
+      }
+    },
+    "candidate": {
+      "main.readyMs": {
+        "median": 0.5,
+        "p25": 0.44999998807907104,
+        "p75": 0.5,
+        "min": 0.30000001192092896,
+        "max": 0.5
+      },
+      "main.single.setMs": {
+        "median": 27.69999998807907,
+        "p25": 27.500000029802322,
+        "p75": 28.099999994039536,
+        "min": 26.600000023841858,
+        "max": 53.5
+      },
+      "main.single.getMs": {
+        "median": 17.80000001192093,
+        "p25": 17.5,
+        "p75": 18.05000001192093,
+        "min": 17,
+        "max": 18.600000023841858
+      },
+      "main.single.iterateMs": {
+        "median": 2,
+        "p25": 1.8499999940395355,
+        "p75": 2,
+        "min": 1.699999988079071,
+        "max": 2
+      },
+      "main.batch.setMs": {
+        "median": 6.5,
+        "p25": 6.3499999940395355,
+        "p75": 6.549999982118607,
+        "min": 6.299999952316284,
+        "max": 6.800000011920929
+      },
+      "main.batch.getMs": {
+        "median": 2.700000047683716,
+        "p25": 2.649999976158142,
+        "p75": 2.9000000059604645,
+        "min": 2.5,
+        "max": 3
+      },
+      "main.batch.removeMs": {
+        "median": 13.699999988079071,
+        "p25": 12.600000023841858,
+        "p75": 14.600000023841858,
+        "min": 10.199999988079071,
+        "max": 16.100000023841858
+      },
+      "main.transactionMs": {
+        "median": 42.40000003576279,
+        "p25": 40.69999998807907,
+        "p75": 43.14999997615814,
+        "min": 38.59999996423721,
+        "max": 44.09999996423721
+      },
+      "legacy.prewarmOffReadyMs": {
+        "median": 0.40000003576278687,
+        "p25": 0.4000000059604645,
+        "p75": 0.5,
+        "min": 0.3999999761581421,
+        "max": 0.5999999642372131
+      },
+      "legacy.prewarmOnReadyMs": {
+        "median": 0.40000003576278687,
+        "p25": 0.3999999761581421,
+        "p75": 0.5,
+        "min": 0.30000001192092896,
+        "max": 0.699999988079071
+      },
+      "legacy.unlimitedConcurrencyMs": {
+        "median": 7.600000023841858,
+        "p25": 7.550000011920929,
+        "p75": 7.799999982118607,
+        "min": 7.300000011920929,
+        "max": 8
+      },
+      "legacy.cappedConcurrencyMs": {
+        "median": 9,
+        "p25": 8.900000005960464,
+        "p75": 9.100000023841858,
+        "min": 8.799999952316284,
+        "max": 9.399999976158142
+      },
+      "legacy.idleReopenMs": {
+        "median": 0.30000001192092896,
+        "p25": 0.30000001192092896,
+        "p75": 0.3499999940395355,
+        "min": 0.19999998807907104,
+        "max": 0.40000003576278687
+      }
+    },
+    "raw": {
+      "baseline": [
+        {
+          "main": {
+            "readyMs": 0.5,
+            "single": {
+              "setMs": 26.900000035762787,
+              "getMs": 16.80000001192093,
+              "iterateMs": 1.5
+            },
+            "batch": {
+              "setMs": 6.099999964237213,
+              "getMs": 2.300000011920929,
+              "removeMs": 9.600000023841858
+            },
+            "transactionMs": 8.399999976158142
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.5,
+            "prewarmOnReadyMs": 0.40000003576278687,
+            "unlimitedConcurrencyMs": 7.699999988079071,
+            "cappedConcurrencyMs": 9.699999988079071,
+            "idleReopenMs": 0.2999999523162842
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.40000003576278687,
+            "single": {
+              "setMs": 26.899999976158142,
+              "getMs": 16.19999998807907,
+              "iterateMs": 1.5
+            },
+            "batch": {
+              "setMs": 6,
+              "getMs": 2.5,
+              "removeMs": 11.5
+            },
+            "transactionMs": 8.900000035762787
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.5,
+            "prewarmOnReadyMs": 0.5,
+            "unlimitedConcurrencyMs": 7.399999976158142,
+            "cappedConcurrencyMs": 9,
+            "idleReopenMs": 0.19999998807907104
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.40000003576278687,
+            "single": {
+              "setMs": 26.599999964237213,
+              "getMs": 16.100000023841858,
+              "iterateMs": 1.699999988079071
+            },
+            "batch": {
+              "setMs": 5.800000011920929,
+              "getMs": 2.399999976158142,
+              "removeMs": 11.899999976158142
+            },
+            "transactionMs": 8.800000011920929
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.3999999761581421,
+            "prewarmOnReadyMs": 0.3999999761581421,
+            "unlimitedConcurrencyMs": 7,
+            "cappedConcurrencyMs": 8.099999964237213,
+            "idleReopenMs": 0.2999999523162842
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.5,
+            "single": {
+              "setMs": 25.19999998807907,
+              "getMs": 16.400000035762787,
+              "iterateMs": 1.5
+            },
+            "batch": {
+              "setMs": 5.700000047683716,
+              "getMs": 2.399999976158142,
+              "removeMs": 13.800000011920929
+            },
+            "transactionMs": 8.800000011920929
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.3999999761581421,
+            "prewarmOnReadyMs": 0.40000003576278687,
+            "unlimitedConcurrencyMs": 8.299999952316284,
+            "cappedConcurrencyMs": 8.899999976158142,
+            "idleReopenMs": 0.30000001192092896
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.3999999761581421,
+            "single": {
+              "setMs": 27.19999998807907,
+              "getMs": 16.099999964237213,
+              "iterateMs": 1.5
+            },
+            "batch": {
+              "setMs": 6.100000023841858,
+              "getMs": 2.5,
+              "removeMs": 12.899999976158142
+            },
+            "transactionMs": 8.399999976158142
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.3999999761581421,
+            "prewarmOnReadyMs": 0.30000001192092896,
+            "unlimitedConcurrencyMs": 6.899999976158142,
+            "cappedConcurrencyMs": 8.899999976158142,
+            "idleReopenMs": 0.19999998807907104
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.3999999761581421,
+            "single": {
+              "setMs": 26.100000023841858,
+              "getMs": 16.69999998807907,
+              "iterateMs": 1.600000023841858
+            },
+            "batch": {
+              "setMs": 6.300000011920929,
+              "getMs": 2.5,
+              "removeMs": 14.300000011920929
+            },
+            "transactionMs": 8.600000023841858
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.5,
+            "prewarmOnReadyMs": 0.5,
+            "unlimitedConcurrencyMs": 7.299999952316284,
+            "cappedConcurrencyMs": 9.5,
+            "idleReopenMs": 0.3999999761581421
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.40000003576278687,
+            "single": {
+              "setMs": 25.899999976158142,
+              "getMs": 16.400000035762787,
+              "iterateMs": 1.5
+            },
+            "batch": {
+              "setMs": 5.800000011920929,
+              "getMs": 2.300000011920929,
+              "removeMs": 14.199999988079071
+            },
+            "transactionMs": 8.300000011920929
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.5,
+            "prewarmOnReadyMs": 0.3999999761581421,
+            "unlimitedConcurrencyMs": 7.800000011920929,
+            "cappedConcurrencyMs": 8.900000035762787,
+            "idleReopenMs": 0.19999998807907104
+          }
+        }
+      ],
+      "candidate": [
+        {
+          "main": {
+            "readyMs": 0.5,
+            "single": {
+              "setMs": 28.399999976158142,
+              "getMs": 18.600000023841858,
+              "iterateMs": 2
+            },
+            "batch": {
+              "setMs": 6.399999976158142,
+              "getMs": 3,
+              "removeMs": 10.199999988079071
+            },
+            "transactionMs": 42.40000003576279
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.40000003576278687,
+            "prewarmOnReadyMs": 0.699999988079071,
+            "unlimitedConcurrencyMs": 7.600000023841858,
+            "cappedConcurrencyMs": 9,
+            "idleReopenMs": 0.30000001192092896
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.5,
+            "single": {
+              "setMs": 27.80000001192093,
+              "getMs": 17.30000001192093,
+              "iterateMs": 1.699999988079071
+            },
+            "batch": {
+              "setMs": 6.300000011920929,
+              "getMs": 2.800000011920929,
+              "removeMs": 12
+            },
+            "transactionMs": 41.5
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.5999999642372131,
+            "prewarmOnReadyMs": 0.5,
+            "unlimitedConcurrencyMs": 8,
+            "cappedConcurrencyMs": 9.399999976158142,
+            "idleReopenMs": 0.40000003576278687
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.5,
+            "single": {
+              "setMs": 27.600000023841858,
+              "getMs": 18,
+              "iterateMs": 1.899999976158142
+            },
+            "batch": {
+              "setMs": 6.5,
+              "getMs": 2.699999988079071,
+              "removeMs": 13.200000047683716
+            },
+            "transactionMs": 43.69999998807907
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.3999999761581421,
+            "prewarmOnReadyMs": 0.40000003576278687,
+            "unlimitedConcurrencyMs": 7.899999976158142,
+            "cappedConcurrencyMs": 8.800000011920929,
+            "idleReopenMs": 0.3999999761581421
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.3999999761581421,
+            "single": {
+              "setMs": 27.400000035762787,
+              "getMs": 17.69999998807907,
+              "iterateMs": 2
+            },
+            "batch": {
+              "setMs": 6.299999952316284,
+              "getMs": 2.700000047683716,
+              "removeMs": 13.699999988079071
+            },
+            "transactionMs": 42.59999996423721
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.5,
+            "prewarmOnReadyMs": 0.3999999761581421,
+            "unlimitedConcurrencyMs": 7.300000011920929,
+            "cappedConcurrencyMs": 9.200000047683716,
+            "idleReopenMs": 0.30000001192092896
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.5,
+            "single": {
+              "setMs": 53.5,
+              "getMs": 17,
+              "iterateMs": 1.800000011920929
+            },
+            "batch": {
+              "setMs": 6.599999964237213,
+              "getMs": 2.5,
+              "removeMs": 14.400000035762787
+            },
+            "transactionMs": 38.59999996423721
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.40000003576278687,
+            "prewarmOnReadyMs": 0.3999999761581421,
+            "unlimitedConcurrencyMs": 7.600000023841858,
+            "cappedConcurrencyMs": 9,
+            "idleReopenMs": 0.30000001192092896
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.5,
+            "single": {
+              "setMs": 27.69999998807907,
+              "getMs": 18.100000023841858,
+              "iterateMs": 2
+            },
+            "batch": {
+              "setMs": 6.5,
+              "getMs": 3,
+              "removeMs": 14.800000011920929
+            },
+            "transactionMs": 39.89999997615814
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.5,
+            "prewarmOnReadyMs": 0.5,
+            "unlimitedConcurrencyMs": 7.699999988079071,
+            "cappedConcurrencyMs": 8.799999952316284,
+            "idleReopenMs": 0.19999998807907104
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.30000001192092896,
+            "single": {
+              "setMs": 26.600000023841858,
+              "getMs": 17.80000001192093,
+              "iterateMs": 2
+            },
+            "batch": {
+              "setMs": 6.800000011920929,
+              "getMs": 2.599999964237213,
+              "removeMs": 16.100000023841858
+            },
+            "transactionMs": 44.09999996423721
+          },
+          "legacy": {
+            "prewarmOffReadyMs": 0.3999999761581421,
+            "prewarmOnReadyMs": 0.30000001192092896,
+            "unlimitedConcurrencyMs": 7.5,
+            "cappedConcurrencyMs": 9,
+            "idleReopenMs": 0.30000001192092896
+          }
+        }
+      ]
+    }
+  },
+  "ratios": {
+    "main.readyMs": {
+      "candidateToBaseline": 1.249999888241301,
+      "percentChange": 24.999988824130103
+    },
+    "main.single.setMs": {
+      "candidateToBaseline": 1.0413533844105554,
+      "percentChange": 4.135338441055527
+    },
+    "main.single.getMs": {
+      "candidateToBaseline": 1.0853658520186111,
+      "percentChange": 8.536585201861104
+    },
+    "main.single.iterateMs": {
+      "candidateToBaseline": 1.3333333333333333,
+      "percentChange": 33.33333333333333
+    },
+    "main.batch.setMs": {
+      "candidateToBaseline": 1.0833333333333333,
+      "percentChange": 8.333333333333332
+    },
+    "main.batch.getMs": {
+      "candidateToBaseline": 1.1250000310440862,
+      "percentChange": 12.500003104408613
+    },
+    "main.batch.removeMs": {
+      "candidateToBaseline": 1.0620155049146895,
+      "percentChange": 6.201550491468944
+    },
+    "main.transactionMs": {
+      "candidateToBaseline": 4.93023254862987,
+      "percentChange": 393.023254862987
+    },
+    "legacy.prewarmOffReadyMs": {
+      "candidateToBaseline": 0.8000000715255737,
+      "percentChange": -19.999992847442627
+    },
+    "legacy.prewarmOnReadyMs": {
+      "candidateToBaseline": 1,
+      "percentChange": 0
+    },
+    "legacy.unlimitedConcurrencyMs": {
+      "candidateToBaseline": 1.02702703355785,
+      "percentChange": 2.702703355785007
+    },
+    "legacy.cappedConcurrencyMs": {
+      "candidateToBaseline": 1.0112359509927398,
+      "percentChange": 1.12359509927398
+    },
+    "legacy.idleReopenMs": {
+      "candidateToBaseline": 1.000000198682181,
+      "percentChange": 0.000019868218083098425
+    }
+  },
+  "package": {
+    "baseline": {
+      "version": "2.1.0",
+      "integrity": "sha512-RtYVIpzO7cOWQ3FbwBzGwhbNSrVUPYIhqN/uORUNpbhb6USvBkQ9Lp1dkaMtIriyVOXQ4FFek5SKZNqYBdLw+Q==",
+      "shasum": "03744b0248d682a3112d84fe070cda0a04d97495",
+      "entryCount": 108,
+      "packedBytes": 594376,
+      "unpackedBytes": 2630510,
+      "groups": {
+        "(root)": {
+          "files": 3,
+          "bytes": 20311
+        },
+        "dist": {
+          "files": 86,
+          "bytes": 2352203
+        },
+        "src": {
+          "files": 19,
+          "bytes": 257996
+        }
+      }
+    },
+    "candidate": {
+      "version": "2.1.0",
+      "integrity": "sha512-dvbGMsi8uieP3yujhO3fXTLWED9P9kEA2d2jnlvkSBwe10hNvqmb+tbH3LbuKsOBEz+A05iLhC8hif5sBbjLew==",
+      "shasum": "9dd801ded013bd02408da30d683e944322888b9b",
+      "entryCount": 138,
+      "packedBytes": 765132,
+      "unpackedBytes": 3432079,
+      "groups": {
+        "(root)": {
+          "files": 3,
+          "bytes": 22465
+        },
+        "dist": {
+          "files": 110,
+          "bytes": 3074302
+        },
+        "src": {
+          "files": 25,
+          "bytes": 335312
+        }
+      }
+    }
+  }
+}

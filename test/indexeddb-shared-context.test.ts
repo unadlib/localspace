@@ -46,7 +46,6 @@ describe('IndexedDB shared context lifecycle', () => {
     const instance = localspace.createInstance({
       name,
       storeName: 'store',
-      prewarmTransactions: false,
     });
     await instance.setDriver([instance.INDEXEDDB]);
     await instance.setItem('persisted', 'value');
@@ -79,12 +78,10 @@ describe('IndexedDB shared context lifecycle', () => {
     const first = localspace.createInstance({
       name,
       storeName: 'store',
-      prewarmTransactions: false,
     });
     const second = localspace.createInstance({
       name,
       storeName: 'store',
-      prewarmTransactions: false,
     });
     await first.setDriver([first.INDEXEDDB]);
     await second.setDriver([second.INDEXEDDB]);
@@ -119,12 +116,10 @@ describe('IndexedDB shared context lifecycle', () => {
     const first = localspace.createInstance({
       name,
       storeName: 'store',
-      prewarmTransactions: false,
     });
     const second = localspace.createInstance({
       name,
       storeName: 'store',
-      prewarmTransactions: false,
     });
     await first.setDriver([first.INDEXEDDB]);
     await second.setDriver([second.INDEXEDDB]);
@@ -167,7 +162,6 @@ describe('IndexedDB shared context lifecycle', () => {
       storeName: 'store',
       bucket: { name: 'requested-bucket' },
       driver: [localspace.INDEXEDDB, localspace.LOCALSTORAGE],
-      prewarmTransactions: false,
     });
     const defaultOpen = vi.spyOn(indexedDB, 'open');
 
@@ -200,7 +194,6 @@ describe('IndexedDB shared context lifecycle', () => {
       storeName: 'store',
       bucket: { name: 'requested-bucket' },
       driver: [localspace.INDEXEDDB, localspace.LOCALSTORAGE],
-      prewarmTransactions: false,
     });
     const defaultOpen = vi.spyOn(indexedDB, 'open');
 
@@ -227,7 +220,6 @@ describe('IndexedDB shared context lifecycle', () => {
       storeName: 'store',
       bucket: { name: 'requested-bucket' },
       driver: [localspace.INDEXEDDB, localspace.LOCALSTORAGE],
-      prewarmTransactions: false,
     });
     const defaultOpen = vi.spyOn(indexedDB, 'open');
 
@@ -254,7 +246,6 @@ describe('IndexedDB shared context lifecycle', () => {
       name,
       storeName: 'store',
       bucket: { name: 'working-bucket' },
-      prewarmTransactions: false,
     });
 
     try {

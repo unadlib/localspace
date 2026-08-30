@@ -207,7 +207,7 @@ test.describe('IndexedDB benchmark', () => {
     expect(metrics.remove.batchMs).toBeGreaterThan(0);
   });
 
-  test('compares runTransaction and batched chunks (with prewarm toggle)', async ({ page }) => {
+  test('measures runTransaction and batched chunks without legacy tuning', async ({ page }) => {
     await ensureLocalspaceReady(page);
 
     const metrics = await page.evaluate(async (config) => {
@@ -223,16 +223,15 @@ test.describe('IndexedDB benchmark', () => {
       }));
       const keys = items.map((i) => i.key);
 
-      const create = (prewarm: boolean) =>
+      const create = () =>
         localspace.createInstance({
           name: `run-tx-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
           storeName: `store-${Math.random().toString(16).slice(2, 6)}`,
           maxBatchSize: config.maxBatchSize,
-          prewarmTransactions: prewarm,
         });
 
-      const measureInstance = async (prewarm: boolean) => {
-        const instance = create(prewarm);
+      const measureInstance = async () => {
+        const instance = create();
         await instance.setDriver([instance.INDEXEDDB]);
         const readyStart = performance.now();
         await instance.ready();
@@ -260,37 +259,16 @@ test.describe('IndexedDB benchmark', () => {
         return { readyMs, chunkMs, txMs };
       };
 
-      const cold = await measureInstance(false);
-      const warm = await measureInstance(true);
-
-      return {
-        cold,
-        warm,
-        readySpeedup: cold.readyMs / warm.readyMs,
-        chunkSpeedup: cold.chunkMs / warm.chunkMs,
-        txSpeedup: cold.txMs / warm.txMs,
-      };
+      return measureInstance();
     }, COLD_START_CONFIG);
 
-    console.log('[IndexedDB] runTransaction vs chunked batch (prewarm toggle)');
-    console.log(
-      `ready: cold ${metrics.cold.readyMs.toFixed(2)}ms vs warm ${metrics.warm.readyMs.toFixed(
-        2,
-      )}ms (x${metrics.readySpeedup.toFixed(2)})`,
-    );
-    console.log(
-      `setItems (chunked): cold ${metrics.cold.chunkMs.toFixed(
-        2,
-      )}ms vs warm ${metrics.warm.chunkMs.toFixed(2)}ms (x${metrics.chunkSpeedup.toFixed(2)})`,
-    );
-    console.log(
-      `runTransaction: cold ${metrics.cold.txMs.toFixed(
-        2,
-      )}ms vs warm ${metrics.warm.txMs.toFixed(2)}ms (x${metrics.txSpeedup.toFixed(2)})`,
-    );
+    console.log('[IndexedDB] runTransaction vs chunked batch');
+    console.log(`ready: ${metrics.readyMs.toFixed(2)}ms`);
+    console.log(`setItems (chunked): ${metrics.chunkMs.toFixed(2)}ms`);
+    console.log(`runTransaction: ${metrics.txMs.toFixed(2)}ms`);
 
-    expect(metrics.readySpeedup).toBeGreaterThan(0);
-    expect(metrics.chunkSpeedup).toBeGreaterThan(0);
-    expect(metrics.txSpeedup).toBeGreaterThan(0);
+    expect(metrics.readyMs).toBeGreaterThanOrEqual(0);
+    expect(metrics.chunkMs).toBeGreaterThan(0);
+    expect(metrics.txMs).toBeGreaterThan(0);
   });
 });

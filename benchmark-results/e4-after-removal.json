@@ -1,0 +1,462 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-31T05:29:32.212Z",
+  "baseline": {
+    "id": "localspace-2.1.0-published",
+    "gitRef": "v2.1.0",
+    "gitCommit": "0e860f32726676ea481d0056c7df03e688fd93b1",
+    "npm": "localspace@2.1.0"
+  },
+  "candidate": {
+    "gitCommit": "21211bd617784202e03da8981e73020f3360fb38",
+    "dirty": true,
+    "packageVersion": "2.1.0"
+  },
+  "environment": {
+    "node": "v24.16.0",
+    "playwright": "1.60.0",
+    "chromium": "148.0.7778.96",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "contract": {
+    "browser": "chromium",
+    "warmups": 1,
+    "samples": 7,
+    "main": {
+      "itemCount": 240,
+      "payloadBytes": 256,
+      "maxBatchSize": 48,
+      "transactionCount": 96
+    },
+    "legacyFeatureProbes": null
+  },
+  "performance": {
+    "baseline": {
+      "main.readyMs": {
+        "median": 0.5,
+        "p25": 0.4000000059604645,
+        "p75": 0.5999999940395355,
+        "min": 0.3999999761581421,
+        "max": 0.6000000238418579
+      },
+      "main.single.setMs": {
+        "median": 27.80000001192093,
+        "p25": 26.999999970197678,
+        "p75": 28,
+        "min": 26.69999998807907,
+        "max": 28.5
+      },
+      "main.single.getMs": {
+        "median": 16.30000001192093,
+        "p25": 16.19999998807907,
+        "p75": 16.349999994039536,
+        "min": 15.800000011920929,
+        "max": 35.700000047683716
+      },
+      "main.single.iterateMs": {
+        "median": 1.5999999642372131,
+        "p25": 1.5,
+        "p75": 1.699999988079071,
+        "min": 1.5,
+        "max": 1.800000011920929
+      },
+      "main.batch.setMs": {
+        "median": 6,
+        "p25": 5.949999988079071,
+        "p75": 6.200000017881393,
+        "min": 5.800000011920929,
+        "max": 6.300000011920929
+      },
+      "main.batch.getMs": {
+        "median": 2.5,
+        "p25": 2.5,
+        "p75": 2.5999999940395355,
+        "min": 2.400000035762787,
+        "max": 2.699999988079071
+      },
+      "main.batch.removeMs": {
+        "median": 12.199999988079071,
+        "p25": 10.849999994039536,
+        "p75": 13.25,
+        "min": 9.400000035762787,
+        "max": 13.699999988079071
+      },
+      "main.transactionMs": {
+        "median": 8.800000011920929,
+        "p25": 8.550000011920929,
+        "p75": 8.899999976158142,
+        "min": 8.100000023841858,
+        "max": 9.300000011920929
+      }
+    },
+    "candidate": {
+      "main.readyMs": {
+        "median": 0.40000003576278687,
+        "p25": 0.3999999761581421,
+        "p75": 0.45000001788139343,
+        "min": 0.3999999761581421,
+        "max": 0.5
+      },
+      "main.single.setMs": {
+        "median": 28.100000023841858,
+        "p25": 27.700000017881393,
+        "p75": 28.499999970197678,
+        "min": 26.599999964237213,
+        "max": 29.099999964237213
+      },
+      "main.single.getMs": {
+        "median": 16.899999976158142,
+        "p25": 16.350000023841858,
+        "p75": 17.75,
+        "min": 16.30000001192093,
+        "max": 18.30000001192093
+      },
+      "main.single.iterateMs": {
+        "median": 1.9000000357627869,
+        "p25": 1.899999976158142,
+        "p75": 2,
+        "min": 1.899999976158142,
+        "max": 2.5
+      },
+      "main.batch.setMs": {
+        "median": 6.399999976158142,
+        "p25": 6.3499999940395355,
+        "p75": 6.6500000059604645,
+        "min": 6.199999988079071,
+        "max": 7.099999964237213
+      },
+      "main.batch.getMs": {
+        "median": 2.699999988079071,
+        "p25": 2.600000023841858,
+        "p75": 2.75,
+        "min": 2.5,
+        "max": 2.900000035762787
+      },
+      "main.batch.removeMs": {
+        "median": 13,
+        "p25": 11.850000023841858,
+        "p75": 13.700000017881393,
+        "min": 10.699999988079071,
+        "max": 14.600000023841858
+      },
+      "main.transactionMs": {
+        "median": 41.09999996423721,
+        "p25": 35.29999998211861,
+        "p75": 41.80000001192093,
+        "min": 33.80000001192093,
+        "max": 42.30000001192093
+      }
+    },
+    "raw": {
+      "baseline": [
+        {
+          "main": {
+            "readyMs": 0.40000003576278687,
+            "single": {
+              "setMs": 27.80000001192093,
+              "getMs": 16.30000001192093,
+              "iterateMs": 1.5
+            },
+            "batch": {
+              "setMs": 6,
+              "getMs": 2.599999964237213,
+              "removeMs": 9.400000035762787
+            },
+            "transactionMs": 8.899999976158142
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.6000000238418579,
+            "single": {
+              "setMs": 26.899999976158142,
+              "getMs": 16.100000023841858,
+              "iterateMs": 1.5999999642372131
+            },
+            "batch": {
+              "setMs": 6,
+              "getMs": 2.699999988079071,
+              "removeMs": 10.699999988079071
+            },
+            "transactionMs": 8.100000023841858
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.6000000238418579,
+            "single": {
+              "setMs": 28.19999998807907,
+              "getMs": 16.30000001192093,
+              "iterateMs": 1.600000023841858
+            },
+            "batch": {
+              "setMs": 6.100000023841858,
+              "getMs": 2.5,
+              "removeMs": 11
+            },
+            "transactionMs": 8.5
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.3999999761581421,
+            "single": {
+              "setMs": 27.80000001192093,
+              "getMs": 16.299999952316284,
+              "iterateMs": 1.5
+            },
+            "batch": {
+              "setMs": 6.300000011920929,
+              "getMs": 2.5,
+              "removeMs": 12.199999988079071
+            },
+            "transactionMs": 8.899999976158142
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.5999999642372131,
+            "single": {
+              "setMs": 28.5,
+              "getMs": 16.399999976158142,
+              "iterateMs": 1.5
+            },
+            "batch": {
+              "setMs": 5.899999976158142,
+              "getMs": 2.5,
+              "removeMs": 13.300000011920929
+            },
+            "transactionMs": 8.800000011920929
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.3999999761581421,
+            "single": {
+              "setMs": 27.099999964237213,
+              "getMs": 35.700000047683716,
+              "iterateMs": 1.7999999523162842
+            },
+            "batch": {
+              "setMs": 6.300000011920929,
+              "getMs": 2.400000035762787,
+              "removeMs": 13.199999988079071
+            },
+            "transactionMs": 9.300000011920929
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.5,
+            "single": {
+              "setMs": 26.69999998807907,
+              "getMs": 15.800000011920929,
+              "iterateMs": 1.800000011920929
+            },
+            "batch": {
+              "setMs": 5.800000011920929,
+              "getMs": 2.600000023841858,
+              "removeMs": 13.699999988079071
+            },
+            "transactionMs": 8.600000023841858
+          }
+        }
+      ],
+      "candidate": [
+        {
+          "main": {
+            "readyMs": 0.40000003576278687,
+            "single": {
+              "setMs": 28.599999964237213,
+              "getMs": 16.400000035762787,
+              "iterateMs": 1.899999976158142
+            },
+            "batch": {
+              "setMs": 6.800000011920929,
+              "getMs": 2.900000035762787,
+              "removeMs": 10.699999988079071
+            },
+            "transactionMs": 41.09999996423721
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.40000003576278687,
+            "single": {
+              "setMs": 29.099999964237213,
+              "getMs": 16.30000001192093,
+              "iterateMs": 2
+            },
+            "batch": {
+              "setMs": 6.399999976158142,
+              "getMs": 2.699999988079071,
+              "removeMs": 11.400000035762787
+            },
+            "transactionMs": 41.30000001192093
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.5,
+            "single": {
+              "setMs": 27.900000035762787,
+              "getMs": 16.899999976158142,
+              "iterateMs": 1.899999976158142
+            },
+            "batch": {
+              "setMs": 6.399999976158142,
+              "getMs": 2.600000023841858,
+              "removeMs": 12.300000011920929
+            },
+            "transactionMs": 33.80000001192093
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.3999999761581421,
+            "single": {
+              "setMs": 28.399999976158142,
+              "getMs": 16.30000001192093,
+              "iterateMs": 2
+            },
+            "batch": {
+              "setMs": 7.099999964237213,
+              "getMs": 2.800000011920929,
+              "removeMs": 13
+            },
+            "transactionMs": 33.80000001192093
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.5,
+            "single": {
+              "setMs": 27.5,
+              "getMs": 18.30000001192093,
+              "iterateMs": 1.899999976158142
+            },
+            "batch": {
+              "setMs": 6.300000011920929,
+              "getMs": 2.699999988079071,
+              "removeMs": 14
+            },
+            "transactionMs": 42.30000001192093
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.3999999761581421,
+            "single": {
+              "setMs": 28.100000023841858,
+              "getMs": 17.80000001192093,
+              "iterateMs": 2.5
+            },
+            "batch": {
+              "setMs": 6.199999988079071,
+              "getMs": 2.5,
+              "removeMs": 13.400000035762787
+            },
+            "transactionMs": 42.30000001192093
+          }
+        },
+        {
+          "main": {
+            "readyMs": 0.3999999761581421,
+            "single": {
+              "setMs": 26.599999964237213,
+              "getMs": 17.69999998807907,
+              "iterateMs": 1.9000000357627869
+            },
+            "batch": {
+              "setMs": 6.5,
+              "getMs": 2.600000023841858,
+              "removeMs": 14.600000023841858
+            },
+            "transactionMs": 36.799999952316284
+          }
+        }
+      ]
+    }
+  },
+  "ratios": {
+    "main.readyMs": {
+      "candidateToBaseline": 0.8000000715255737,
+      "percentChange": -19.999992847442627
+    },
+    "main.single.setMs": {
+      "candidateToBaseline": 1.0107913673306577,
+      "percentChange": 1.0791367330657764
+    },
+    "main.single.getMs": {
+      "candidateToBaseline": 1.0368098137299635,
+      "percentChange": 3.6809813729963556
+    },
+    "main.single.iterateMs": {
+      "candidateToBaseline": 1.1875000488944363,
+      "percentChange": 18.750004889443623
+    },
+    "main.batch.setMs": {
+      "candidateToBaseline": 1.0666666626930237,
+      "percentChange": 6.666666269302368
+    },
+    "main.batch.getMs": {
+      "candidateToBaseline": 1.0799999952316284,
+      "percentChange": 7.999999523162842
+    },
+    "main.batch.removeMs": {
+      "candidateToBaseline": 1.0655737715330025,
+      "percentChange": 6.55737715330024
+    },
+    "main.transactionMs": {
+      "candidateToBaseline": 4.670454535063756,
+      "percentChange": 367.0454535063756
+    }
+  },
+  "package": {
+    "baseline": {
+      "version": "2.1.0",
+      "integrity": "sha512-RtYVIpzO7cOWQ3FbwBzGwhbNSrVUPYIhqN/uORUNpbhb6USvBkQ9Lp1dkaMtIriyVOXQ4FFek5SKZNqYBdLw+Q==",
+      "shasum": "03744b0248d682a3112d84fe070cda0a04d97495",
+      "entryCount": 108,
+      "packedBytes": 594376,
+      "unpackedBytes": 2630510,
+      "groups": {
+        "(root)": {
+          "files": 3,
+          "bytes": 20311
+        },
+        "dist": {
+          "files": 86,
+          "bytes": 2352203
+        },
+        "src": {
+          "files": 19,
+          "bytes": 257996
+        }
+      }
+    },
+    "candidate": {
+      "version": "2.1.0",
+      "integrity": "sha512-4fGjxDICPZSXolcTOaym+bxLL18/OJO1iT31miOBU7le8UCUhcuO1DvFEnRPeQzAyUeENHpvvl9tUnRRgQExTg==",
+      "shasum": "0df2dde6a6b1110232f89d153b8df3e300781bb1",
+      "entryCount": 138,
+      "packedBytes": 756538,
+      "unpackedBytes": 3387413,
+      "groups": {
+        "(root)": {
+          "files": 3,
+          "bytes": 22486
+        },
+        "dist": {
+          "files": 110,
+          "bytes": 3034130
+        },
+        "src": {
+          "files": 25,
+          "bytes": 330797
+        }
+      }
+    }
+  }
+}

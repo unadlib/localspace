@@ -1132,7 +1132,6 @@ describe('LocalSpace.close', () => {
     const store = localspace.createInstance({
       name,
       storeName: 'store',
-      prewarmTransactions: false,
     });
     await store.setDriver([store.INDEXEDDB]);
     await store.setItem('persisted', 'value');
@@ -1151,7 +1150,6 @@ describe('LocalSpace.close', () => {
     const observer = localspace.createInstance({
       name,
       storeName: 'store',
-      prewarmTransactions: false,
     });
     await observer.setDriver([observer.INDEXEDDB]);
     await expect(observer.getItem('persisted')).resolves.toBe('value');

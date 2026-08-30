@@ -152,11 +152,6 @@ interface DbContext {
   db: IDBDatabase | null;
   dbReady: Promise<void> | null;
   deferredOperations: DeferredOperation[];
-  prewarmPromise?: Promise<void> | null;
-  prewarmed?: boolean;
-  idleTimer?: ReturnType<typeof setTimeout> | null;
-  activeTransactions: number;
-  pendingTransactions: Array<() => void>;
 }
 
 interface DeferredOperation {
@@ -406,11 +401,6 @@ function createDbContext(): DbContext {
     db: null,
     dbReady: null,
     deferredOperations: [],
-    prewarmPromise: null,
-    prewarmed: false,
-    idleTimer: null,
-    activeTransactions: 0,
-    pendingTransactions: [],
   };
 }
 
@@ -458,27 +448,16 @@ function disposeDbContextIfUnused(
   dbInfo: DbInfo,
   dbContext: DbContext
 ): boolean {
-  if (
-    dbContext.forages.length > 0 ||
-    dbContext.activeTransactions > 0 ||
-    dbContext.pendingTransactions.length > 0 ||
-    dbContext.deferredOperations.length > 0 ||
-    dbContext.prewarmPromise
-  ) {
+  if (dbContext.forages.length > 0 || dbContext.deferredOperations.length > 0) {
     return false;
   }
 
-  if (dbContext.idleTimer) {
-    clearTimeout(dbContext.idleTimer);
-    dbContext.idleTimer = null;
-  }
   try {
     dbContext.db?.close();
   } catch {
     // The registry can still be released after a best-effort close.
   }
   dbContext.db = null;
-  dbContext.prewarmed = false;
 
   const contextKey = getDbContextKey(dbInfo);
   if (dbContexts[contextKey] === dbContext) {
@@ -601,7 +580,6 @@ function getConnection(
         const dbContext = dbContexts[contextKey];
         if (dbContext) {
           dbContext.db = null;
-          dbContext.prewarmed = false;
           for (const forage of dbContext.forages) {
             forage._dbInfo.db = null;
           }
@@ -654,75 +632,6 @@ function getTransactionOptions(
   return undefined;
 }
 
-function maybePrewarmTransaction(
-  dbInfo: DbInfo,
-  dbContext: DbContext
-): Promise<void> | undefined {
-  if (dbInfo.prewarmTransactions === false) {
-    return undefined;
-  }
-  if (dbContext.prewarmed || dbContext.prewarmPromise) {
-    return dbContext.prewarmPromise || Promise.resolve();
-  }
-
-  const promise = new Promise<void>((resolve) => {
-    try {
-      const storeName = requireStoreName(dbInfo);
-      const txOptions = getTransactionOptions(dbInfo, READ_ONLY);
-      const tx = txOptions
-        ? dbInfo.db!.transaction(storeName, READ_ONLY, txOptions)
-        : dbInfo.db!.transaction(storeName, READ_ONLY);
-      // A lightweight request warms up the connection without mutating data.
-      tx.objectStore(storeName).count();
-
-      tx.oncomplete = () => resolve();
-      tx.onabort = tx.onerror = () => resolve();
-    } catch {
-      resolve();
-    }
-  });
-
-  dbContext.prewarmPromise = promise;
-  promise.finally(() => {
-    dbContext.prewarmPromise = null;
-    dbContext.prewarmed = true;
-  });
-  return promise;
-}
-
-function scheduleIdleClose(dbInfo: DbInfo): void {
-  const dbContext = getDbContext(dbInfo);
-  const idleMs = dbInfo.connectionIdleMs;
-  if (!dbContext || !dbContext.db || !idleMs || idleMs <= 0) {
-    return;
-  }
-
-  if (dbContext.idleTimer) {
-    clearTimeout(dbContext.idleTimer);
-  }
-
-  dbContext.idleTimer = setTimeout(() => {
-    if (
-      dbContext.pendingTransactions.length > 0 ||
-      dbContext.activeTransactions > 0
-    ) {
-      // Defer closing until the queue drains.
-      scheduleIdleClose(dbInfo);
-      return;
-    }
-    try {
-      dbContext.db?.close();
-    } catch {
-      // ignore close errors
-    }
-    dbContext.db = null;
-    dbContext.prewarmed = false;
-    for (const forage of dbContext.forages) {
-      forage._dbInfo.db = null;
-    }
-  }, idleMs);
-}
-
 function createTransaction(
   dbInfo: DbInfo,
   mode: TransactionMode,
@@ -763,68 +672,11 @@ function createTransaction(
   };
 
   try {
-    const dbContext = ensureDbContext(dbInfo);
-    if (dbContext.idleTimer) {
-      clearTimeout(dbContext.idleTimer);
-      dbContext.idleTimer = null;
-    }
-
-    const maxTx = dbInfo.maxConcurrentTransactions;
-    const processPending = (): boolean => {
-      if (dbContext.pendingTransactions.length > 0) {
-        const next = dbContext.pendingTransactions.shift();
-        if (next) {
-          setTimeout(next, 0);
-          return true;
-        }
-      }
-      return false;
-    };
-
-    const start = () => {
-      try {
-        const txOptions = getTransactionOptions(dbInfo, mode);
-        const tx = txOptions
-          ? dbInfo.db!.transaction(dbInfo.storeName!, mode, txOptions)
-          : dbInfo.db!.transaction(dbInfo.storeName!, mode);
-
-        dbContext.activeTransactions += 1;
-
-        let finalized = false;
-        const finalize = () => {
-          if (finalized) {
-            return;
-          }
-          finalized = true;
-          dbContext.activeTransactions = Math.max(
-            0,
-            dbContext.activeTransactions - 1
-          );
-          const scheduledPendingTransaction = processPending();
-          if (
-            scheduledPendingTransaction ||
-            !disposeDbContextIfUnused(dbInfo, dbContext)
-          ) {
-            scheduleIdleClose(dbInfo);
-          }
-        };
-
-        tx.addEventListener('complete', finalize);
-        tx.addEventListener('abort', finalize);
-        tx.addEventListener('error', finalize);
-
-        callback(null, tx);
-      } catch (error) {
-        handleError(error);
-      }
-    };
-
-    if (maxTx && maxTx > 0 && dbContext.activeTransactions >= maxTx) {
-      dbContext.pendingTransactions.push(start);
-      return;
-    }
-
-    start();
+    const txOptions = getTransactionOptions(dbInfo, mode);
+    const tx = txOptions
+      ? dbInfo.db!.transaction(dbInfo.storeName!, mode, txOptions)
+      : dbInfo.db!.transaction(dbInfo.storeName!, mode);
+    callback(null, tx);
   } catch (err: any) {
     handleError(err);
   }
@@ -939,12 +791,6 @@ async function _initStorage(
       forage._dbInfo.version = dbInfo.version;
     }
   }
-
-  // Opportunistic prewarm to avoid cold-start latency on first operation
-  const prewarm = maybePrewarmTransaction(dbInfo, dbContext);
-  if (prewarm) {
-    prewarm.catch(() => undefined);
-  }
 }
 
 async function _closeStorage(this: IndexedDBDriverContext): Promise<void> {
@@ -972,19 +818,10 @@ async function _closeStorage(this: IndexedDBDriverContext): Promise<void> {
     return;
   }
 
-  if (dbContext.idleTimer) {
-    clearTimeout(dbContext.idleTimer);
-    dbContext.idleTimer = null;
-  }
-  if (dbContext.prewarmPromise) {
-    await dbContext.prewarmPromise.catch(() => undefined);
-  }
-
   try {
     dbContext.db?.close();
   } finally {
     dbContext.db = null;
-    dbContext.prewarmed = false;
     disposeDbContextIfUnused(dbInfo, dbContext);
   }
 }
@@ -2259,7 +2096,6 @@ function dropInstance(
         .then(() => {
           if (dbContext) {
             dbContext.db = null;
-            dbContext.prewarmed = false;
             advanceReadiness(dropDbInfo);
             disposeDbContextIfUnused(dropDbInfo, dbContext);
           }
@@ -2388,7 +2224,6 @@ const asyncStorage: Driver = {
 // Browser-native ESM consumers do not provide Node's `process` global.
 if (typeof process !== 'undefined' && process?.env?.NODE_ENV === 'test') {
   (asyncStorage as any).__test__ = {
-    createTransaction,
     getDbContext,
   };
 }

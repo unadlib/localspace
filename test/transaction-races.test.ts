@@ -33,7 +33,6 @@ const createIndexedDbStore = async (
     storeName: 'store',
     plugins,
     pluginErrorPolicy: 'strict',
-    prewarmTransactions: false,
   });
   await store.setDriver([store.INDEXEDDB]);
   await store.ready();

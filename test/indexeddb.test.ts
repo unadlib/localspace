@@ -772,57 +772,6 @@ describe('IndexedDB driver tests', () => {
     });
   });
 
-  describe('Connection idle handling', () => {
-    it('should reopen after idle timeout for binary setItem', async () => {
-      const idleInstance = localspace.createInstance({
-        name: `indexeddb-idle-${Math.random().toString(36).slice(2)}`,
-        storeName: 'idleStore',
-        connectionIdleMs: 5,
-      });
-      await idleInstance.setDriver([idleInstance.INDEXEDDB]);
-      await idleInstance.ready();
-      await idleInstance.setItem('warm', 'up');
-
-      await new Promise((resolve) => setTimeout(resolve, 25));
-
-      const binary = new Uint8Array([1, 2, 3]);
-      const stored = await idleInstance.setItem('binary-after-idle', binary);
-      expect(Array.from(stored)).toEqual([1, 2, 3]);
-
-      const retrieved =
-        await idleInstance.getItem<Uint8Array>('binary-after-idle');
-      expect(Array.from(retrieved ?? [])).toEqual([1, 2, 3]);
-
-      await idleInstance.dropInstance();
-    });
-
-    it('should run transaction with binary data after idle close', async () => {
-      const idleTxInstance = localspace.createInstance({
-        name: `indexeddb-idle-tx-${Math.random().toString(36).slice(2)}`,
-        storeName: 'idleTxStore',
-        connectionIdleMs: 5,
-      });
-      await idleTxInstance.setDriver([idleTxInstance.INDEXEDDB]);
-      await idleTxInstance.ready();
-      await idleTxInstance.setItem('seed', 'value');
-
-      await new Promise((resolve) => setTimeout(resolve, 25));
-
-      const binary = new Uint8Array([4, 5, 6]);
-      await idleTxInstance.runTransaction('readwrite', async (tx) => {
-        const current = await tx.get<string>('seed');
-        await tx.set('echo', current ?? 'missing');
-        await tx.set('binary-tx', binary);
-      });
-
-      const retrieved = await idleTxInstance.getItem<Uint8Array>('binary-tx');
-      expect(Array.from(retrieved ?? [])).toEqual([4, 5, 6]);
-      expect(await idleTxInstance.getItem('echo')).toBe('value');
-
-      await idleTxInstance.dropInstance();
-    });
-  });
-
   describe('dropInstance edge cases', () => {
     it('should handle dropInstance on non-existent database', async () => {
       const fakeDbName = `non-existent-${Math.random().toString(36).slice(2)}`;
