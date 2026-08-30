@@ -38,6 +38,8 @@ jobs:
         run: node test/package-exports.cjs
       - name: Verify package declaration consumers
         run: pnpm test:types:package
+      - name: Verify isolated package tarball
+        run: node scripts/verify-package-tarball.mjs --skip-build
 
   browsers:
     name: Playwright ${{ matrix.browser }}

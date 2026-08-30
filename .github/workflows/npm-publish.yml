@@ -26,8 +26,8 @@ jobs:
         run: pnpm run test:unit
       - name: Check package exports
         run: pnpm run test:exports
-      - name: Check package contents
-        run: npm pack --dry-run --json
+      - name: Check isolated package tarball
+        run: node scripts/verify-package-tarball.mjs --skip-build
       - name: Publish to npm
         run: npm publish
         env:

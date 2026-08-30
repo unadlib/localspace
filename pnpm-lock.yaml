@@ -7,10 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      lz-string:
-        specifier: ^1.5.0
-        version: 1.5.0
     devDependencies:
       '@eslint/js':
         specifier: ^9.39.4
@@ -54,6 +50,9 @@ importers:
       localforage:
         specifier: ^1.10.0
         version: 1.10.0
+      lz-string:
+        specifier: ^1.5.0
+        version: 1.5.0
       nyc:
         specifier: ^17.1.0
         version: 17.1.0
