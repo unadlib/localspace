@@ -6,7 +6,7 @@ import compressionPlugin from '../src/plugins/compression';
 describe('Compression plugin decompression failures', () => {
   it('should surface decompression errors as LocalSpaceError', async () => {
     const codec = {
-      compress: (data: string) => data,
+      compress: (_data: Uint8Array) => new Uint8Array([1]),
       decompress: () => {
         throw new Error('decompress boom');
       },
@@ -26,7 +26,7 @@ describe('Compression plugin decompression failures', () => {
     await store.setDriver([store.INDEXEDDB]);
     await store.ready();
 
-    await store.setItem('key', { a: 1 });
+    await store.setItem('key', { text: 'x'.repeat(2_000) });
 
     await expect(store.getItem('key')).rejects.toBeInstanceOf(LocalSpaceError);
     await expect(store.getItem('key')).rejects.toThrow(

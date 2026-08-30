@@ -83,5 +83,9 @@ export { default as serializer } from './utils/serializer.js';
 export { ttlPlugin } from './plugins/ttl.js';
 export { encryptionPlugin } from './plugins/encryption.js';
 export { compressionPlugin } from './plugins/compression.js';
+export type {
+  CompressionCodec,
+  CompressionPluginOptions,
+} from './plugins/compression.js';
 
 export { PluginAbortError } from './core/plugin-manager.js';

@@ -9,6 +9,7 @@ import localspace, {
 } from '../src';
 import {
   createPluginEnvelope,
+  readPluginEnvelope,
   type PluginEnvelopeKind,
 } from '../src/core/plugin-envelope';
 import {
@@ -58,6 +59,9 @@ const versionLegacyTransform = (
   kind: PluginEnvelopeKind,
   value: unknown
 ): unknown => {
+  if (readPluginEnvelope(value, kind).matched) {
+    return value;
+  }
   const legacy = value as Record<string, unknown>;
   switch (kind) {
     case 'encryption':
@@ -387,7 +391,12 @@ describe('3.0 StoredRecord writer and legacy reader', () => {
         name: reader.config('name'),
         storeName: reader.config('storeName'),
       };
-      const logical = { message: `future-${kind}` };
+      const logical = {
+        message:
+          kind === 'compression'
+            ? `future-${kind}-${'x'.repeat(1_000)}`
+            : `future-${kind}`,
+      };
 
       await reader.setItem('legacy-transform', logical);
       const legacyTransform = await raw.getItem('legacy-transform');

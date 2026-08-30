@@ -15,10 +15,7 @@ import {
   type PluginEnvelopeV1,
 } from '../src/core/plugin-envelope';
 import { readStoredRecord } from '../src/core/stored-record';
-import {
-  getRawMemoryValue,
-  setRawMemoryValue,
-} from './utils/raw-memory';
+import { getRawMemoryValue, setRawMemoryValue } from './utils/raw-memory';
 
 const uniqueName = (prefix: string) =>
   `${prefix}-${Math.random().toString(36).slice(2)}`;
@@ -218,34 +215,53 @@ describe('versioned plugin envelope reader', () => {
     ).rejects.toMatchObject({ code: 'DESERIALIZATION_FAILED' });
   });
 
-  it('keeps writing legacy compression payloads and reads the versioned form', async () => {
+  it('writes versioned compression envelopes and retains the legacy reader', async () => {
     const { store, raw } = await createStorePair(
       'compression-envelope-reader',
       compressionPlugin({ threshold: 0 })
     );
     const original = { source: '3.0', text: 'x'.repeat(200) };
-    await store.setItem('legacy', original);
-    const legacy = await raw.getItem<Record<string, unknown>>('legacy');
-    expect(legacy).toMatchObject({ __ls_compressed: true });
+    await store.setItem('versioned', original);
+    const versioned = await raw.getItem('versioned');
+    const parsed = readPluginEnvelope<Record<string, unknown>>(
+      versioned,
+      'compression'
+    );
+    expect(parsed.matched).toBe(true);
+    if (!parsed.matched) {
+      throw new Error('Versioned compression payload missing');
+    }
+    await expect(store.getItem('versioned')).resolves.toEqual(original);
 
-    const { __ls_compressed: _marker, ...payload } = legacy!;
-    await raw.setItem('future', envelope('compression', payload));
-    await expect(store.getItem('future')).resolves.toEqual(original);
+    await raw.setItem('legacy', {
+      __ls_compressed: true,
+      ...parsed.payload,
+    });
+    await expect(store.getItem('legacy')).resolves.toEqual(original);
   });
 
   it('reads legacy empty compression labels but rejects them in versioned envelopes', async () => {
     const { store, raw } = await createStorePair(
       'compression-empty-algorithm',
-      compressionPlugin({ threshold: 0, algorithm: '' })
+      compressionPlugin({ threshold: 0 })
     );
     const original = { source: '2.x', text: 'x'.repeat(200) };
 
-    await store.setItem('legacy', original);
-    const legacy = await raw.getItem<Record<string, unknown>>('legacy');
-    expect(legacy).toMatchObject({
+    await store.setItem('seed', original);
+    const seed = readPluginEnvelope<Record<string, unknown>>(
+      await raw.getItem('seed'),
+      'compression'
+    );
+    if (!seed.matched) {
+      throw new Error('Versioned compression payload missing');
+    }
+    const legacy = {
       __ls_compressed: true,
       algorithm: '',
-    });
+      data: seed.payload.data,
+      originalSize: seed.payload.originalSize,
+    };
+    await raw.setItem('legacy', legacy);
     await expect(store.getItem('legacy')).resolves.toEqual(original);
 
     const { __ls_compressed: _marker, ...payload } = legacy!;

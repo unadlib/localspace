@@ -242,6 +242,57 @@ test.describe('localspace browser interoperability', () => {
     expect(result.summaries).toEqual([{ iterations: 2, stopped: false }]);
   });
 
+  test('compression stores only a net-smaller versioned envelope', async ({
+    page,
+  }) => {
+    await ensureFixtureReady(page);
+
+    const result = await page.evaluate(async (storeName) => {
+      const moduleUrl = '/dist/index.esm.js';
+      const localspaceModule = await import(moduleUrl);
+      const options = {
+        name: 'playwright-compression-v1',
+        storeName,
+      };
+      const store = localspaceModule.default.createInstance({
+        ...options,
+        plugins: [localspaceModule.compressionPlugin({ threshold: 0 })],
+      });
+      const raw = localspaceModule.default.createInstance(options);
+      await Promise.all([
+        store.setDriver([store.LOCALSTORAGE]),
+        raw.setDriver([raw.LOCALSTORAGE]),
+      ]);
+      await store.clear();
+      const large = 'x'.repeat(2_000);
+      await store.setItem('small', 0);
+      await store.setItem('large', large);
+
+      const smallPhysical = await raw.getItem('small');
+      const largePhysical = await raw.getItem('large');
+      const restored = await store.getItem('large');
+      await store.dropInstance({ ...options });
+      await Promise.all([store.close(), raw.close()]);
+      return {
+        smallPhysical,
+        largeHeader: largePhysical?.__localspace__ ?? null,
+        largeAlgorithm: largePhysical?.payload?.algorithm ?? null,
+        restored,
+      };
+    }, randomStoreName('compression-net-size'));
+
+    expect(result).toEqual({
+      smallPhysical: 0,
+      largeHeader: {
+        namespace: 'localspace.plugin',
+        kind: 'compression',
+        version: 1,
+      },
+      largeAlgorithm: 'lz-string',
+      restored: 'x'.repeat(2_000),
+    });
+  });
+
   test('IndexedDB transaction runner can await an ordinary instance operation', async ({
     page,
   }) => {

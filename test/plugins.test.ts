@@ -179,7 +179,13 @@ describe('Plugin system', () => {
     });
 
     const raw = await rawReader.getItem('blob');
-    expect(raw).toMatchObject({ __ls_compressed: true });
+    expect(raw).toMatchObject({
+      __localspace__: {
+        namespace: 'localspace.plugin',
+        kind: 'compression',
+        version: 1,
+      },
+    });
 
     const restored = await compressedStore.getItem<string>('blob');
     expect(restored).toBe(payload);
@@ -417,9 +423,9 @@ describe('Plugin batch operations', () => {
     });
     const rawA = await rawReader.getItem('a');
     expect(rawA).toMatchObject({ __ls_ttl: true });
-    expect(
-      readStoredRecord((rawA as { data?: unknown } | null)?.data)
-    ).toEqual({ matched: true, value: 'val-a' });
+    expect(readStoredRecord((rawA as { data?: unknown } | null)?.data)).toEqual(
+      { matched: true, value: 'val-a' }
+    );
 
     // Batch get with TTL plugin should unwrap
     const result = await store.getItems(['a', 'b']);
@@ -506,7 +512,13 @@ describe('Plugin batch operations', () => {
       storeName: 'compress-batch-store',
     });
     const raw1 = await rawReader.getItem('large1');
-    expect(raw1).toMatchObject({ __ls_compressed: true });
+    expect(raw1).toMatchObject({
+      __localspace__: {
+        namespace: 'localspace.plugin',
+        kind: 'compression',
+        version: 1,
+      },
+    });
 
     // Batch get with compression plugin should decompress
     const result = await store.getItems<string>(['large1', 'large2']);
@@ -731,7 +743,13 @@ describe('Plugin edge cases and combinations', () => {
     const rawLarge = await rawReader.getItem('large');
 
     expect(rawSmall).toBe('tiny'); // not compressed
-    expect(rawLarge).toMatchObject({ __ls_compressed: true }); // compressed
+    expect(rawLarge).toMatchObject({
+      __localspace__: {
+        namespace: 'localspace.plugin',
+        kind: 'compression',
+        version: 1,
+      },
+    });
 
     // Both should read correctly
     const result = await store.getItems<string>(['small', 'large']);

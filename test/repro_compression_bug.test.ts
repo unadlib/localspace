@@ -8,7 +8,7 @@ describe('Compression Plugin Bug Reproduction', () => {
       compress: () => {
         throw new Error('Compression failed intentionally');
       },
-      decompress: (data: any) => data,
+      decompress: (data: Uint8Array) => data,
     };
 
     const store = localspace.createInstance({
@@ -23,7 +23,7 @@ describe('Compression Plugin Bug Reproduction', () => {
     });
 
     const value = 'test-value-that-should-be-compressed';
-    
+
     // FIXED: This should now reject with a LocalSpaceError
     await expect(store.setItem('key', value)).rejects.toThrow(
       'Failed to compress payload'

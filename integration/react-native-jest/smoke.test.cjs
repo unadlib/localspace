@@ -1,5 +1,5 @@
 const localspacePkg = require('localspace');
-const { LocalSpace } = localspacePkg;
+const { LocalSpace, compressionPlugin } = localspacePkg;
 const { createReactNativeInstance } = require('localspace/react-native');
 const asyncStorageModule = require('@react-native-async-storage/async-storage');
 const AsyncStorage = asyncStorageModule.default ?? asyncStorageModule;
@@ -43,5 +43,20 @@ describe('localspace + react-native async storage integration smoke', () => {
       { key: 'two', value: 2 },
       { key: 'missing', value: null },
     ]);
+  });
+
+  it('supports the bytes-based compression pipeline', async () => {
+    const base = new LocalSpace();
+    const store = await createReactNativeInstance(base, {
+      name: 'rn-it-compression',
+      storeName: 'kv',
+      reactNativeAsyncStorage: AsyncStorage,
+      plugins: [compressionPlugin({ threshold: 0 })],
+    });
+    const value = { text: 'x'.repeat(2_000) };
+
+    await store.setItem('compressed', value);
+
+    expect(await store.getItem('compressed')).toEqual(value);
   });
 });

@@ -5,26 +5,27 @@ import type {
   BatchResponse,
 } from '../types.js';
 import { normalizeBatchEntries } from '../utils/helpers.js';
-import { toLocalSpaceError } from '../errors.js';
+import { createLocalSpaceError, toLocalSpaceError } from '../errors.js';
 import serializer from '../utils/serializer.js';
 import { compressToUint8Array, decompressFromUint8Array } from 'lz-string';
 import {
+  createPluginEnvelope,
   hasOwnPayloadField,
   readPluginEnvelope,
 } from '../core/plugin-envelope.js';
 import { markBuiltInStorageTransformPlugin } from '../core/plugin-capabilities.js';
 
 export interface CompressionCodec {
-  compress(data: string): Promise<Uint8Array | string> | Uint8Array | string;
-  decompress(data: Uint8Array | string): Promise<string> | string;
+  compress(data: Uint8Array): Promise<Uint8Array> | Uint8Array;
+  decompress(data: Uint8Array): Promise<Uint8Array> | Uint8Array;
 }
 
 export interface CompressionPluginOptions {
-  /** Minimum payload size in bytes before compression is attempted */
+  /** Minimum uncompressed byte length before compression is attempted. */
   threshold?: number;
-  /** Optional custom codec */
+  /** Optional bytes-to-bytes codec. */
   codec?: CompressionCodec;
-  /** Algorithm label stored in metadata */
+  /** Non-empty codec label persisted in versioned metadata. */
   algorithm?: string;
 }
 
@@ -34,46 +35,71 @@ type CompressionPayloadBody = {
   originalSize: number;
 };
 
-type CompressionPayload = CompressionPayloadBody & {
+type LegacyCompressionPayload = CompressionPayloadBody & {
   __ls_compressed: true;
 };
+
+type ParsedCompressionPayload = {
+  payload: CompressionPayloadBody;
+  versioned: boolean;
+};
+
+const BASE64_PATTERN =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+const invalidCompressionPayload = (reason: string) =>
+  createLocalSpaceError(
+    'DESERIALIZATION_FAILED',
+    'Failed to decompress payload: invalid compression payload.',
+    { payloadKind: 'compression', reason }
+  );
 
 const validateCompressionPayload = (
   value: unknown,
   allowEmptyAlgorithm: boolean
 ): CompressionPayloadBody => {
   const payload = value as Partial<CompressionPayloadBody>;
+  if (!payload || typeof payload !== 'object') {
+    throw invalidCompressionPayload('invalid-payload');
+  }
   if (
-    !payload ||
-    typeof payload !== 'object' ||
     typeof payload.algorithm !== 'string' ||
-    (!allowEmptyAlgorithm && payload.algorithm.length === 0) ||
+    (!allowEmptyAlgorithm && payload.algorithm.length === 0)
+  ) {
+    throw invalidCompressionPayload('invalid-algorithm');
+  }
+  if (
     typeof payload.data !== 'string' ||
+    payload.data.length % 4 !== 0 ||
+    !BASE64_PATTERN.test(payload.data)
+  ) {
+    throw invalidCompressionPayload('invalid-data');
+  }
+  if (
     typeof payload.originalSize !== 'number' ||
     !Number.isSafeInteger(payload.originalSize) ||
     payload.originalSize < 0
   ) {
-    throw toLocalSpaceError(
-      new Error('Invalid compression payload fields.'),
-      'DESERIALIZATION_FAILED',
-      'Failed to decompress payload: invalid compression payload.'
-    );
+    throw invalidCompressionPayload('invalid-original-size');
   }
   return payload as CompressionPayloadBody;
 };
 
 const parseCompressionPayload = (
   value: unknown
-): CompressionPayloadBody | null => {
+): ParsedCompressionPayload | null => {
   const envelope = readPluginEnvelope<unknown>(value, 'compression');
   if (envelope.matched) {
-    return validateCompressionPayload(envelope.payload, false);
+    return {
+      payload: validateCompressionPayload(envelope.payload, false),
+      versioned: true,
+    };
   }
 
   if (
     !value ||
     typeof value !== 'object' ||
-    (value as Partial<CompressionPayload>).__ls_compressed !== true
+    (value as Partial<LegacyCompressionPayload>).__ls_compressed !== true
   ) {
     return null;
   }
@@ -85,63 +111,168 @@ const parseCompressionPayload = (
     return null;
   }
 
-  // The 2.x writer accepted an empty custom algorithm label. The label is
-  // informational, so retain that representation only for legacy payloads.
-  return validateCompressionPayload(value, true);
+  // The 2.x label was informational and could be empty. Retain that reader
+  // behavior only for marker-based legacy payloads.
+  return {
+    payload: validateCompressionPayload(value, true),
+    versioned: false,
+  };
 };
 
+const decodeUtf8 = (data: Uint8Array): string =>
+  new TextDecoder('utf-8', { fatal: true }).decode(data);
+
+const encodeUtf8 = (data: string): Uint8Array => new TextEncoder().encode(data);
+
 const defaultCodec: CompressionCodec = {
-  compress: (data: string) => compressToUint8Array(data),
-  decompress: (data: Uint8Array | string) => {
-    if (typeof data === 'string') {
-      const buffer = serializer.stringToBuffer(data);
-      return decompressFromUint8Array(new Uint8Array(buffer)) ?? '';
+  compress: (data) => compressToUint8Array(decodeUtf8(data)),
+  decompress: (data) => {
+    const decompressed = decompressFromUint8Array(data);
+    if (decompressed === null) {
+      throw new Error('The compressed byte sequence is invalid.');
     }
-    return decompressFromUint8Array(data) ?? '';
+    return encodeUtf8(decompressed);
   },
 };
 
-const toUint8Array = (value: Uint8Array | string): Uint8Array => {
-  if (typeof value === 'string') {
-    return new TextEncoder().encode(value);
+const copyCodecBytes = (value: unknown, method: string): Uint8Array => {
+  if (Object.prototype.toString.call(value) !== '[object Uint8Array]') {
+    throw new TypeError(
+      `Compression codec ${method}() must return Uint8Array.`
+    );
   }
-  return value;
+  const source = value as Uint8Array;
+  const copy = new Uint8Array(source.byteLength);
+  copy.set(source);
+  return copy;
+};
+
+const bytesToBase64 = (bytes: Uint8Array): string =>
+  serializer.bufferToString(bytes.slice().buffer as ArrayBuffer);
+
+const base64ToBytes = (value: string): Uint8Array =>
+  new Uint8Array(serializer.stringToBuffer(value));
+
+const serializeToBytes = async (value: unknown): Promise<Uint8Array> =>
+  encodeUtf8(await serializer.serialize(value));
+
+const validateOptions = (
+  options: CompressionPluginOptions
+): { threshold: number; codec: CompressionCodec; algorithm: string } => {
+  const threshold = options.threshold ?? 1024;
+  if (!Number.isSafeInteger(threshold) || threshold < 0) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Compression threshold must be a non-negative safe integer.',
+      { configKey: 'threshold', providedValue: threshold }
+    );
+  }
+
+  const codec = options.codec ?? defaultCodec;
+  if (
+    !codec ||
+    typeof codec.compress !== 'function' ||
+    typeof codec.decompress !== 'function'
+  ) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Compression codec must provide compress() and decompress() functions.',
+      { configKey: 'codec' }
+    );
+  }
+
+  const algorithm =
+    options.algorithm ?? (options.codec ? 'custom' : 'lz-string');
+  if (typeof algorithm !== 'string' || algorithm.length === 0) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Compression algorithm must be a non-empty string.',
+      { configKey: 'algorithm' }
+    );
+  }
+
+  return { threshold, codec, algorithm };
 };
 
 const createCompressionPlugin = (
   options: CompressionPluginOptions = {}
 ): LocalSpacePlugin => {
-  const threshold = options.threshold ?? 1024;
-  const codec = options.codec ?? defaultCodec;
-  const algorithm = options.algorithm ?? 'lz-string';
+  const { threshold, codec, algorithm } = validateOptions(options);
+
+  const compressValue = async <T>(value: T): Promise<T> => {
+    if (value == null) {
+      return value;
+    }
+
+    const originalBytes = await serializeToBytes(value);
+    if (originalBytes.byteLength < threshold) {
+      return value;
+    }
+
+    const compressedBytes = copyCodecBytes(
+      await codec.compress(originalBytes.slice()),
+      'compress'
+    );
+    const envelope = createPluginEnvelope('compression', {
+      algorithm,
+      originalSize: originalBytes.byteLength,
+      data: bytesToBase64(compressedBytes),
+    } satisfies CompressionPayloadBody);
+
+    // Include the V1 envelope header, metadata, and base64 expansion in the
+    // decision. Storing raw compressed bytes that make the complete persisted
+    // representation larger is not a compression win.
+    const compressedRepresentation = await serializeToBytes(envelope);
+    return compressedRepresentation.byteLength < originalBytes.byteLength
+      ? (envelope as unknown as T)
+      : value;
+  };
+
+  const decompressValue = async <T>(value: T | null): Promise<T | null> => {
+    const parsed = parseCompressionPayload(value);
+    if (!parsed) {
+      return value;
+    }
+    const { payload, versioned } = parsed;
+    if (versioned && payload.algorithm !== algorithm) {
+      throw createLocalSpaceError(
+        'DESERIALIZATION_FAILED',
+        'Failed to decompress payload: compression algorithm mismatch.',
+        {
+          payloadKind: 'compression',
+          reason: 'algorithm-mismatch',
+          payloadAlgorithm: payload.algorithm,
+          configuredAlgorithm: algorithm,
+        }
+      );
+    }
+
+    const decompressedBytes = copyCodecBytes(
+      await codec.decompress(base64ToBytes(payload.data)),
+      'decompress'
+    );
+    if (decompressedBytes.byteLength !== payload.originalSize) {
+      throw createLocalSpaceError(
+        'DESERIALIZATION_FAILED',
+        'Failed to decompress payload: original size mismatch.',
+        {
+          payloadKind: 'compression',
+          reason: 'original-size-mismatch',
+          expectedSize: payload.originalSize,
+          actualSize: decompressedBytes.byteLength,
+        }
+      );
+    }
+
+    return serializer.deserialize(decodeUtf8(decompressedBytes)) as T;
+  };
 
   return {
     name: 'compression',
     priority: 5,
     beforeSet: async <T>(_key: string, value: T): Promise<T> => {
-      if (value == null) {
-        return value;
-      }
       try {
-        const serialized = await serializer.serialize(value);
-        const encoded = new TextEncoder().encode(serialized);
-        if (encoded.byteLength < threshold) {
-          return value;
-        }
-
-        const compressed = toUint8Array(await codec.compress(serialized));
-        const payload: CompressionPayload = {
-          __ls_compressed: true,
-          algorithm,
-          originalSize: encoded.byteLength,
-          data: serializer.bufferToString(
-            compressed.buffer.slice(
-              compressed.byteOffset,
-              compressed.byteOffset + compressed.byteLength
-            ) as ArrayBuffer
-          ),
-        };
-        return payload as unknown as T;
+        return await compressValue(value);
       } catch (error) {
         throw toLocalSpaceError(
           error,
@@ -151,14 +282,8 @@ const createCompressionPlugin = (
       }
     },
     afterGet: async <T>(_key: string, value: T | null): Promise<T | null> => {
-      const payload = parseCompressionPayload(value);
-      if (!payload) {
-        return value;
-      }
       try {
-        const buffer = serializer.stringToBuffer(payload.data);
-        const decompressed = await codec.decompress(new Uint8Array(buffer));
-        return serializer.deserialize(decompressed) as T;
+        return await decompressValue(value);
       } catch (error) {
         throw toLocalSpaceError(
           error,
@@ -170,79 +295,39 @@ const createCompressionPlugin = (
     beforeSetItems: async <T>(
       entries: BatchItems<T>,
       _context: PluginContext
-    ): Promise<BatchItems<T>> => {
-      const normalized = normalizeBatchEntries(entries);
-
-      const compressed = await Promise.all(
-        normalized.map(async ({ key, value }) => {
-          if (value == null) {
-            return { key, value };
-          }
+    ): Promise<BatchItems<T>> =>
+      Promise.all(
+        normalizeBatchEntries(entries).map(async ({ key, value }) => {
           try {
-            const serialized = await serializer.serialize(value);
-            const encoded = new TextEncoder().encode(serialized);
-            if (encoded.byteLength < threshold) {
-              return { key, value };
-            }
-
-            const compressedData = toUint8Array(
-              await codec.compress(serialized)
-            );
-            const payload: CompressionPayload = {
-              __ls_compressed: true,
-              algorithm,
-              originalSize: encoded.byteLength,
-              data: serializer.bufferToString(
-                compressedData.buffer.slice(
-                  compressedData.byteOffset,
-                  compressedData.byteOffset + compressedData.byteLength
-                ) as ArrayBuffer
-              ),
-            };
-            return { key, value: payload as unknown as T };
+            return { key, value: await compressValue(value) };
           } catch (error) {
             throw toLocalSpaceError(
               error,
               'OPERATION_FAILED',
-              `Failed to compress payload for key "${key}"`
+              `Failed to compress payload for key "${key}"`,
+              { key }
             );
           }
         })
-      );
-
-      return compressed;
-    },
+      ),
     afterGetItems: async <T>(
       entries: BatchResponse<T>,
       _context: PluginContext
-    ): Promise<BatchResponse<T>> => {
-      const decompressed = await Promise.all(
+    ): Promise<BatchResponse<T>> =>
+      Promise.all(
         entries.map(async ({ key, value }) => {
-          const payload = parseCompressionPayload(value);
-          if (!payload) {
-            return { key, value };
-          }
           try {
-            const buffer = serializer.stringToBuffer(payload.data);
-            const decompressedData = await codec.decompress(
-              new Uint8Array(buffer)
-            );
-            return {
-              key,
-              value: serializer.deserialize(decompressedData) as T,
-            };
+            return { key, value: await decompressValue(value) };
           } catch (error) {
             throw toLocalSpaceError(
               error,
               'DESERIALIZATION_FAILED',
-              `Failed to decompress payload for key "${key}"`
+              `Failed to decompress payload for key "${key}"`,
+              { key }
             );
           }
         })
-      );
-
-      return decompressed;
-    },
+      ),
   };
 };
 

@@ -1,9 +1,11 @@
 import localspace, {
   LocalSpace,
+  compressionPlugin,
   memoryDriver,
   registerDriver,
   setDeprecationWarnings,
   type BatchItems,
+  type CompressionCodec,
   type Driver,
   type DriverCapabilities,
   type LocalSpaceConfig,
@@ -33,6 +35,15 @@ const migrationValue: StorageValue = {
   binary: new Uint8Array([1, 2, 3]),
   nested: [null, true, 1, 'value'],
 };
+const compressionCodec: CompressionCodec = {
+  compress: async (bytes) => bytes.slice(),
+  decompress: async (bytes) => bytes.slice(),
+};
+const compression = compressionPlugin({
+  threshold: 256,
+  codec: compressionCodec,
+  algorithm: 'package-types-codec-v1',
+});
 void instance.setItem('migration', migrationValue);
 void instance.setItems([{ key: 'migration', value: migrationValue }]);
 void instance.getItem<StorageValue>('migration');
@@ -126,6 +137,8 @@ void [
   selectedCapabilities,
   configSnapshot,
   migrationValue,
+  compressionCodec,
+  compression,
   iterateResult,
   observerPlugin,
   customDriver,
