@@ -277,6 +277,17 @@ const bridgeWriteLegacy = async (page, fixture) =>
       if ((await core.length()) !== 4) fail('Bridge legacy core write failed.');
       await core.close();
 
+      const defaultNamespace = new api.LocalSpace({
+        driver: api.indexedDBDriver._driver,
+        pluginErrorPolicy: 'strict',
+      });
+      await defaultNamespace.ready();
+      await defaultNamespace.setItem('legacy-default-namespace', {
+        source: '2.1-bridge',
+        namespace: 'localforage/keyvaluepairs',
+      });
+      await defaultNamespace.close();
+
       const plugins = new api.LocalSpace({
         name: phaseFixture.databaseName,
         storeName: phaseFixture.pluginStoreName,
@@ -302,7 +313,11 @@ const bridgeWriteLegacy = async (page, fixture) =>
         fail('Bridge could not read its legacy plugin write.');
       }
       await plugins.close();
-      return { coreEntries: 4, pluginEntries: 1 };
+      return {
+        coreEntries: 4,
+        defaultNamespaceEntries: 1,
+        pluginEntries: 1,
+      };
     },
     { fixture }
   );
@@ -399,6 +414,25 @@ const candidateReadAndWrite = async (page, fixture) =>
       await core.setItem('v3-bytes', new Uint16Array([1, 256, 65535]));
       await core.close();
 
+      const defaultNamespace = new api.LocalSpace({
+        driver: api.indexedDBDriver._driver,
+        pluginErrorPolicy: 'strict',
+      });
+      await defaultNamespace.ready();
+      same(
+        await defaultNamespace.getItem('legacy-default-namespace'),
+        {
+          source: '2.1-bridge',
+          namespace: 'localforage/keyvaluepairs',
+        },
+        '3.0 did not reopen the bridge default namespace.'
+      );
+      await defaultNamespace.setItem('v3-default-namespace', {
+        source: '3.0-candidate',
+        namespace: 'localforage/keyvaluepairs',
+      });
+      await defaultNamespace.close();
+
       const plugins = new api.LocalSpace({
         name: phaseFixture.databaseName,
         storeName: phaseFixture.pluginStoreName,
@@ -469,8 +503,10 @@ const candidateReadAndWrite = async (page, fixture) =>
 
       return {
         legacyCoreRead: 4,
+        legacyDefaultNamespaceRead: 1,
         legacyPluginRead: 1,
         candidateCoreWritten: 4,
+        candidateDefaultNamespaceWritten: 1,
         candidatePluginWritten: 1,
         unknownVersionInjected: true,
       };
@@ -590,6 +626,21 @@ const bridgeReadCandidate = async (page, fixture) =>
       );
       await core.close();
 
+      const defaultNamespace = new api.LocalSpace({
+        driver: api.indexedDBDriver._driver,
+        pluginErrorPolicy: 'strict',
+      });
+      await defaultNamespace.ready();
+      same(
+        await defaultNamespace.getItem('v3-default-namespace'),
+        {
+          source: '3.0-candidate',
+          namespace: 'localforage/keyvaluepairs',
+        },
+        'Bridge did not reopen the 3.0 default namespace.'
+      );
+      await defaultNamespace.close();
+
       const plugins = new api.LocalSpace({
         name: phaseFixture.databaseName,
         storeName: phaseFixture.pluginStoreName,
@@ -618,6 +669,7 @@ const bridgeReadCandidate = async (page, fixture) =>
 
       return {
         candidateCoreRead: 4,
+        candidateDefaultNamespaceRead: 1,
         candidatePluginRead: 1,
         unknownVersionRejected: true,
         unknownVersionPreserved: true,
