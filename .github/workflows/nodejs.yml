@@ -75,6 +75,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install Playwright ${{ matrix.browser }}
         run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+      - name: Record exact browser engine evidence
+        run: node scripts/report-browser-evidence.mjs ${{ matrix.browser }}
       - name: Build package
         run: pnpm build
       - name: Run ${{ matrix.browser }} tests

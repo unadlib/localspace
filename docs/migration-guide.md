@@ -500,6 +500,12 @@ bridge version identified and package-isolated in the 3.0 release evidence. If
 that bridge has not been published and verified, treat downgrade after 3.0
 writes as unsupported.
 
+Plugin rollback also requires the same application-owned inputs on both sides:
+encryption key/derivation and any non-default AES-GCM parameters, plus the same
+custom compression codec for its persisted algorithm label. The envelope
+identifies a transform; it cannot embed secrets or arbitrary codec
+implementations.
+
 A release rehearsal must use actual packages and a shared persistent fixture:
 
 1. write legacy fixtures with the pinned 2.1.x bridge;

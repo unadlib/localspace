@@ -603,7 +603,15 @@ diagnostics; do not parse message text.
 
 ## Platform boundary
 
-The 3.0 release target is current unprefixed IndexedDB on recent Chromium,
-Firefox, and Safari engines; Node.js 22/24 for imports, types, tests, and custom
-drivers; and React Native 0.83.x with AsyncStorage 2.2.x. Prefixed IndexedDB,
-WebSQL, and a built-in persistent Node driver are outside the contract.
+Browser certification is exact rather than aspirational: the frozen lockfile's
+Chromium, Firefox, and WebKit engines are logged and tested independently. A
+real Safari build is recorded and smoke-tested before GA; Playwright WebKit is
+not presented as Safari evidence. Edge, multiple browser majors, and Firefox
+ESR are not claimed without separate jobs.
+
+Node.js 22/24 cover package imports, JavaScript tests, and custom drivers, but
+the public declarations intentionally expose browser storage and Web Crypto
+types. TypeScript-only Node consumers therefore include the `DOM` library (or
+use `skipLibCheck`). React Native certification uses the exact 0.83.x / 2.2.x
+fixture and registry RC tarball. Prefixed IndexedDB, WebSQL, and a built-in
+persistent Node driver are outside the contract.

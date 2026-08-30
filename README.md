@@ -388,13 +388,19 @@ Common codes include `DRIVER_UNAVAILABLE`, `DRIVER_NOT_INITIALIZED`,
 
 ## Supported platforms
 
-| Platform          | 3.0 support policy                                                                                         | Release evidence                                                |
-| ----------------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Chromium and Edge | latest two stable engine majors, unprefixed IndexedDB                                                      | Playwright Chromium project                                     |
-| Firefox           | latest two stable majors plus current ESR                                                                  | Playwright Firefox project                                      |
-| Safari            | latest two stable Safari majors                                                                            | Playwright WebKit plus real Safari smoke for release candidates |
-| Node.js           | maintained LTS 22 and 24 for imports, types, tests, and custom drivers; no built-in persistent Node driver | Node CI matrix                                                  |
-| React Native      | 0.83.x with AsyncStorage 2.2.x release fixture                                                             | official Jest mock plus iOS Detox fixture                       |
+| Platform     | 3.0 support policy                                                                                         | Release evidence                                                           |
+| ------------ | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Chromium     | exact engine build resolved by the frozen Playwright lockfile, using unprefixed IndexedDB                  | Chromium project plus logged Playwright and engine versions                |
+| Firefox      | exact engine build resolved by the frozen Playwright lockfile                                              | Firefox project plus logged Playwright and engine versions                 |
+| WebKit       | exact engine build resolved by the frozen Playwright lockfile                                              | WebKit project plus logged Playwright and engine versions                  |
+| Safari       | exact stable Safari build recorded for the release candidate                                               | real Safari smoke before GA; Playwright WebKit is a separate preflight     |
+| Node.js      | LTS 22 and 24 for package import, JavaScript tests, and custom drivers; no built-in persistent Node driver | Node CI matrix; browser-facing TypeScript declarations require the DOM lib |
+| React Native | 0.83.x with AsyncStorage 2.2.x release fixture                                                             | official Jest mock plus iOS Detox against the exact registry RC tarball    |
+
+This matrix is deliberately evidence-shaped: one Playwright project does not
+certify two browser majors, Firefox ESR, Microsoft Edge, or real Safari. Those
+targets require their own release jobs before LocalSpace can claim them as
+tested support.
 
 Legacy prefixed IndexedDB APIs and WebSQL are not supported. WebSQL data must be
 migrated before adopting LocalSpace.
