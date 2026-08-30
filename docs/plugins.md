@@ -369,6 +369,11 @@ for 3.0. Payloads must remain within the validators understood by the 2.1
 bridge reader. See the [Migration Guide](./migration-guide.md) before relying
 on a source rollback after 3.0 writes.
 
+Recognized envelopes, headers, and built-in payloads use exact enumerable data
+properties: extra fields, symbols, non-enumerable fields, or accessors are
+malformed and reject with `DESERIALIZATION_FAILED`. Readers inspect property
+descriptors and never execute getters while parsing persisted metadata.
+
 ## TTL plugin
 
 ```ts

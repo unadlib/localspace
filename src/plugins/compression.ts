@@ -10,7 +10,9 @@ import serializer from '../utils/serializer.js';
 import { compressToUint8Array, decompressFromUint8Array } from 'lz-string';
 import {
   createPluginEnvelope,
+  hasExactPayloadFields,
   hasOwnPayloadField,
+  readOwnPayloadField,
   readPluginEnvelope,
 } from '../core/plugin-envelope.js';
 import { markBuiltInStorageTransformPlugin } from '../core/plugin-capabilities.js';
@@ -35,10 +37,6 @@ type CompressionPayloadBody = {
   originalSize: number;
 };
 
-type LegacyCompressionPayload = CompressionPayloadBody & {
-  __ls_compressed: true;
-};
-
 type ParsedCompressionPayload = {
   payload: CompressionPayloadBody;
   versioned: boolean;
@@ -56,33 +54,36 @@ const invalidCompressionPayload = (reason: string) =>
 
 const validateCompressionPayload = (
   value: unknown,
-  allowEmptyAlgorithm: boolean
+  allowEmptyAlgorithm: boolean,
+  expectedFields: readonly string[]
 ): CompressionPayloadBody => {
-  const payload = value as Partial<CompressionPayloadBody>;
-  if (!payload || typeof payload !== 'object') {
+  if (!hasExactPayloadFields(value, expectedFields)) {
     throw invalidCompressionPayload('invalid-payload');
   }
+  const algorithm = readOwnPayloadField(value, 'algorithm');
+  const data = readOwnPayloadField(value, 'data');
+  const originalSize = readOwnPayloadField(value, 'originalSize');
   if (
-    typeof payload.algorithm !== 'string' ||
-    (!allowEmptyAlgorithm && payload.algorithm.length === 0)
+    typeof algorithm !== 'string' ||
+    (!allowEmptyAlgorithm && algorithm.length === 0)
   ) {
     throw invalidCompressionPayload('invalid-algorithm');
   }
   if (
-    typeof payload.data !== 'string' ||
-    payload.data.length % 4 !== 0 ||
-    !BASE64_PATTERN.test(payload.data)
+    typeof data !== 'string' ||
+    data.length % 4 !== 0 ||
+    !BASE64_PATTERN.test(data)
   ) {
     throw invalidCompressionPayload('invalid-data');
   }
   if (
-    typeof payload.originalSize !== 'number' ||
-    !Number.isSafeInteger(payload.originalSize) ||
-    payload.originalSize < 0
+    typeof originalSize !== 'number' ||
+    !Number.isSafeInteger(originalSize) ||
+    originalSize < 0
   ) {
     throw invalidCompressionPayload('invalid-original-size');
   }
-  return payload as CompressionPayloadBody;
+  return { algorithm, data, originalSize };
 };
 
 const parseCompressionPayload = (
@@ -91,7 +92,11 @@ const parseCompressionPayload = (
   const envelope = readPluginEnvelope<unknown>(value, 'compression');
   if (envelope.matched) {
     return {
-      payload: validateCompressionPayload(envelope.payload, false),
+      payload: validateCompressionPayload(envelope.payload, false, [
+        'algorithm',
+        'data',
+        'originalSize',
+      ]),
       versioned: true,
     };
   }
@@ -99,7 +104,7 @@ const parseCompressionPayload = (
   if (
     !value ||
     typeof value !== 'object' ||
-    (value as Partial<LegacyCompressionPayload>).__ls_compressed !== true
+    readOwnPayloadField(value, '__ls_compressed') !== true
   ) {
     return null;
   }
@@ -114,7 +119,12 @@ const parseCompressionPayload = (
   // The 2.x label was informational and could be empty. Retain that reader
   // behavior only for marker-based legacy payloads.
   return {
-    payload: validateCompressionPayload(value, true),
+    payload: validateCompressionPayload(value, true, [
+      '__ls_compressed',
+      'algorithm',
+      'data',
+      'originalSize',
+    ]),
     versioned: false,
   };
 };

@@ -31,61 +31,108 @@ export const createPluginEnvelope = <T>(
   payload,
 });
 
-const hasOwn = (value: object, property: PropertyKey): boolean =>
-  Object.prototype.hasOwnProperty.call(value, property);
+const isRecord = (value: unknown): value is Record<PropertyKey, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+const ownDataDescriptor = (
+  value: object,
+  property: PropertyKey
+): PropertyDescriptor | undefined => {
+  const descriptor = Object.getOwnPropertyDescriptor(value, property);
+  return descriptor && 'value' in descriptor ? descriptor : undefined;
+};
+
+export const hasExactPayloadFields = (
+  value: unknown,
+  expected: readonly string[]
+): value is Record<string, unknown> => {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const keys = Reflect.ownKeys(value);
+  if (
+    keys.length !== expected.length ||
+    keys.some((key) => typeof key !== 'string' || !expected.includes(key))
+  ) {
+    return false;
+  }
+  return expected.every((key) => !!ownDataDescriptor(value, key)?.enumerable);
+};
+
+export const readOwnPayloadField = (
+  value: object,
+  property: PropertyKey
+): unknown => ownDataDescriptor(value, property)?.value;
+
+const invalidEnvelope = (
+  kind: PluginEnvelopeKind,
+  reason: string
+): never => {
+  throw createLocalSpaceError(
+    'DESERIALIZATION_FAILED',
+    `Invalid ${kind} plugin envelope: ${reason}.`,
+    {
+      payloadKind: kind,
+      payloadVersion: PLUGIN_ENVELOPE_VERSION,
+      reason,
+    }
+  );
+};
 
 export const readPluginEnvelope = <T>(
   value: unknown,
   expectedKind: PluginEnvelopeKind
 ): PluginEnvelopeReadResult<T> => {
-  if (!value || typeof value !== 'object') {
+  if (!isRecord(value)) {
     return { matched: false };
   }
 
-  const record = value as Record<string, unknown>;
-  if (!hasOwn(record, PLUGIN_ENVELOPE_PROPERTY)) {
+  const record = value;
+  const headerDescriptor = ownDataDescriptor(
+    record,
+    PLUGIN_ENVELOPE_PROPERTY
+  );
+  if (!headerDescriptor || !isRecord(headerDescriptor.value)) {
     return { matched: false };
   }
 
-  const header = record[PLUGIN_ENVELOPE_PROPERTY];
-  if (!header || typeof header !== 'object') {
+  const headerRecord = headerDescriptor.value;
+  if (
+    readOwnPayloadField(headerRecord, 'namespace') !==
+    PLUGIN_ENVELOPE_NAMESPACE
+  ) {
+    return { matched: false };
+  }
+  if (readOwnPayloadField(headerRecord, 'kind') !== expectedKind) {
     return { matched: false };
   }
 
-  const headerRecord = header as Record<string, unknown>;
-  if (headerRecord.namespace !== PLUGIN_ENVELOPE_NAMESPACE) {
-    return { matched: false };
-  }
-  if (headerRecord.kind !== expectedKind) {
-    return { matched: false };
-  }
-
-  if (headerRecord.version !== PLUGIN_ENVELOPE_VERSION) {
+  const version = readOwnPayloadField(headerRecord, 'version');
+  if (version !== PLUGIN_ENVELOPE_VERSION) {
     throw createLocalSpaceError(
       'DESERIALIZATION_FAILED',
       `Unsupported ${expectedKind} plugin envelope version.`,
       {
         payloadKind: expectedKind,
-        payloadVersion: headerRecord.version,
+        payloadVersion: version,
         supportedPayloadVersions: [PLUGIN_ENVELOPE_VERSION],
       }
     );
   }
-  if (!hasOwn(record, 'payload')) {
-    throw createLocalSpaceError(
-      'DESERIALIZATION_FAILED',
-      `Invalid ${expectedKind} plugin envelope: missing payload.`,
-      {
-        payloadKind: expectedKind,
-        payloadVersion: PLUGIN_ENVELOPE_VERSION,
-      }
-    );
+  if (
+    !hasExactPayloadFields(record, [PLUGIN_ENVELOPE_PROPERTY, 'payload']) ||
+    !hasExactPayloadFields(headerRecord, ['namespace', 'kind', 'version'])
+  ) {
+    return invalidEnvelope(expectedKind, 'invalid envelope shape');
   }
 
-  return { matched: true, payload: record.payload as T };
+  return {
+    matched: true,
+    payload: readOwnPayloadField(record, 'payload') as T,
+  };
 };
 
 export const hasOwnPayloadField = (
   value: object,
   property: PropertyKey
-): boolean => hasOwn(value, property);
+): boolean => !!ownDataDescriptor(value, property)?.enumerable;

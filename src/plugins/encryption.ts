@@ -9,7 +9,9 @@ import { createLocalSpaceError, toLocalSpaceError } from '../errors.js';
 import serializer from '../utils/serializer.js';
 import {
   createPluginEnvelope,
+  hasExactPayloadFields,
   hasOwnPayloadField,
+  readOwnPayloadField,
   readPluginEnvelope,
   type PluginEnvelopeV1,
 } from '../core/plugin-envelope.js';
@@ -64,10 +66,6 @@ type EncryptedPayloadBody = {
   algorithm: string;
   iv: string;
   data: string;
-};
-
-type LegacyEncryptedPayload = EncryptedPayloadBody & {
-  __ls_encrypted: true;
 };
 
 type VersionedEncryptedPayload = PluginEnvelopeV1<EncryptedPayloadBody>;
@@ -273,35 +271,53 @@ const importKey = async (
   return validateCryptoKey(derived, algorithmName, importedUsages);
 };
 
-const validateEncryptedPayload = (value: unknown): EncryptedPayloadBody => {
-  const payload = value as Partial<EncryptedPayloadBody>;
+const validateEncryptedPayload = (
+  value: unknown,
+  expectedFields: readonly string[]
+): EncryptedPayloadBody => {
+  const algorithm =
+    value && typeof value === 'object'
+      ? readOwnPayloadField(value, 'algorithm')
+      : undefined;
+  const iv =
+    value && typeof value === 'object'
+      ? readOwnPayloadField(value, 'iv')
+      : undefined;
+  const data =
+    value && typeof value === 'object'
+      ? readOwnPayloadField(value, 'data')
+      : undefined;
   if (
-    !payload ||
-    typeof payload !== 'object' ||
-    !SUPPORTED_AES_ALGORITHMS.has(payload.algorithm ?? '') ||
-    !isCanonicalBase64(payload.iv) ||
-    !isCanonicalBase64(payload.data)
+    !hasExactPayloadFields(value, expectedFields) ||
+    typeof algorithm !== 'string' ||
+    !SUPPORTED_AES_ALGORITHMS.has(algorithm) ||
+    !isCanonicalBase64(iv) ||
+    !isCanonicalBase64(data)
   ) {
     throw createLocalSpaceError(
       'DESERIALIZATION_FAILED',
       'Failed to decrypt payload: invalid or unsupported encrypted payload.',
-      { payloadAlgorithm: payload.algorithm }
+      { payloadAlgorithm: algorithm }
     );
   }
 
-  return payload as EncryptedPayloadBody;
+  return { algorithm, iv, data };
 };
 
 const parseEncryptedPayload = (value: unknown): EncryptedPayloadBody | null => {
   const envelope = readPluginEnvelope<unknown>(value, 'encryption');
   if (envelope.matched) {
-    return validateEncryptedPayload(envelope.payload);
+    return validateEncryptedPayload(envelope.payload, [
+      'algorithm',
+      'iv',
+      'data',
+    ]);
   }
 
   if (
     !value ||
     typeof value !== 'object' ||
-    (value as Partial<LegacyEncryptedPayload>).__ls_encrypted !== true
+    readOwnPayloadField(value, '__ls_encrypted') !== true
   ) {
     return null;
   }
@@ -313,7 +329,12 @@ const parseEncryptedPayload = (value: unknown): EncryptedPayloadBody | null => {
     return null;
   }
 
-  return validateEncryptedPayload(value);
+  return validateEncryptedPayload(value, [
+    '__ls_encrypted',
+    'algorithm',
+    'iv',
+    'data',
+  ]);
 };
 
 type EncryptionPluginMode = 'gcm' | 'legacy-migration';

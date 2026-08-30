@@ -12,7 +12,8 @@
   side effects.
 - Added collision-safe StoredRecord v1 encoding for every new logical value,
   while retaining readers for unwrapped 2.x values and legacy built-in-plugin
-  payloads. Unknown record and envelope versions fail explicitly.
+  payloads. Unknown versions and non-canonical envelope/payload shapes fail
+  explicitly without invoking persisted accessors.
 - Added immutable construction-scoped driver definitions, private per-selection
   driver sessions, and the explicit realm-wide `registerDriver()` API.
 - Added frozen post-readiness driver capabilities for transactions, atomic

@@ -189,6 +189,16 @@ exact-shape value before deploying the bridge reader. Every value written by
 3.0—including that exact application shape—is collision-safe because 3.0 wraps
 it once and decodes exactly one layer.
 
+The same audit applies to raw pre-3.0 application values that exactly match a
+complete built-in plugin envelope or a legacy marker payload
+(`__ls_ttl`/`__ls_compressed`/`__ls_encrypted` plus that format's full field
+set). A 3.0 reader cannot distinguish such an unwrapped historical value from
+plugin metadata. Partial lookalikes remain application data; recognized but
+malformed or extended metadata fails closed rather than being guessed. Migrate
+any exact collision through raw driver access before enabling the matching
+built-in plugin. New 3.0 application values are protected by the outer core
+StoredRecord.
+
 ## Migrate transactions
 
 The 2.1 runner allowed ordinary instance operations while a driver transaction

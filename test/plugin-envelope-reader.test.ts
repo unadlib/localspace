@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import localspace, {
   compressionPlugin,
   encryptionPlugin,
@@ -112,6 +112,148 @@ describe('versioned plugin envelope reader', () => {
         'compression'
       )
     ).toThrowError(expect.objectContaining({ code: 'DESERIALIZATION_FAILED' }));
+  });
+
+  it('rejects extended envelope shapes without invoking accessors', () => {
+    const extraOuter = {
+      ...envelope('ttl', { data: 'value', expiresAt: 123 }),
+      applicationField: true,
+    };
+    expect(() => readPluginEnvelope(extraOuter, 'ttl')).toThrowError(
+      expect.objectContaining({
+        code: 'DESERIALIZATION_FAILED',
+        details: expect.objectContaining({
+          payloadKind: 'ttl',
+          reason: 'invalid envelope shape',
+        }),
+      })
+    );
+
+    const extraHeader = envelope('ttl', { data: 'value', expiresAt: 123 }) as
+      PluginEnvelopeV1<unknown> & {
+        __localspace__: PluginEnvelopeV1<unknown>['__localspace__'] & {
+          applicationField: boolean;
+        };
+      };
+    extraHeader.__localspace__.applicationField = true;
+    expect(() => readPluginEnvelope(extraHeader, 'ttl')).toThrowError(
+      expect.objectContaining({ code: 'DESERIALIZATION_FAILED' })
+    );
+
+    const payloadGetter = vi.fn(() => ({ data: 'secret', expiresAt: 123 }));
+    const accessorEnvelope = {
+      __localspace__: {
+        namespace: PLUGIN_ENVELOPE_NAMESPACE,
+        kind: 'ttl',
+        version: PLUGIN_ENVELOPE_VERSION,
+      },
+    } as Record<string, unknown>;
+    Object.defineProperty(accessorEnvelope, 'payload', {
+      enumerable: true,
+      get: payloadGetter,
+    });
+
+    expect(() => readPluginEnvelope(accessorEnvelope, 'ttl')).toThrowError(
+      expect.objectContaining({ code: 'DESERIALIZATION_FAILED' })
+    );
+    expect(payloadGetter).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'versioned TTL',
+      ttlPlugin(),
+      envelope('ttl', {
+        data: 'value',
+        expiresAt: Date.now() + 60_000,
+        applicationField: true,
+      }),
+    ],
+    [
+      'legacy TTL',
+      ttlPlugin(),
+      {
+        __ls_ttl: true,
+        data: 'value',
+        expiresAt: Date.now() + 60_000,
+        applicationField: true,
+      },
+    ],
+    [
+      'versioned compression',
+      compressionPlugin(),
+      envelope('compression', {
+        algorithm: 'lz-string',
+        data: 'AAAA',
+        originalSize: 1,
+        applicationField: true,
+      }),
+    ],
+    [
+      'legacy compression',
+      compressionPlugin(),
+      {
+        __ls_compressed: true,
+        algorithm: 'lz-string',
+        data: 'AAAA',
+        originalSize: 1,
+        applicationField: true,
+      },
+    ],
+    [
+      'versioned encryption',
+      encryptionPlugin({ key: '0123456789abcdef0123456789abcdef' }),
+      envelope('encryption', {
+        algorithm: 'AES-GCM',
+        iv: 'AAAAAAAAAAAAAAAA',
+        data: 'AAAA',
+        applicationField: true,
+      }),
+    ],
+    [
+      'legacy encryption',
+      encryptionPlugin({ key: '0123456789abcdef0123456789abcdef' }),
+      {
+        __ls_encrypted: true,
+        algorithm: 'AES-GCM',
+        iv: 'AAAAAAAAAAAAAAAA',
+        data: 'AAAA',
+        applicationField: true,
+      },
+    ],
+  ])('rejects an extended %s payload without mutating it', async (
+    label,
+    plugin,
+    malformed
+  ) => {
+    const { store, raw } = await createStorePair(
+      `extended-${String(label).replaceAll(' ', '-')}`,
+      plugin
+    );
+    await raw.setItem('malformed', malformed);
+
+    await expect(store.getItem('malformed')).rejects.toMatchObject({
+      code: 'DESERIALIZATION_FAILED',
+    });
+    await expect(raw.getItem('malformed')).resolves.toEqual(malformed);
+  });
+
+  it('does not invoke accessors while validating a recognized payload', async () => {
+    const expiresAtGetter = vi.fn(() => Date.now() + 60_000);
+    const payload = { data: 'secret' } as Record<string, unknown>;
+    Object.defineProperty(payload, 'expiresAt', {
+      enumerable: true,
+      get: expiresAtGetter,
+    });
+
+    await expect(
+      ttlPlugin().afterGet!(
+        'accessor',
+        envelope('ttl', payload) as never,
+        pluginReadContext
+      )
+    ).rejects.toMatchObject({ code: 'DESERIALIZATION_FAILED' });
+    expect(expiresAtGetter).not.toHaveBeenCalled();
   });
 
   it('writes versioned TTL payloads and retains the legacy reader', async () => {

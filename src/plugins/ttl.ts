@@ -8,7 +8,9 @@ import { normalizeBatchEntries } from '../utils/helpers.js';
 import { createLocalSpaceError, toLocalSpaceError } from '../errors.js';
 import {
   createPluginEnvelope,
+  hasExactPayloadFields,
   hasOwnPayloadField,
+  readOwnPayloadField,
   readPluginEnvelope,
 } from '../core/plugin-envelope.js';
 import {
@@ -52,10 +54,6 @@ type TtlPayloadBody<T> = {
   expiresAt: number;
 };
 
-type LegacyTtlPayload<T> = TtlPayloadBody<T> & {
-  __ls_ttl: true;
-};
-
 const TTL_METADATA_KEY = '__localspace_ttl_metadata';
 
 const invalidTtlPayload = () =>
@@ -67,28 +65,38 @@ const invalidTtlPayload = () =>
 const validateVersionedTtlPayload = (
   value: unknown
 ): TtlPayloadBody<unknown> => {
-  const payload = value as Partial<TtlPayloadBody<unknown>>;
+  const expiresAt =
+    value && typeof value === 'object'
+      ? readOwnPayloadField(value, 'expiresAt')
+      : undefined;
   if (
-    !payload ||
-    typeof payload !== 'object' ||
-    !hasOwnPayloadField(payload, 'data') ||
-    typeof payload.expiresAt !== 'number' ||
-    !Number.isFinite(payload.expiresAt)
+    !hasExactPayloadFields(value, ['data', 'expiresAt']) ||
+    typeof expiresAt !== 'number' ||
+    !Number.isFinite(expiresAt)
   ) {
     throw invalidTtlPayload();
   }
-  return payload as TtlPayloadBody<unknown>;
+  return {
+    data: readOwnPayloadField(value, 'data'),
+    expiresAt,
+  };
 };
 
 const validateLegacyTtlPayload = (value: unknown): TtlPayloadBody<unknown> => {
-  const payload = value as Partial<TtlPayloadBody<unknown>>;
+  const hasData =
+    !!value && typeof value === 'object' && hasOwnPayloadField(value, 'data');
+  const expectedFields = hasData
+    ? ['__ls_ttl', 'data', 'expiresAt']
+    : ['__ls_ttl', 'expiresAt'];
+  const expiresAt =
+    value && typeof value === 'object'
+      ? readOwnPayloadField(value, 'expiresAt')
+      : undefined;
   if (
-    !payload ||
-    typeof payload !== 'object' ||
-    !hasOwnPayloadField(payload, 'expiresAt') ||
-    typeof payload.expiresAt !== 'number' ||
-    (!Number.isFinite(payload.expiresAt) &&
-      payload.expiresAt !== Number.POSITIVE_INFINITY)
+    !hasExactPayloadFields(value, expectedFields) ||
+    typeof expiresAt !== 'number' ||
+    (!Number.isFinite(expiresAt) &&
+      expiresAt !== Number.POSITIVE_INFINITY)
   ) {
     throw invalidTtlPayload();
   }
@@ -96,8 +104,8 @@ const validateLegacyTtlPayload = (value: unknown): TtlPayloadBody<unknown> => {
   // JSON serialization omits an own `data: undefined` field. Legacy 2.x
   // readers treated that representation as a valid TTL-wrapped undefined.
   return {
-    data: payload.data,
-    expiresAt: payload.expiresAt,
+    data: hasData ? readOwnPayloadField(value, 'data') : undefined,
+    expiresAt,
   };
 };
 
@@ -110,7 +118,7 @@ const parseTtlPayload = (value: unknown): TtlPayloadBody<unknown> | null => {
   if (
     !value ||
     typeof value !== 'object' ||
-    (value as Partial<LegacyTtlPayload<unknown>>).__ls_ttl !== true
+    readOwnPayloadField(value, '__ls_ttl') !== true
   ) {
     return null;
   }
