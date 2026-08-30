@@ -1,6 +1,5 @@
 export type LocalSpaceDeprecation =
   | 'react-native-auto-detection'
-  | 'storage-bucket-fallback'
   | 'weak-memory-transaction';
 
 type DeprecationState = {

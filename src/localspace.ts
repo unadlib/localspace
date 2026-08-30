@@ -658,6 +658,12 @@ export class LocalSpace implements LocalSpaceInstance {
               if (this._closed) {
                 throw this._closedError('ready');
               }
+              if (
+                this.#config.bucket?.name &&
+                driverName === DefaultDrivers.INDEXEDDB._driver
+              ) {
+                throw error;
+              }
             }
           }
 

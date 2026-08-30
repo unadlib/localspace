@@ -157,50 +157,92 @@ describe('IndexedDB shared context lifecycle', () => {
     expect(testHooks.getDbContext(secondDbInfo)).toBeUndefined();
   });
 
-  it('uses the default context identity after a bucket fallback', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  it('rejects a failed bucket open without falling back to another driver', async () => {
     const restoreBuckets = installStorageBuckets(async () => {
       throw new Error('bucket unavailable');
     });
-    const name = uniqueName('bucket-fallback-context');
+    const name = uniqueName('bucket-open-failure');
     const bucketInstance = localspace.createInstance({
       name,
       storeName: 'store',
       bucket: { name: 'requested-bucket' },
+      driver: [localspace.INDEXEDDB, localspace.LOCALSTORAGE],
       prewarmTransactions: false,
     });
-    const defaultInstance = localspace.createInstance({
-      name,
-      storeName: 'store',
-      prewarmTransactions: false,
-    });
+    const defaultOpen = vi.spyOn(indexedDB, 'open');
 
     try {
-      await bucketInstance.setDriver([bucketInstance.INDEXEDDB]);
-      await defaultInstance.setDriver([defaultInstance.INDEXEDDB]);
-      await bucketInstance.ready();
-      await defaultInstance.ready();
-
-      expect(bucketInstance._dbInfo?.idbContextId).toBe('default');
-      expect(testHooks.getDbContext(bucketInstance._dbInfo!)).toBe(
-        testHooks.getDbContext(defaultInstance._dbInfo!)
-      );
-      const sessions =
-        testHooks.getDbContext(bucketInstance._dbInfo!)?.forages ?? [];
-      expect(sessions).toHaveLength(2);
-      expect(sessions[0]).not.toBe(bucketInstance);
-      expect(sessions[1]).not.toBe(defaultInstance);
-      expect(sessions[0]).not.toBe(sessions[1]);
+      await expect(bucketInstance.ready()).rejects.toMatchObject({
+        code: 'DRIVER_UNAVAILABLE',
+        details: {
+          bucketName: 'requested-bucket',
+          operation: 'initialize',
+          reason: 'storage-bucket-open-failed',
+        },
+      });
+      expect(defaultOpen).not.toHaveBeenCalled();
+      expect(bucketInstance.driver()).toBe(bucketInstance.INDEXEDDB);
     } finally {
       await bucketInstance.close();
-      await defaultInstance.close();
       restoreBuckets();
     }
+  });
 
-    const cleanup = localspace.createInstance({ name, storeName: 'store' });
-    await cleanup.setDriver([cleanup.INDEXEDDB]);
-    await cleanup.dropInstance();
-    await cleanup.close();
+  it('rejects when the Storage Buckets API is unavailable', async () => {
+    const target = navigator as Navigator & { storageBuckets?: unknown };
+    const descriptor = Object.getOwnPropertyDescriptor(
+      target,
+      'storageBuckets'
+    );
+    delete target.storageBuckets;
+    const instance = localspace.createInstance({
+      name: uniqueName('bucket-api-unavailable'),
+      storeName: 'store',
+      bucket: { name: 'requested-bucket' },
+      driver: [localspace.INDEXEDDB, localspace.LOCALSTORAGE],
+      prewarmTransactions: false,
+    });
+    const defaultOpen = vi.spyOn(indexedDB, 'open');
+
+    try {
+      await expect(instance.ready()).rejects.toMatchObject({
+        code: 'DRIVER_UNAVAILABLE',
+        details: {
+          reason: 'storage-buckets-unavailable',
+        },
+      });
+      expect(defaultOpen).not.toHaveBeenCalled();
+    } finally {
+      await instance.close();
+      if (descriptor) {
+        Object.defineProperty(target, 'storageBuckets', descriptor);
+      }
+    }
+  });
+
+  it('rejects a bucket that does not expose IndexedDB', async () => {
+    const restoreBuckets = installStorageBuckets(async () => ({}));
+    const instance = localspace.createInstance({
+      name: uniqueName('bucket-without-indexeddb'),
+      storeName: 'store',
+      bucket: { name: 'requested-bucket' },
+      driver: [localspace.INDEXEDDB, localspace.LOCALSTORAGE],
+      prewarmTransactions: false,
+    });
+    const defaultOpen = vi.spyOn(indexedDB, 'open');
+
+    try {
+      await expect(instance.ready()).rejects.toMatchObject({
+        code: 'DRIVER_UNAVAILABLE',
+        details: {
+          reason: 'storage-bucket-indexeddb-unavailable',
+        },
+      });
+      expect(defaultOpen).not.toHaveBeenCalled();
+    } finally {
+      await instance.close();
+      restoreBuckets();
+    }
   });
 
   it('rejects the matching bucket readiness when object-store drop fails', async () => {

@@ -2,10 +2,6 @@ export {};
 
 declare global {
   var __DEV__: boolean;
-  var webkitIndexedDB: Window['indexedDB'];
-  var mozIndexedDB: Window['indexedDB'];
-  var OIndexedDB: Window['indexedDB'];
-  var msIndexedDB: Window['indexedDB'];
 
   interface StorageBucketOptions {
     durability?: 'relaxed' | 'strict';

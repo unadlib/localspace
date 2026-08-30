@@ -62,74 +62,44 @@ describe('helper utilities', () => {
       expect(blob.size).toBe(0);
     });
 
-    it('should handle fallback for legacy browsers', () => {
-      // Save original Blob constructor
+    it('does not invoke legacy BlobBuilder fallbacks', () => {
       const OriginalBlob = globalThis.Blob;
-
-      // Mock Blob constructor to throw TypeError on first call
-      let callCount = 0;
-      const mockBlobBuilder = function(this: any) {
-        this.parts = [];
-        this.append = function(part: BlobPart) {
-          this.parts.push(part);
-        };
-        this.getBlob = function(type?: string) {
-          // Use original Blob for the actual blob creation
-          return new OriginalBlob(this.parts, { type });
-        };
-      };
-
-      globalThis.Blob = vi.fn().mockImplementation(function(parts: BlobPart[], options?: BlobPropertyBag) {
-        callCount++;
-        if (callCount === 1) {
-          const error = new Error('TypeError') as any;
-          error.name = 'TypeError';
-          throw error;
-        }
-        return new OriginalBlob(parts, options);
-      }) as any;
-
-      (globalThis as any).BlobBuilder = mockBlobBuilder;
+      const legacyBuilder = vi.fn();
+      globalThis.Blob = vi.fn().mockImplementation(() => {
+        const error = new Error('TypeError');
+        error.name = 'TypeError';
+        throw error;
+      }) as typeof Blob;
+      (globalThis as Record<string, unknown>).BlobBuilder = legacyBuilder;
 
       try {
-        const blob = createBlob(['test'], { type: 'text/plain' });
-        expect(blob).toBeInstanceOf(OriginalBlob);
+        expect(() => createBlob(['test'])).toThrowError(
+          expect.objectContaining({ code: 'BLOB_UNSUPPORTED' })
+        );
+        expect(legacyBuilder).not.toHaveBeenCalled();
       } finally {
-        // Restore original Blob
         globalThis.Blob = OriginalBlob;
-        delete (globalThis as any).BlobBuilder;
+        delete (globalThis as Record<string, unknown>).BlobBuilder;
       }
     });
 
-    it('should throw error when no Blob support available', () => {
-      // Save original Blob constructor
+    it('normalizes a missing modern Blob implementation', () => {
       const OriginalBlob = globalThis.Blob;
-
-      // Mock Blob constructor to always throw
       globalThis.Blob = vi.fn().mockImplementation(() => {
-        const error = new Error('TypeError') as any;
+        const error = new Error('TypeError');
         error.name = 'TypeError';
         throw error;
-      }) as any;
-
-      // Ensure no fallback builders exist
-      const builders = ['BlobBuilder', 'MSBlobBuilder', 'MozBlobBuilder', 'WebKitBlobBuilder'];
-      const savedBuilders: any = {};
-      builders.forEach(builder => {
-        savedBuilders[builder] = (globalThis as any)[builder];
-        delete (globalThis as any)[builder];
-      });
+      }) as typeof Blob;
 
       try {
-        expect(() => createBlob(['test'])).toThrow('Blob constructor not supported');
+        expect(() => createBlob(['test'])).toThrowError(
+          expect.objectContaining({
+            code: 'BLOB_UNSUPPORTED',
+            message: 'Blob constructor not supported',
+          })
+        );
       } finally {
-        // Restore everything
         globalThis.Blob = OriginalBlob;
-        builders.forEach(builder => {
-          if (savedBuilders[builder]) {
-            (globalThis as any)[builder] = savedBuilders[builder];
-          }
-        });
       }
     });
 
@@ -150,5 +120,4 @@ describe('helper utilities', () => {
       }
     });
   });
-
 });

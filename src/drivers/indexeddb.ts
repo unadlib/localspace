@@ -22,7 +22,6 @@ import {
   chunkArray,
 } from '../utils/helpers.js';
 import serializer from '../utils/serializer.js';
-import { warnDeprecation } from '../utils/deprecations.js';
 import { markDriverTransactionScope } from '../core/transaction-scope.js';
 
 type IndexedDBDriverContext = LocalSpaceInstance &
@@ -167,20 +166,7 @@ interface DeferredOperation {
 }
 
 function getDefaultIDB(): IDBFactory | null {
-  if (typeof indexedDB !== 'undefined') {
-    return indexedDB;
-  }
-  if (typeof window !== 'undefined') {
-    return (
-      window.indexedDB ||
-      window.webkitIndexedDB ||
-      window.mozIndexedDB ||
-      window.OIndexedDB ||
-      window.msIndexedDB ||
-      null
-    );
-  }
-  return null;
+  return typeof indexedDB !== 'undefined' ? indexedDB : null;
 }
 
 function getIDB(dbInfo?: DbInfo): IDBFactory | null {
@@ -229,42 +215,59 @@ async function resolveIdbBackend(
   config: LocalSpaceConfig
 ): Promise<ResolvedIdbBackend | null> {
   if (config.bucket?.name) {
-    const nav =
-      typeof navigator !== 'undefined' ? (navigator as Navigator) : undefined;
+    const bucketName = config.bucket.name;
+    const nav = getNavigatorObject();
     const buckets = nav?.storageBuckets;
 
-    if (buckets && typeof buckets.open === 'function') {
-      try {
-        const bucket = await buckets.open(config.bucket.name, {
-          durability: config.bucket.durability,
-          persisted: config.bucket.persisted,
-        });
-        if (bucket.indexedDB) {
-          return {
-            factory: bucket.indexedDB,
-            contextId: `bucket:${config.bucket.name}`,
-          };
+    const failureDetails = {
+      driver: DRIVER_NAME,
+      operation: 'initialize',
+      bucketName,
+    };
+    if (!buckets || typeof buckets.open !== 'function') {
+      throw createLocalSpaceError(
+        'DRIVER_UNAVAILABLE',
+        `Storage Bucket "${bucketName}" was requested, but the Storage Buckets API is unavailable.`,
+        {
+          ...failureDetails,
+          reason: 'storage-buckets-unavailable',
         }
-        warnDeprecation(
-          'storage-bucket-fallback',
-          'a requested Storage Bucket did not expose IndexedDB and fell back to the default backend; 3.0 rejects instead of falling back.'
-        );
-      } catch (error) {
-        console.warn(
-          `Failed to open storage bucket "${config.bucket.name}", falling back to default bucket.`,
-          error
-        );
-        warnDeprecation(
-          'storage-bucket-fallback',
-          'a requested Storage Bucket could not be opened and fell back to the default backend; 3.0 rejects instead of falling back.'
-        );
-      }
-    } else {
-      warnDeprecation(
-        'storage-bucket-fallback',
-        'Storage Buckets are unavailable, so the requested bucket fell back to the default backend; 3.0 rejects instead of falling back.'
       );
     }
+
+    let bucket: StorageBucket;
+    try {
+      bucket = await buckets.open(bucketName, {
+        durability: config.bucket.durability,
+        persisted: config.bucket.persisted,
+      });
+    } catch (error) {
+      throw toLocalSpaceError(
+        error,
+        'DRIVER_UNAVAILABLE',
+        `Failed to open Storage Bucket "${bucketName}".`,
+        {
+          ...failureDetails,
+          reason: 'storage-bucket-open-failed',
+        }
+      );
+    }
+
+    if (!bucket.indexedDB) {
+      throw createLocalSpaceError(
+        'DRIVER_UNAVAILABLE',
+        `Storage Bucket "${bucketName}" does not expose IndexedDB.`,
+        {
+          ...failureDetails,
+          reason: 'storage-bucket-indexeddb-unavailable',
+        }
+      );
+    }
+
+    return {
+      factory: bucket.indexedDB,
+      contextId: `bucket:${bucketName}`,
+    };
   }
 
   const factory = getDefaultIDB();

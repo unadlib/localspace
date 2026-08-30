@@ -37,45 +37,6 @@ describe('migration deprecation warnings', () => {
     expect(warnings()).toEqual([]);
   });
 
-  it('warns when a requested Storage Bucket falls back', async () => {
-    const target = navigator as Navigator & {
-      storageBuckets?: { open: () => Promise<never> };
-    };
-    const descriptor = Object.getOwnPropertyDescriptor(
-      target,
-      'storageBuckets'
-    );
-    Object.defineProperty(target, 'storageBuckets', {
-      configurable: true,
-      value: {
-        open: async () => {
-          throw new Error('bucket unavailable');
-        },
-      },
-    });
-    const instance = new LocalSpace({
-      name: `bucket-deprecation-${Math.random().toString(36).slice(2)}`,
-      storeName: 'store',
-      bucket: { name: 'requested-bucket' },
-    });
-
-    try {
-      await instance.setDriver([instance.INDEXEDDB]);
-      await instance.ready();
-    } finally {
-      await instance.close();
-      if (descriptor) {
-        Object.defineProperty(target, 'storageBuckets', descriptor);
-      } else {
-        delete target.storageBuckets;
-      }
-    }
-
-    expect(warnings()).toContain(
-      '[localspace] Deprecation: a requested Storage Bucket could not be opened and fell back to the default backend; 3.0 rejects instead of falling back.'
-    );
-  });
-
   it('accepts matching batch and single hooks without a migration warning', () => {
     const plugin: LocalSpacePlugin = {
       name: 'ttl',

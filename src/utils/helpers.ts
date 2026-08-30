@@ -57,16 +57,7 @@ export function extend<T extends object>(
   return target;
 }
 
-/**
- * Create a Blob (with fallback for older browsers)
- */
-type LegacyBlobBuilderConstructor = {
-  new (): {
-    append(part: BlobPart): void;
-    getBlob(type?: string): Blob;
-  };
-};
-
+/** Create a Blob on the supported modern browser surface. */
 export function createBlob(
   parts: BlobPart[],
   properties?: BlobPropertyBag
@@ -77,32 +68,10 @@ export function createBlob(
     if (!(error instanceof Error) || error.name !== 'TypeError') {
       throw error;
     }
-    // Fallback for older browsers (though we're targeting modern ones)
-    const legacyWindow = window as typeof window & {
-      BlobBuilder?: LegacyBlobBuilderConstructor;
-      MSBlobBuilder?: LegacyBlobBuilderConstructor;
-      MozBlobBuilder?: LegacyBlobBuilderConstructor;
-      WebKitBlobBuilder?: LegacyBlobBuilderConstructor;
-    };
-
-    const BlobBuilder =
-      legacyWindow.BlobBuilder ||
-      legacyWindow.MSBlobBuilder ||
-      legacyWindow.MozBlobBuilder ||
-      legacyWindow.WebKitBlobBuilder;
-
-    if (!BlobBuilder) {
-      throw createLocalSpaceError(
-        'BLOB_UNSUPPORTED',
-        'Blob constructor not supported'
-      );
-    }
-
-    const builder = new BlobBuilder();
-    for (const part of parts) {
-      builder.append(part);
-    }
-    return builder.getBlob(properties?.type);
+    throw createLocalSpaceError(
+      'BLOB_UNSUPPORTED',
+      'Blob constructor not supported'
+    );
   }
 }
 
