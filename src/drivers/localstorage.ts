@@ -508,6 +508,13 @@ const localStorageWrapper: Driver = {
   _driver: 'localStorageWrapper',
   _initStorage,
   _support: async () => isLocalStorageValid(),
+  _capabilities: {
+    transactions: false,
+    atomicBatch: false,
+    dropInstance: true,
+    persistent: true,
+    storageBuckets: false,
+  },
   iterate,
   getItem,
   getItems,

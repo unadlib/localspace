@@ -668,6 +668,13 @@ const reactNativeAsyncStorageWrapper: Driver = {
     const detected = await resolveRuntimeAsyncStorage();
     return detected !== null;
   },
+  _capabilities: {
+    transactions: false,
+    atomicBatch: false,
+    dropInstance: true,
+    persistent: true,
+    storageBuckets: false,
+  },
   iterate,
   getItem,
   getItems,

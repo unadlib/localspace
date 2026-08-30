@@ -174,6 +174,16 @@ export interface DriverRegistrationOptions {
   overwrite?: boolean;
 }
 
+export interface LocalSpaceCapabilities {
+  readonly transactions: boolean;
+  readonly atomicBatch: boolean;
+  readonly dropInstance: boolean;
+  readonly persistent: boolean;
+  readonly storageBuckets: boolean;
+}
+
+export type DriverCapabilities = Partial<LocalSpaceCapabilities>;
+
 /**
  * Driver interface that all storage drivers must implement
  */
@@ -211,6 +221,18 @@ export interface Driver {
    * Check if driver is supported (can be boolean or function)
    */
   _support?: boolean | (() => boolean | Promise<boolean>);
+
+  /**
+   * Declarative guarantees for a selected driver session. Omitted fields use
+   * conservative defaults; a synchronous resolver may inspect the initialized
+   * session and its configuration.
+   */
+  _capabilities?:
+    | DriverCapabilities
+    | ((
+        this: LocalSpaceInstance,
+        config: Readonly<LocalSpaceConfig>
+      ) => DriverCapabilities);
 
   /**
    * Iterate through all items
@@ -416,6 +438,12 @@ export interface LocalSpaceInstance {
    * Check if driver is supported
    */
   supports(driverName: string): boolean;
+
+  /**
+   * Return the frozen guarantees of the selected, initialized driver.
+   * Throws DRIVER_NOT_INITIALIZED before ready() has completed.
+   */
+  capabilities(): LocalSpaceCapabilities;
 
   /**
    * Iterate through items

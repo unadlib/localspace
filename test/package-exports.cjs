@@ -159,6 +159,7 @@ async function main() {
   const esm = await import('localspace');
   assert.equal(typeof esm.LocalSpace, 'function');
   assert.equal(typeof esm.default?.setItem, 'function');
+  assert.equal(typeof esm.default?.capabilities, 'function');
   assert.equal(typeof esm.registerDriver, 'function');
   assert.equal('syncPlugin' in esm, false);
   assert.equal('quotaPlugin' in esm, false);

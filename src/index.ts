@@ -22,6 +22,8 @@ import type {
   StorageBinary,
   StorageValue,
   DriverRegistrationOptions,
+  DriverCapabilities,
+  LocalSpaceCapabilities,
 } from './types.js';
 
 // Create default instance
@@ -54,6 +56,8 @@ export type {
   StorageBinary,
   StorageValue,
   DriverRegistrationOptions,
+  DriverCapabilities,
+  LocalSpaceCapabilities,
 };
 export type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from './errors.js';
 export { LocalSpaceError } from './errors.js';

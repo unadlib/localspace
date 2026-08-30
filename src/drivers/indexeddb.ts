@@ -2112,6 +2112,14 @@ const asyncStorage: Driver = {
   _initStorage,
   _closeStorage,
   _support: isIndexedDBValid,
+  _capabilities: (config) => ({
+    transactions: true,
+    atomicBatch: !config.maxBatchSize,
+    dropInstance: true,
+    persistent: true,
+    storageBuckets:
+      typeof getNavigatorObject()?.storageBuckets?.open === 'function',
+  }),
   iterate,
   getItem,
   getItems,

@@ -12,6 +12,7 @@ import type {
   TransactionScope,
   PluginContext,
   PluginOperation,
+  LocalSpaceCapabilities,
 } from './types.js';
 import { extend, isArray, normalizeBatchEntries } from './utils/helpers.js';
 import {
@@ -43,6 +44,7 @@ import {
   DRIVER_OPERATIONS,
   type DriverOperation,
 } from './core/driver-contract.js';
+import { resolveDriverCapabilities } from './core/driver-capabilities.js';
 
 const DefaultDrivers: Record<'INDEXEDDB' | 'LOCALSTORAGE' | 'MEMORY', Driver> =
   {
@@ -133,7 +135,9 @@ type DriverClose = () => Promise<void>;
 type DriverSession = {
   driver: string;
   operations: Readonly<Record<DriverOperation, RawDriverMethod>>;
+  supportedOperations: ReadonlySet<DriverOperation>;
   initialize(): Promise<void>;
+  resolveCapabilities(): Readonly<LocalSpaceCapabilities>;
   close: DriverClose | null;
   syncFacade(): void;
 };
@@ -207,6 +211,7 @@ export class LocalSpace implements LocalSpaceInstance {
   private _closed = false;
   private _closePromise: Promise<void> | null = null;
   private _driverInitialized = false;
+  private _capabilitiesSnapshot: Readonly<LocalSpaceCapabilities> | null = null;
   private _activeDriverSession: DriverSession | null = null;
   private _pendingDriverCleanups: DriverCleanup[] = [];
   private _driverTransition: Promise<void> | null = null;
@@ -298,6 +303,14 @@ export class LocalSpace implements LocalSpaceInstance {
 
   dropInstance = (options?: LocalSpaceConfig): Promise<void> =>
     this._dispatchOperation('dropInstance', [options]);
+
+  capabilities = (): LocalSpaceCapabilities => {
+    this._assertOpen('capabilities');
+    if (!this._driverInitialized || !this._capabilitiesSnapshot) {
+      throw this._notInitializedError('capabilities');
+    }
+    return this._capabilitiesSnapshot;
+  };
 
   config(options: LocalSpaceConfig): true | Error | Promise<void>;
   config<K extends keyof LocalSpaceConfig>(
@@ -623,12 +636,14 @@ export class LocalSpace implements LocalSpaceInstance {
       const session = this._createDriverSession(driver);
       this._activeDriverSession = session;
       this._driverInitialized = false;
+      this._capabilitiesSnapshot = null;
       this._driver = driver._driver;
       setDriverToConfig();
 
       try {
         await session.initialize();
         session.syncFacade();
+        this._capabilitiesSnapshot = session.resolveCapabilities();
         this._driverInitialized = true;
       } catch (error) {
         if (session.close) {
@@ -647,6 +662,7 @@ export class LocalSpace implements LocalSpaceInstance {
           this._activeDriverSession = null;
         }
         this._driverInitialized = false;
+        this._capabilitiesSnapshot = null;
         this._dbInfo = null;
         throw error;
       }
@@ -821,9 +837,13 @@ export class LocalSpace implements LocalSpaceInstance {
     };
     const receiver = lifecycleScope.instance as DriverAugmentedInstance;
     const operations = {} as Record<DriverOperation, RawDriverMethod>;
+    const supportedOperations = new Set<DriverOperation>();
 
     for (const operation of DRIVER_OPERATIONS) {
       const configured = definition[operation] as RawDriverMethod | undefined;
+      if (typeof configured === 'function') {
+        supportedOperations.add(operation);
+      }
       const candidate: RawDriverMethod =
         typeof configured === 'function'
           ? (...args: unknown[]) => configured.apply(receiver, args)
@@ -849,6 +869,7 @@ export class LocalSpace implements LocalSpaceInstance {
     session = {
       driver: definition._driver,
       operations: Object.freeze(operations),
+      supportedOperations,
       initialize: () =>
         lifecycleScope
           .invoke('driver-init', () =>
@@ -858,6 +879,12 @@ export class LocalSpace implements LocalSpaceInstance {
             )
           )
           .finally(syncFacade),
+      resolveCapabilities: () =>
+        resolveDriverCapabilities(
+          definition,
+          receiver,
+          receiverContext.get('_config') as LocalSpaceConfig
+        ),
       close:
         typeof definition._closeStorage === 'function'
           ? () =>
@@ -884,6 +911,7 @@ export class LocalSpace implements LocalSpaceInstance {
       if (!this._driverInitialized || !session) {
         throw this._notInitializedError(operation);
       }
+      this._assertOperationSupported(session, operation);
 
       const original = session.operations[operation];
       let implementation: RawDriverMethod = original;
@@ -934,6 +962,39 @@ export class LocalSpace implements LocalSpaceInstance {
 
       return implementation(...args);
     }) as Promise<T>;
+  }
+
+  private _assertOperationSupported(
+    session: DriverSession,
+    operation: DriverOperation
+  ): void {
+    const capability =
+      operation === 'runTransaction'
+        ? 'transactions'
+        : operation === 'dropInstance'
+          ? 'dropInstance'
+          : undefined;
+    const capabilities = this._capabilitiesSnapshot;
+    const capabilityAvailable = capability
+      ? capabilities?.[capability] === true
+      : true;
+
+    if (session.supportedOperations.has(operation) && capabilityAvailable) {
+      return;
+    }
+
+    throw createLocalSpaceError(
+      'UNSUPPORTED_OPERATION',
+      `Method ${operation} is not supported by the current driver`,
+      {
+        driver: session.driver,
+        operation,
+        reason: session.supportedOperations.has(operation)
+          ? 'capability-disabled'
+          : 'driver-operation-unavailable',
+        ...(capability ? { capability } : {}),
+      }
+    );
   }
 
   _runTrackedOperation(
@@ -1586,6 +1647,7 @@ export class LocalSpace implements LocalSpaceInstance {
   private async _releaseActiveDriver(): Promise<void> {
     if (!this._driverInitialized) {
       this._activeDriverSession = null;
+      this._capabilitiesSnapshot = null;
       this._dbInfo = null;
       return;
     }
@@ -1597,6 +1659,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
     this._activeDriverSession = null;
     this._driverInitialized = false;
+    this._capabilitiesSnapshot = null;
     this._dbInfo = null;
   }
 

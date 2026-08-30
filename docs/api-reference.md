@@ -429,6 +429,57 @@ if (localspace.supports(localspace.INDEXEDDB)) {
 }
 ```
 
+### `capabilities(): LocalSpaceCapabilities`
+
+Returns the same frozen snapshot for the currently selected, initialized driver
+session. Call `await ready()` first; before initialization it throws
+`DRIVER_NOT_INITIALIZED`. Driver fallback or switching installs a new snapshot
+without changing any public method identity.
+
+```ts
+await localspace.ready();
+const capabilities = localspace.capabilities();
+
+if (capabilities.transactions) {
+  await localspace.runTransaction('readwrite', async (tx) => {
+    await tx.set('key', 'value');
+  });
+}
+```
+
+```ts
+interface LocalSpaceCapabilities {
+  readonly transactions: boolean;
+  readonly atomicBatch: boolean;
+  readonly dropInstance: boolean;
+  readonly persistent: boolean;
+  readonly storageBuckets: boolean;
+}
+```
+
+`atomicBatch: false` does not remove batch methods; it means the driver does not
+promise one all-or-nothing commit for an arbitrary batch. IndexedDB reports it
+only when batch chunking is disabled. `storageBuckets` reports runtime API
+availability for the IndexedDB driver, not that the current namespace is in a
+bucket.
+
+| Built-in driver           | transactions | atomicBatch        | dropInstance | persistent | storageBuckets   |
+| ------------------------- | ------------ | ------------------ | ------------ | ---------- | ---------------- |
+| IndexedDB                 | yes          | yes when unchunked | yes          | yes        | runtime-detected |
+| localStorage              | no           | no                 | yes          | yes        | no               |
+| Memory                    | yes          | no                 | yes          | no         | no               |
+| React Native AsyncStorage | no           | no                 | yes          | yes        | no               |
+
+Missing optional operations and explicitly disabled transaction/drop
+capabilities reject with `UNSUPPORTED_OPERATION` before plugin initialization,
+hooks, a transaction runner, or a driver operation can run.
+
+Custom drivers may declare conservative overrides with `_capabilities`, either
+as an object or a synchronous resolver invoked after driver initialization.
+LocalSpace snapshots and freezes object declarations without freezing the
+caller-owned metadata. `transactions: true`, `dropInstance: true`, and
+`atomicBatch: true` require the corresponding driver methods.
+
 React Native AsyncStorage is opt-in from a separate entry:
 
 ```ts

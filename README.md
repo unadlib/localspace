@@ -154,6 +154,24 @@ console.log(localspace.driver());
 // 'asyncStorage' | 'localStorageWrapper'
 ```
 
+After readiness, inspect the selected driver's frozen guarantees instead of
+inferring them from method presence:
+
+```ts
+await localspace.ready();
+const capabilities = localspace.capabilities();
+
+if (capabilities.transactions) {
+  await localspace.runTransaction('readwrite', async (tx) => {
+    await tx.set('key', 'value');
+  });
+}
+```
+
+The snapshot includes `transactions`, `atomicBatch`, `dropInstance`,
+`persistent`, and `storageBuckets`. Unsupported optional operations reject
+before plugins or the driver run; the facade method remains present and stable.
+
 ### In-Memory Fallback
 
 When browser persistent storage is unavailable (for example, cookies/site data are blocked), opt in to the memory driver explicitly:

@@ -4,6 +4,7 @@ import {
   OPTIONAL_DRIVER_OPERATIONS,
   REQUIRED_DRIVER_OPERATIONS,
 } from './driver-contract.js';
+import { snapshotCapabilityDeclaration } from './driver-capabilities.js';
 
 const REQUIRED_DRIVER_METHODS = [
   '_initStorage',
@@ -67,9 +68,19 @@ const cloneDriverDefinition = (driver: Driver): Readonly<Driver> => {
     throw complianceError(driver, '_support must be a boolean or function');
   }
 
+  const descriptors = Object.getOwnPropertyDescriptors(driver);
+  const capabilityDeclaration = snapshotCapabilityDeclaration(driver);
+  if (capabilityDeclaration !== undefined) {
+    descriptors._capabilities = {
+      configurable: true,
+      enumerable: descriptors._capabilities?.enumerable ?? true,
+      value: capabilityDeclaration,
+      writable: true,
+    };
+  }
   const snapshot = Object.create(
     Object.getPrototypeOf(driver),
-    Object.getOwnPropertyDescriptors(driver)
+    descriptors
   ) as Driver;
   return Object.freeze(snapshot);
 };

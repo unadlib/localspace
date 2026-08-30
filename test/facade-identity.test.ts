@@ -8,6 +8,7 @@ import {
 
 const PUBLIC_METHODS = [
   'clear',
+  'capabilities',
   'close',
   'config',
   'createInstance',

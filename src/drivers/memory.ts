@@ -477,6 +477,13 @@ const memoryStorageWrapper: Driver = {
   _driver: DRIVER_NAME,
   _initStorage,
   _support: true,
+  _capabilities: {
+    transactions: true,
+    atomicBatch: false,
+    dropInstance: true,
+    persistent: false,
+    storageBuckets: false,
+  },
   iterate,
   getItem,
   getItems,
