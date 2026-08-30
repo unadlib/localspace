@@ -43,6 +43,9 @@
   detached, deeply frozen snapshot and plugin registration locks at the first
   readiness/storage operation. Malformed policy, driver, and plugin shapes
   reject atomically instead of being silently coerced or failing during use.
+- Made structured and strict plugin teardown failures observable and retryable.
+  Other initialized plugins and the active driver still receive cleanup, while
+  a later lifecycle call retries only the plugin cleanup that failed.
 - Changed batch plugin execution to one hook form per plugin and phase: invoke
   the batch hook once when present, otherwise map the matching single hook.
   Priority ordering is preserved globally across both forms. Single-item
@@ -101,8 +104,8 @@
   TypeScript `sourcesContent`.
 - Added isolated ESM, CommonJS, React Native, declaration, forbidden-deep-import,
   bundled-compression, and mapped-stack consumer checks.
-- Reduced the certified artifact from 138 to 63 files, from 756,538 to 432,120
-  packed bytes, and from 3,387,413 to 1,929,372 unpacked bytes. Final budgets
+- Reduced the certified artifact from 138 to 63 files, from 756,538 to 446,246
+  packed bytes, and from 3,387,413 to 2,004,009 unpacked bytes. Final budgets
   are enforced mechanically.
 
 ### Migration
