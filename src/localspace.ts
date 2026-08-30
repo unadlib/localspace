@@ -270,7 +270,31 @@ export class LocalSpace implements LocalSpaceInstance {
   private readonly _driverRegistry = new DriverRegistry(globalDriverRegistry);
 
   constructor(options?: LocalSpaceOptions) {
+    if (
+      options !== undefined &&
+      (!options || typeof options !== 'object' || Array.isArray(options))
+    ) {
+      throw createLocalSpaceError(
+        'INVALID_CONFIG',
+        'LocalSpace options must be an object.',
+        { configKey: 'options', reason: 'invalid-options' }
+      );
+    }
     const { plugins = [], drivers = [], ...configOverrides } = options ?? {};
+    if (!Array.isArray(plugins)) {
+      throw createLocalSpaceError(
+        'INVALID_CONFIG',
+        'Configuration option "plugins" must be an array.',
+        { configKey: 'plugins', reason: 'invalid-plugin-list' }
+      );
+    }
+    if (!Array.isArray(drivers)) {
+      throw createLocalSpaceError(
+        'INVALID_CONFIG',
+        'Configuration option "drivers" must be an array.',
+        { configKey: 'drivers', reason: 'invalid-driver-list' }
+      );
+    }
     const normalizedOverrides = normalizeConfigOptions(configOverrides);
 
     this.#defaultConfig = extend({}, DefaultConfig);

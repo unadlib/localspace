@@ -37,6 +37,60 @@ describe('immutable configuration', () => {
   });
 
   it.each([
+    ['description', 42],
+    ['durability', 'eventual'],
+    ['pluginInitPolicy', 'continue'],
+    ['pluginErrorPolicy', 'warn'],
+  ])('rejects invalid public option %s=%s', (key, value) => {
+    expect(() => new LocalSpace({ [key]: value } as never)).toThrowError(
+      expect.objectContaining<Partial<LocalSpaceError>>({
+        code: 'INVALID_CONFIG',
+        details: expect.objectContaining({ configKey: key }),
+      })
+    );
+  });
+
+  it.each([42, '', [], ['memoryStorageWrapper', 42], ['']])(
+    'rejects invalid driver selection %j',
+    (driver) => {
+      expect(() => new LocalSpace({ driver } as never)).toThrowError(
+        expect.objectContaining<Partial<LocalSpaceError>>({
+          code: 'INVALID_CONFIG',
+          details: expect.objectContaining({ configKey: 'driver' }),
+        })
+      );
+    }
+  );
+
+  it.each([
+    [{ plugins: null }, 'plugins', 'invalid-plugin-list'],
+    [{ drivers: {} }, 'drivers', 'invalid-driver-list'],
+  ])('rejects invalid option collection %j', (options, configKey, reason) => {
+    expect(() => new LocalSpace(options as never)).toThrowError(
+      expect.objectContaining<Partial<LocalSpaceError>>({
+        code: 'INVALID_CONFIG',
+        details: expect.objectContaining({ configKey, reason }),
+      })
+    );
+  });
+
+  it.each([
+    [null, 'invalid-plugin'],
+    [{ name: 'invalid', priority: Number.NaN }, 'invalid-plugin-member'],
+    [{ name: 'invalid', enabled: 'yes' }, 'invalid-plugin-member'],
+    [{ name: 'invalid', afterSet: true }, 'invalid-plugin-hook'],
+  ])('rejects malformed plugin configuration %j', (plugin, reason) => {
+    expect(
+      () => new LocalSpace({ plugins: [plugin] } as never)
+    ).toThrowError(
+      expect.objectContaining<Partial<LocalSpaceError>>({
+        code: 'INVALID_CONFIG',
+        details: expect.objectContaining({ configKey: 'plugins', reason }),
+      })
+    );
+  });
+
+  it.each([
     [null, 'invalid-bucket'],
     [[], 'invalid-bucket'],
     [{}, 'invalid-bucket-name'],

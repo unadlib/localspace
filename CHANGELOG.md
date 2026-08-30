@@ -39,7 +39,8 @@
   using the active driver and plugin set across readiness and driver switches.
 - Made configuration construction-time state. `config()` now returns a
   detached, deeply frozen snapshot and plugin registration locks at the first
-  readiness/storage operation.
+  readiness/storage operation. Malformed policy, driver, and plugin shapes
+  reject atomically instead of being silently coerced or failing during use.
 - Changed batch plugin execution to one hook form per plugin and phase: invoke
   the batch hook once when present, otherwise map the matching single hook.
   Priority ordering is preserved globally across both forms. Single-item

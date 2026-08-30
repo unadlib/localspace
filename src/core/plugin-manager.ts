@@ -88,6 +88,36 @@ type BeforeSetItemsOptions<T> = {
 
 const sharedMetadataFor = (): Record<string, unknown> => Object.create(null);
 
+const PLUGIN_HOOKS = [
+  'onInit',
+  'onDestroy',
+  'onError',
+  'beforeSet',
+  'afterSet',
+  'beforeGet',
+  'afterGet',
+  'beforeRemove',
+  'afterRemove',
+  'beforeSetItems',
+  'afterSetItems',
+  'beforeGetItems',
+  'afterGetItems',
+  'beforeRemoveItems',
+  'afterRemoveItems',
+  'beforeIterate',
+  'afterIterate',
+  'beforeKeys',
+  'afterKeys',
+  'beforeKey',
+  'afterKey',
+  'beforeLength',
+  'afterLength',
+  'beforeClear',
+  'afterClear',
+  'beforeDropInstance',
+  'afterDropInstance',
+] as const satisfies ReadonlyArray<keyof LocalSpacePlugin>;
+
 /**
  * Plugin combination warnings to help users avoid problematic configurations.
  */
@@ -209,7 +239,13 @@ export class PluginManager {
     );
     const pendingNames = new Set<string>();
     for (const plugin of plugins) {
-      if (!plugin) continue;
+      if (!plugin || typeof plugin !== 'object') {
+        throw createLocalSpaceError(
+          'INVALID_CONFIG',
+          'Every plugin must be an object with a unique non-empty name.',
+          { configKey: 'plugins', reason: 'invalid-plugin' }
+        );
+      }
       if (
         typeof plugin.name !== 'string' ||
         plugin.name.length === 0 ||
@@ -229,11 +265,71 @@ export class PluginManager {
           }
         );
       }
+      if (
+        plugin.version !== undefined &&
+        typeof plugin.version !== 'string'
+      ) {
+        throw createLocalSpaceError(
+          'INVALID_CONFIG',
+          `Plugin "${plugin.name}" version must be a string.`,
+          {
+            configKey: 'plugins',
+            plugin: plugin.name,
+            member: 'version',
+            reason: 'invalid-plugin-member',
+          }
+        );
+      }
+      if (
+        plugin.priority !== undefined &&
+        (typeof plugin.priority !== 'number' ||
+          !Number.isFinite(plugin.priority))
+      ) {
+        throw createLocalSpaceError(
+          'INVALID_CONFIG',
+          `Plugin "${plugin.name}" priority must be a finite number.`,
+          {
+            configKey: 'plugins',
+            plugin: plugin.name,
+            member: 'priority',
+            reason: 'invalid-plugin-member',
+          }
+        );
+      }
+      if (
+        plugin.enabled !== undefined &&
+        typeof plugin.enabled !== 'boolean' &&
+        typeof plugin.enabled !== 'function'
+      ) {
+        throw createLocalSpaceError(
+          'INVALID_CONFIG',
+          `Plugin "${plugin.name}" enabled must be a boolean or function.`,
+          {
+            configKey: 'plugins',
+            plugin: plugin.name,
+            member: 'enabled',
+            reason: 'invalid-plugin-member',
+          }
+        );
+      }
+      for (const hook of PLUGIN_HOOKS) {
+        if (plugin[hook] !== undefined && typeof plugin[hook] !== 'function') {
+          throw createLocalSpaceError(
+            'INVALID_CONFIG',
+            `Plugin "${plugin.name}" hook ${hook} must be a function.`,
+            {
+              configKey: 'plugins',
+              plugin: plugin.name,
+              member: hook,
+              reason: 'invalid-plugin-hook',
+            }
+          );
+        }
+      }
       pendingNames.add(plugin.name);
     }
 
     for (const plugin of plugins) {
-      if (!plugin) continue;
       this.pluginRegistry.push({ plugin, order: this.orderCounter++ });
     }
     this.sortPlugins();

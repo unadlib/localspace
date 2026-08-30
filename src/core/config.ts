@@ -128,6 +128,22 @@ export function normalizeConfigOptions(
 
   const normalized: InternalConfigOptions = { ...options };
 
+  const invalidChoice = (
+    key: keyof InternalConfigOptions,
+    value: unknown,
+    supportedValues: readonly string[]
+  ): never => {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      `Configuration option "${String(key)}" must be one of: ${supportedValues.join(', ')}.`,
+      {
+        configKey: key,
+        providedValue: value,
+        supportedValues,
+      }
+    );
+  };
+
   for (const key of INTEGER_OPTIONS) {
     const value = options[key];
     if (value !== undefined) {
@@ -146,6 +162,46 @@ export function normalizeConfigOptions(
     );
   }
 
+  if (
+    options.description !== undefined &&
+    typeof options.description !== 'string'
+  ) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Database description must be a string.',
+      { configKey: 'description', providedType: typeof options.description }
+    );
+  }
+
+  if (
+    options.durability !== undefined &&
+    !['default', 'relaxed', 'strict'].includes(options.durability)
+  ) {
+    invalidChoice('durability', options.durability, [
+      'default',
+      'relaxed',
+      'strict',
+    ]);
+  }
+  if (
+    options.pluginInitPolicy !== undefined &&
+    !['fail', 'disable-and-continue'].includes(options.pluginInitPolicy)
+  ) {
+    invalidChoice('pluginInitPolicy', options.pluginInitPolicy, [
+      'fail',
+      'disable-and-continue',
+    ]);
+  }
+  if (
+    options.pluginErrorPolicy !== undefined &&
+    !['strict', 'lenient'].includes(options.pluginErrorPolicy)
+  ) {
+    invalidChoice('pluginErrorPolicy', options.pluginErrorPolicy, [
+      'strict',
+      'lenient',
+    ]);
+  }
+
   if (options.storeName !== undefined) {
     if (
       typeof options.storeName !== 'string' ||
@@ -160,8 +216,25 @@ export function normalizeConfigOptions(
     normalized.storeName = options.storeName;
   }
 
-  if (Array.isArray(options.driver)) {
-    normalized.driver = [...options.driver];
+  if (options.driver !== undefined) {
+    const requestedDrivers = Array.isArray(options.driver)
+      ? options.driver
+      : [options.driver];
+    if (
+      requestedDrivers.length === 0 ||
+      requestedDrivers.some(
+        (driver) => typeof driver !== 'string' || driver.length === 0
+      )
+    ) {
+      throw createLocalSpaceError(
+        'INVALID_CONFIG',
+        'Configuration option "driver" must be a non-empty driver name or array of names.',
+        { configKey: 'driver', reason: 'invalid-driver-selection' }
+      );
+    }
+    normalized.driver = Array.isArray(options.driver)
+      ? [...requestedDrivers]
+      : requestedDrivers[0];
   }
 
   if (options.bucket !== undefined) {

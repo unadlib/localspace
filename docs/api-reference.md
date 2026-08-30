@@ -347,6 +347,10 @@ The removed `size`, `strictValues`, `strictTransactions`,
 options reject with `INVALID_CONFIG` instead of being ignored. In 3.0 value
 validation and transaction-scope enforcement are always enabled.
 
+JavaScript callers receive `INVALID_CONFIG` for malformed driver/plugin lists,
+unknown policy/durability values, invalid driver names, and non-callable plugin
+hooks. Invalid choices are never silently coerced to a default policy.
+
 ### Plugin registration lock
 
 `use(pluginOrPlugins)` registers plugins only before the first `ready()` or
