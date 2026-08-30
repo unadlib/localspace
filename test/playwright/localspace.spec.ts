@@ -356,7 +356,7 @@ test.describe('localspace browser interoperability', () => {
     });
   });
 
-  test('IndexedDB transaction runner can await an ordinary instance operation', async ({
+  test('IndexedDB transaction runner requires transaction-scoped operations', async ({
     page,
   }) => {
     await ensureFixtureReady(page);
@@ -373,8 +373,18 @@ test.describe('localspace browser interoperability', () => {
       await instance.ready();
       const runnerResult = await Promise.race([
         instance.runTransaction('readwrite', async () => {
-          await instance.setItem('ordinary-operation', 'completed');
-          return 'runner-completed';
+          try {
+            await instance.setItem('ordinary-operation', 'blocked');
+            return { error: null };
+          } catch (error) {
+            const structuredError = error as any;
+            return {
+              error: {
+                code: structuredError.code,
+                details: structuredError.details,
+              },
+            };
+          }
         }),
         new Promise((_, reject) =>
           setTimeout(
@@ -390,8 +400,16 @@ test.describe('localspace browser interoperability', () => {
       };
     }, randomStoreName('transaction-runner-compatibility'));
 
-    expect(result.runnerResult).toBe('runner-completed');
-    expect(result.storedValue).toBe('completed');
+    expect(result.runnerResult).toEqual({
+      error: {
+        code: 'TRANSACTION_SCOPE_REQUIRED',
+        details: {
+          operation: 'setItem',
+          reason: 'transaction-scope-required',
+        },
+      },
+    });
+    expect(result.storedValue).toBeNull();
   });
 
   test('close releases an IndexedDB instance without deleting its data', async ({

@@ -263,6 +263,7 @@ export class LocalSpace implements LocalSpaceInstance {
   private _operationPause: Promise<void> | null = null;
   private _operationsStarting = 0;
   private readonly _activeOperations = new Set<Promise<unknown>>();
+  private _activeTransactionRunners = 0;
   private _invokingLifecycleCallback: LifecycleCallback | null = null;
   private _pluginManager: PluginManager;
   private readonly _driverRegistry = new DriverRegistry(globalDriverRegistry);
@@ -872,6 +873,19 @@ export class LocalSpace implements LocalSpaceInstance {
     operation: DriverOperation,
     args: unknown[]
   ): Promise<T> {
+    if (this._activeTransactionRunners > 0) {
+      return Promise.reject(
+        createLocalSpaceError(
+          'TRANSACTION_SCOPE_REQUIRED',
+          `Use the transaction scope for ${operation}() while a transaction runner is active.`,
+          {
+            operation,
+            reason: 'transaction-scope-required',
+          }
+        )
+      );
+    }
+
     this.#configurationLocked = true;
     return this._runTrackedOperation(operation, args, async () => {
       await this.ready();
@@ -1521,11 +1535,29 @@ export class LocalSpace implements LocalSpaceInstance {
       this._pluginManager.assertNoStorageTransformBypass('runTransaction');
 
       return original(mode, (scope: TransactionScope) => {
+        let scopeActive = true;
+        const assertScopeActive = (scopeOperation: string): void => {
+          if (scopeActive) {
+            return;
+          }
+
+          throw createLocalSpaceError(
+            'TRANSACTION_SCOPE_REQUIRED',
+            'The transaction scope cannot be used after its runner settles.',
+            {
+              operation: 'runTransaction',
+              reason: 'transaction-scope-inactive',
+              scopeOperation,
+            }
+          );
+        };
         const validatingScope: TransactionScope = {
-          ...scope,
-          get: async <T extends StorageValue>(key: string) =>
-            decodeStoredRecordValue(await scope.get<T>(key)) as T | null,
+          get: async <T extends StorageValue>(key: string) => {
+            assertScopeActive('get');
+            return decodeStoredRecordValue(await scope.get<T>(key)) as T | null;
+          },
           set: async <T extends StorageValue>(key: string, value: T) => {
+            assertScopeActive('set');
             const canonicalValue = prepareStorageValueWrite(value, {
               operation: 'runTransaction',
               key,
@@ -1533,18 +1565,39 @@ export class LocalSpace implements LocalSpaceInstance {
             await scope.set(key, encodeStorageValueRecord(canonicalValue));
             return canonicalValue as T;
           },
-          iterate: <T extends StorageValue, U>(
+          remove: async (key: string) => {
+            assertScopeActive('remove');
+            await scope.remove(key);
+          },
+          keys: async () => {
+            assertScopeActive('keys');
+            return scope.keys();
+          },
+          iterate: async <T extends StorageValue, U>(
             iterator: (value: T, key: string, iterationNumber: number) => U
-          ) =>
-            scope.iterate<T, U>((value, key, iterationNumber) =>
+          ) => {
+            assertScopeActive('iterate');
+            return scope.iterate<T, U>((value, key, iterationNumber) =>
               iterator(
                 decodeStoredRecordValue(value) as T,
                 key,
                 iterationNumber
               )
-            ),
+            );
+          },
+          clear: async () => {
+            assertScopeActive('clear');
+            await scope.clear();
+          },
         };
-        return runner(validatingScope);
+
+        this._activeTransactionRunners += 1;
+        return Promise.resolve()
+          .then(() => runner(validatingScope))
+          .finally(() => {
+            scopeActive = false;
+            this._activeTransactionRunners -= 1;
+          });
       });
     };
   }
