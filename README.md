@@ -345,7 +345,8 @@ pnpm test:rn:integration
 ```
 
 See [`integration/react-native-detox/README.md`](./integration/react-native-detox/README.md)
-for simulator/emulator commands.
+for simulator/emulator commands and the manual gate that installs an exact,
+integrity-checked published RC tarball.
 
 ## Lifecycle
 

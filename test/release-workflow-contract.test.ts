@@ -6,6 +6,10 @@ const workflow = readFileSync(
   path.resolve(process.cwd(), '.github/workflows/nodejs.yml'),
   'utf8'
 );
+const detoxWorkflow = readFileSync(
+  path.resolve(process.cwd(), '.github/workflows/detox-mobile.yml'),
+  'utf8'
+);
 
 const extractJob = (name: string): string => {
   const startMarker = `\n  ${name}:\n`;
@@ -27,5 +31,20 @@ describe('release workflow contracts', () => {
     expect(browsersJob).toMatch(
       /uses: actions\/checkout@v\d+\n\s+with:\n(?:\s+#.*\n)*\s+fetch-depth: 0/
     );
+  });
+
+  it('runs manual iOS Detox against an exact integrity-checked RC tarball', () => {
+    expect(detoxWorkflow).toMatch(
+      /package_spec:\n\s+description:.*localspace@3\.0\.0-rc\.1\n\s+required: true/
+    );
+    expect(detoxWorkflow).toContain('scripts/prepare-detox-rc.mjs');
+    expect(detoxWorkflow).toContain('${{ inputs.package_spec }}');
+    expect(detoxWorkflow).toContain('--expected-commit "$GITHUB_SHA"');
+    expect(detoxWorkflow).toContain(
+      'pnpm --filter localspace-detox-fixture add --save-exact "$RC_TARBALL"'
+    );
+    expect(detoxWorkflow).toContain('scripts/verify-detox-rc-install.mjs');
+    expect(detoxWorkflow).not.toContain('pnpm run build\n');
+    expect(detoxWorkflow).not.toContain('app_exists');
   });
 });

@@ -25,7 +25,9 @@
 - Added a serializable, realm-and-namespace-scoped scheduler for memory
   read-write transactions.
 - Added an explicit React Native driver capability contract and official
-  AsyncStorage Jest/React Native 0.83.x Detox fixtures.
+  AsyncStorage Jest/React Native 0.83.x Detox fixtures. The manual iOS gate
+  resolves, integrity-checks, installs, and records an exact published RC
+  tarball instead of consuming the workspace package.
 - Added Node 22/24 and Chromium/Firefox/WebKit release matrices.
 - Added integrity-pinned 2.1.0 performance/package baselines, same-run relative
   comparison evidence, and exact package allowlist/size budgets.

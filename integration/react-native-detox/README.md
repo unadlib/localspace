@@ -1,10 +1,11 @@
 # Localspace React Native Detox Fixture
 
-This is a real React Native fixture app used by the manual workflow:
+This is a real React Native fixture app used by the manual release workflow:
 
 - `.github/workflows/detox-mobile.yml`
 
-It validates `localspace/react-native` in iOS simulator runtime via Detox.
+It validates an exact published `localspace@3.0.0-rc.N` tarball through
+`localspace/react-native` in iOS simulator runtime via Detox.
 
 ## What This App Tests
 
@@ -52,6 +53,11 @@ pnpm run test:android:detox
 ## Workflow Notes
 
 - GitHub workflow uses this directory as `DETOX_APP_DIR`.
-- The iOS Detox workflow is manually dispatched and is not part of blocking CI.
+- Dispatch requires an exact published RC specifier such as
+  `localspace@3.0.0-rc.1`; ranges and dist-tags are rejected.
+- The workflow verifies npm integrity metadata, replaces the `workspace:*`
+  development link with that tarball, and checks the installed version/path
+  before building the app.
+- The iOS Detox workflow is a manual 3.0 release gate, not ordinary push CI.
 - Android Detox can still be run locally with the commands above.
 - iOS job uses `macos-latest` and installs `applesimutils`.
