@@ -27,9 +27,10 @@ const cartStore = localspace.createInstance({
       defaultTTL: 7 * 24 * 60 * 60 * 1000, // 7 days
       cleanupInterval: 60 * 60 * 1000, // Hourly cleanup
       onExpire: (key, value) => {
+        const expiredCart = value as Cart | undefined;
         analytics.track('cart_expired', {
           key,
-          itemCount: value?.items?.length,
+          itemCount: expiredCart?.items.length,
         });
       },
     }),
@@ -73,16 +74,16 @@ class CartService {
   }
 }
 
-interface Cart {
+type Cart = {
   items: CartItem[];
   updatedAt: number;
-}
+};
 
-interface CartItem {
+type CartItem = {
   productId: string;
   quantity: number;
   addedAt: number;
-}
+};
 ```
 
 ---
@@ -186,7 +187,11 @@ class CredentialManager {
 Compressed API cache with intelligent expiration:
 
 ```ts
-import localspace, { ttlPlugin, compressionPlugin } from 'localspace';
+import localspace, {
+  ttlPlugin,
+  compressionPlugin,
+  type StorageValue,
+} from 'localspace';
 
 const apiCache = localspace.createInstance({
   name: 'offline-app',
@@ -213,7 +218,7 @@ const apiCache = localspace.createInstance({
 });
 
 // Cache-aware fetch wrapper
-async function cachedFetch<T>(
+async function cachedFetch<T extends StorageValue>(
   url: string,
   options?: {
     cacheKey?: string;
@@ -270,11 +275,11 @@ async function revalidateInBackground(url: string, cacheKey: string) {
   }
 }
 
-interface CachedResponse<T> {
+type CachedResponse<T extends StorageValue> = {
   data: T;
   fetchedAt: number;
   staleAt?: number;
-}
+};
 
 // Prefetch common data
 async function prefetchAppData() {

@@ -1,451 +1,382 @@
 # API Reference
 
-Complete reference for all localspace methods with TypeScript signatures.
-
-## Core Methods
-
-Every storage operation is installed once as a bound facade dispatcher. Calling
-`ready()`, `use()`, or `setDriver()` changes internal dispatch state, not the
-public function object. Captured methods, React dependency arrays, and spies
-therefore continue to observe the current initialized driver and current plugin
-registry:
+This reference describes the LocalSpace 3.0 public contract. Import runtime
+APIs from `localspace`; import the explicit React Native helpers from
+`localspace/react-native`.
 
 ```ts
-const get = store.getItem;
-await store.ready();
-store.use(plugin);
-await store.setDriver(store.MEMORY);
-await get('key'); // current driver and plugins, no `.bind(store)` required
+import localspace, {
+  LocalSpace,
+  LocalSpaceError,
+  type LocalSpaceInstance,
+  type StorageValue,
+} from 'localspace';
 ```
 
-### `getItem<T>(key: string): Promise<T | null>`
+## Package exports
 
-Retrieves an item from storage.
+| Specifier                 | Contents                                                                                                        |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `localspace`              | default instance, `LocalSpace`, web/memory drivers, types, plugins, errors, serializer, and driver registration |
+| `localspace/react-native` | explicit AsyncStorage driver installation and instance helpers                                                  |
+| `localspace/package.json` | package metadata                                                                                                |
+
+Other deep imports are unsupported. The published tarball does not include
+`src/`; runtime source maps embed `sourcesContent` for mapped stack traces.
+
+## Storage values
 
 ```ts
-// Basic usage
-const user = await localspace.getItem<User>('user');
+type StoragePrimitive = null | boolean | number | string;
 
-// Returns null for non-existent keys
-const missing = await localspace.getItem('nonexistent'); // null
+type StorageBinary =
+  | ArrayBuffer
+  | Int8Array
+  | Uint8Array
+  | Uint8ClampedArray
+  | Int16Array
+  | Uint16Array
+  | Int32Array
+  | Uint32Array
+  | Float32Array
+  | Float64Array
+  | BigInt64Array
+  | BigUint64Array;
+
+type StorageValue =
+  | StoragePrimitive
+  | StorageBinary
+  | StorageValue[]
+  | { [key: string]: StorageValue };
 ```
 
-### `setItem<T>(key: string, value: T): Promise<T>`
+Every application value and every plugin-produced write value is validated.
+The runtime accepts only:
 
-Stores an item. Returns the stored value.
+- `null`, booleans, finite numbers, and strings;
+- non-detached `ArrayBuffer` values and the typed arrays listed above;
+- dense arrays containing supported values and no custom/symbol properties;
+- ordinary or null-prototype objects with enumerable own data properties whose
+  values are supported.
+
+The runtime rejects `undefined`, `bigint`, symbols, functions, non-finite
+numbers, sparse arrays, accessors, non-enumerable properties, symbol keys,
+cycles, `SharedArrayBuffer`, shared-memory views, `DataView`, `Blob`, `Date`,
+`Map`, `Set`, `RegExp`, and class instances with `SERIALIZATION_FAILED`.
+Accepted values are copied and normalized before persistence; for example,
+negative zero is read back as zero.
+
+LocalSpace encodes every accepted logical value in a versioned StoredRecord.
+It still reads unwrapped 2.x values. A user object with a `__localspace__`
+property is wrapped like any other value and therefore cannot collide with the
+record marker. Unknown LocalSpace record versions fail with
+`DESERIALIZATION_FAILED` instead of being guessed.
+
+## Creating instances
+
+### Default instance
 
 ```ts
-// Basic usage
-await localspace.setItem('user', { name: 'Ada', role: 'admin' });
+import localspace from 'localspace';
 
-// Store various types
-await localspace.setItem('count', 42);
-await localspace.setItem('tags', ['a', 'b', 'c']);
-await localspace.setItem('active', true);
-await localspace.setItem('config', null);
-
-// undefined is converted to null
-await localspace.setItem('empty', undefined); // stored as null
+await localspace.setItem('key', 'value');
 ```
 
-### `removeItem(key: string): Promise<void>`
+The default instance uses IndexedDB followed by localStorage. It uses the
+permanently frozen historical namespace `localforage/keyvaluepairs`.
 
-Removes an item from storage.
+### `new LocalSpace(options?)`
 
 ```ts
-await localspace.removeItem('user');
+import { LocalSpace } from 'localspace';
+
+const store = new LocalSpace({
+  name: 'my-app',
+  storeName: 'settings',
+});
 ```
+
+### `createInstance(options?)`
+
+```ts
+const store = localspace.createInstance({
+  name: 'my-app',
+  storeName: 'cache',
+});
+```
+
+Each instance owns its configuration, plugin manager, and driver sessions.
+Construction-scoped custom driver definitions do not leak to another instance.
+
+## Core storage methods
+
+All public operation methods are stable facade functions: their identity does
+not change after readiness, driver fallback/switching, or plugin setup.
+
+### `getItem<T extends StorageValue>(key): Promise<T | null>`
+
+Returns the decoded logical value, or `null` when the key does not exist or a
+plugin intentionally hides it.
+
+```ts
+const profile = await store.getItem<{
+  name: string;
+  active: boolean;
+}>('profile');
+```
+
+### `setItem<T extends StorageValue>(key, value): Promise<T>`
+
+Validates, copies, transforms, and stores one value. Validation happens before
+plugin or driver side effects. The returned value is the logical write result,
+not an internal StoredRecord or plugin envelope.
+
+```ts
+const saved = await store.setItem('profile', {
+  name: 'Ada',
+  active: true,
+});
+```
+
+Keys are normalized to strings for driver compatibility. Avoid non-string keys
+even when calling from plain JavaScript.
+
+### `removeItem(key): Promise<void>`
+
+Removes one item. Removing a missing item resolves normally.
 
 ### `clear(): Promise<void>`
 
-Removes all items from the current store.
-
-```ts
-await localspace.clear();
-```
+Removes all values in the current `name`/`storeName` namespace. It runs the
+plugin `beforeClear` and `afterClear` observers.
 
 ### `length(): Promise<number>`
 
-Returns the number of items in the store.
-
-```ts
-const count = await localspace.length();
-console.log(`Store has ${count} items`);
-```
-
-### `key(index: number): Promise<string | null>`
-
-Returns the key at the given index.
-
-```ts
-const firstKey = await localspace.key(0);
-const lastKey = await localspace.key((await localspace.length()) - 1);
-```
+Returns the number of logical visible items. Built-in TTL expiration is applied
+before counting, so `getItem`, `iterate`, `keys`, `key`, and `length` agree.
 
 ### `keys(): Promise<string[]>`
 
-Returns all keys in the store.
+Returns logical visible keys in driver iteration order.
+
+### `key(index): Promise<string | null>`
+
+Returns the logical visible key at a zero-based index, or `null` when the index
+is outside the current key list.
+
+### `iterate<T, U>(iterator): Promise<U | undefined>`
 
 ```ts
-const allKeys = await localspace.keys();
-console.log('Keys:', allKeys);
-```
-
-### `iterate<T, U>(iterator: (value: T, key: string, index: number) => U): Promise<U>`
-
-Iterates over all items. Return a non-undefined value to stop early.
-
-The 2.1 declaration says `Promise<U>`, but a complete iteration without early
-termination returns `undefined` at runtime. Handle that value now. The 3.0
-declaration is corrected to `Promise<U | undefined>`.
-
-When the built-in encryption, compression, or TTL plugin is active, LocalSpace
-2.1 rejects `iterate()` with `UNSUPPORTED_OPERATION` before invoking the
-iterator. Use `keys()` plus `getItems()` when logical, plugin-processed values
-are required.
-
-```ts
-// Process all items
-await localspace.iterate<User, void>((value, key, index) => {
-  console.log(`${index}. ${key}:`, value);
-});
-
-// Early termination - find first admin
-const admin = await localspace.iterate<User, User>((value, key) => {
-  if (value.role === 'admin') {
-    return value; // stops iteration and returns this value
+const match = await store.iterate<StorageValue, string>(
+  async (value, key, iterationNumber) => {
+    await audit(key, value, iterationNumber);
+    return key.startsWith('target:') ? key : undefined;
   }
-});
-```
-
----
-
-## Error Contract
-
-Rejected operations use `LocalSpaceError`. Branch on `error.code`, not browser
-exception text; the original failure is available through `error.cause`, while
-`error.details` carries stable context such as `driver`, `operation`, `key`,
-`configKey`, and attempted driver failures.
-
-Common codes include:
-
-| Code                     | Meaning                                                              |
-| ------------------------ | -------------------------------------------------------------------- |
-| `INVALID_CONFIG`         | Configuration failed normalization before driver initialization      |
-| `DRIVER_UNAVAILABLE`     | Every requested driver failed; `details.driverErrors` preserves each |
-| `QUOTA_EXCEEDED`         | A driver reported a storage quota failure                            |
-| `OPERATION_FAILED`       | A driver operation failed for another stable category                |
-| `UNSUPPORTED_OPERATION`  | The selected driver/plugin combination cannot honor the contract     |
-| `INSTANCE_CLOSED`        | A terminally closed instance received another operation              |
-| `SERIALIZATION_FAILED`   | A value could not be safely transformed or serialized                |
-| `DESERIALIZATION_FAILED` | Stored data was malformed, unsupported, or could not be transformed  |
-
-```ts
-import { LocalSpaceError } from 'localspace';
-
-try {
-  await store.setItem('key', value);
-} catch (error) {
-  if (error instanceof LocalSpaceError && error.code === 'QUOTA_EXCEEDED') {
-    reportStoragePressure(error.details);
-  }
-  throw error;
-}
-```
-
----
-
-## Batch Operations
-
-Each batch chunk executes in a transaction on IndexedDB. When `maxBatchSize` is
-unset, the entire call is one chunk. Other drivers expose the same API but may
-run grouped work sequentially.
-
-### `setItems<T>(entries: BatchItems<T>): Promise<BatchResponse<T>>`
-
-Stores multiple items atomically on IndexedDB when `maxBatchSize` is unset or
-the input fits in one chunk. On other drivers this is a grouped operation with
-driver-specific atomicity.
-
-```ts
-// Array format
-await localspace.setItems([
-  { key: 'user:1', value: { name: 'Ada' } },
-  { key: 'user:2', value: { name: 'Grace' } },
-]);
-
-// Map format
-await localspace.setItems(
-  new Map([
-    ['user:1', { name: 'Ada' }],
-    ['user:2', { name: 'Grace' }],
-  ])
 );
+```
 
-// Object format
-await localspace.setItems({
-  'user:1': { name: 'Ada' },
-  'user:2': { name: 'Grace' },
-});
+Iteration exposes decoded logical values. Callbacks are awaited sequentially.
+Iteration numbers start at 1. The first non-`undefined` callback result stops
+iteration and becomes the result; otherwise the promise resolves to
+`undefined`.
 
-// Returns array of { key, value } pairs
-const result = await localspace.setItems([
+## Batch methods
+
+```ts
+type KeyValuePair<T> = { key: string; value: T };
+
+type BatchItems<T> =
+  | Array<KeyValuePair<T>>
+  | Map<string, T>
+  | Record<string, T>;
+
+type BatchResponse<T> = Array<{ key: string; value: T | null }>;
+```
+
+### `setItems<T extends StorageValue>(entries): Promise<BatchResponse<T>>`
+
+Accepts an entry array, `Map`, or object. Values are validated before plugin or
+driver side effects. The response contains logical values in the effective
+batch order.
+
+```ts
+await store.setItems([
   { key: 'a', value: 1 },
   { key: 'b', value: 2 },
 ]);
-// [{ key: 'a', value: 1 }, { key: 'b', value: 2 }]
 ```
 
-### `getItems<T>(keys: string[]): Promise<BatchResponse<T>>`
+On IndexedDB an unchunked call is atomic. When `maxBatchSize` splits the call,
+or when another driver is selected, do not assume batch atomicity; inspect
+`capabilities().atomicBatch`.
 
-Retrieves multiple items in order.
+### `getItems<T extends StorageValue>(keys): Promise<BatchResponse<T>>`
+
+Returns one result for each requested key in requested order. Missing or
+plugin-hidden values are `null`.
+
+### `removeItems(keys): Promise<void>`
+
+Removes all requested keys. Its atomicity follows the selected driver and batch
+configuration.
+
+## Transactions
+
+### `runTransaction<T>(mode, runner): Promise<T>`
 
 ```ts
-const users = await localspace.getItems(['user:1', 'user:2', 'user:3']);
-// [
-//   { key: 'user:1', value: { name: 'Ada' } },
-//   { key: 'user:2', value: { name: 'Grace' } },
-//   { key: 'user:3', value: null }  // doesn't exist
-// ]
+type TransactionMode = 'readonly' | 'readwrite';
 
-// Access values
-users.forEach(({ key, value }) => {
-  if (value) console.log(key, value);
-});
+interface TransactionScope {
+  get<T extends StorageValue>(key: string): Promise<T | null>;
+  set<T extends StorageValue>(key: string, value: T): Promise<T>;
+  remove(key: string): Promise<void>;
+  keys(): Promise<string[]>;
+  iterate<T extends StorageValue, U>(
+    iterator: (value: T, key: string, iterationNumber: number) => U | Promise<U>
+  ): Promise<U | undefined>;
+  clear(): Promise<void>;
+}
 ```
 
-### `removeItems(keys: string[]): Promise<void>`
-
-Removes multiple items atomically on IndexedDB when `maxBatchSize` is unset or
-the input fits in one chunk. On other drivers this is a grouped operation with
-driver-specific atomicity.
-
 ```ts
-await localspace.removeItems(['user:1', 'user:2', 'temp:session']);
-```
-
----
-
-## Transaction API
-
-### `runTransaction<T>(mode: 'readonly' | 'readwrite', runner: (scope: TransactionScope) => Promise<T> | T): Promise<T>`
-
-Executes multiple operations using the selected driver's 2.x transaction
-behavior. IndexedDB provides a native transaction while the runner is issuing
-transaction-scope requests. The memory driver provides snapshot rollback but
-does not isolate concurrent callers. localStorage and React Native AsyncStorage
-reject this method with `UNSUPPORTED_OPERATION`.
-
-The permissive 2.x runner may await ordinary instance operations, but those
-operations are not part of the transaction. A stricter transaction-bound
-runner and cross-driver isolation contract are planned for 3.0.
-
-The Memory implementation additionally provides snapshot rollback without
-isolating concurrent callers. 3.0 retains Memory transactions only with
-store-scoped serializable isolation; do not use the 2.1 behavior as a concurrency
-primitive.
-
-When the built-in encryption, compression, or TTL plugin is active, LocalSpace
-2.1 rejects `runTransaction()` with `UNSUPPORTED_OPERATION` before creating a
-driver transaction or invoking the runner. This prevents transaction writes
-from bypassing the configured storage transformation.
-
-```ts
-// Atomic counter increment on IndexedDB
-const newValue = await localspace.runTransaction('readwrite', async (tx) => {
+const result = await store.runTransaction('readwrite', async (tx) => {
   const current = (await tx.get<number>('counter')) ?? 0;
-  const next = current + 1;
-  await tx.set('counter', next);
-  return next;
+  await tx.set('counter', current + 1);
+  return current + 1;
 });
-
-// Read multiple values consistently
-const snapshot = await localspace.runTransaction('readonly', async (tx) => {
-  const user = await tx.get<User>('user');
-  const settings = await tx.get<Settings>('settings');
-  return { user, settings };
-});
-
-// Transaction scope methods:
-// tx.get<T>(key) - read a value
-// tx.set<T>(key, value) - write a value (readwrite only)
-// tx.remove(key) - delete a value (readwrite only)
-// tx.keys() - get all keys
-// tx.iterate(fn) - iterate all items
-// tx.clear() - clear all items (readwrite only)
 ```
 
----
+Contract:
 
-## Configuration Methods
+- the runner must use only the supplied scope for same-instance storage work;
+- every ordinary facade operation on that instance rejects with
+  `TRANSACTION_SCOPE_REQUIRED` while the runner is active;
+- a retained scope rejects after the runner settles;
+- `readonly` scopes reject `set`, `remove`, and `clear` with
+  `TRANSACTION_READONLY`;
+- a rejected/failed runner rolls back writes;
+- the runner result becomes the `runTransaction()` result;
+- plugin transforms and observers run inside the transaction and receive
+  `context.transactionScope`;
+- an IndexedDB transaction that becomes natively inactive before settlement
+  rejects with `TRANSACTION_INACTIVE`.
 
-### `config(): LocalSpaceConfig`
+IndexedDB uses one native object-store transaction and keeps it active across
+awaited scope work. Memory serializes read-write runners per JavaScript realm,
+`name`, and `storeName`, using a private snapshot and atomic commit. LocalSpace
+adds no cross-tab/process lock or replication layer. Native IndexedDB scheduling
+still applies across contexts that open the same backend; memory isolation is
+realm-local.
 
-Returns current configuration.
+localStorage and React Native AsyncStorage report `transactions: false` and
+reject before invoking the runner.
+
+## Configuration
+
+### `config(): LocalSpaceConfigSnapshot`
+
+Returns a detached, deeply frozen snapshot. Mutating the original constructor
+inputs or the returned snapshot cannot change the active instance.
+
+### `config(key): LocalSpaceConfigSnapshot[key] | undefined`
+
+Returns one field from a fresh immutable snapshot.
 
 ```ts
-const config = localspace.config();
-console.log(config.name, config.storeName);
+const name = store.config('name');
+const config = store.config();
 ```
 
-The 2.x getter still returns its historical mutable internal reference, but
-mutating that object is deprecated. Treat it as readonly and pass configuration
-to `createInstance()`; 3.0 returns a readonly snapshot.
+`config(options)` was removed. Pass configuration when constructing an
+instance. JavaScript calls that attempt the old setter throw `INVALID_ARGUMENT`.
 
-### `config<K>(key: K): LocalSpaceConfig[K]`
-
-Returns a specific configuration value.
+### Options
 
 ```ts
-const name = localspace.config('name');
-const driver = localspace.config('driver');
-```
-
-### `config(options: LocalSpaceConfig): true | Error | Promise<void>`
-
-Updates configuration. Must be called before the first storage operation.
-Configuration without `driver` returns synchronously. Supplying `driver`
-returns the `setDriver()` promise, while invalid or locked configuration is
-returned as an `Error` value.
-
-This setter overload is deprecated in 2.1 and removed in 3.0. Move all options
-to `new LocalSpace(options)` or `createInstance(options)` before upgrading.
-
-The constructor and `config(options)` use the same validation rules.
-Database/store names must be non-empty strings. `version` must be a positive
-safe integer; `maxBatchSize`, `connectionIdleMs`, and
-`maxConcurrentTransactions` must be non-negative safe integers. Zero preserves
-the 2.x disabled/unbounded behavior: no batch split, no idle close, and no
-transaction cap, respectively. Invalid constructor options throw
-`LocalSpaceError(INVALID_CONFIG)` before driver selection begins.
-For 2.x data compatibility, the legacy `config(options)` setter still replaces
-non-word `storeName` characters with `_`; constructor names are preserved.
-Pass the exact stored namespace when moving between the two entry points.
-
-> **Note:** validation and lock errors are **returned, not thrown or
-> rejected** (a localForage-compatible contract). This means
-> `await localspace.config({ version: 'bad' })` resolves to an `Error`
-> object rather than rejecting, so a `try/catch` will not catch it. Inspect
-> the return value when you pass options that can fail. Only the `driver`
-> form returns a real promise.
-
-```ts
-localspace.config({
-  name: 'myapp',
-  storeName: 'data',
-  version: 2,
-});
-
-// Non-driver config: check the return value, do not rely on try/catch.
-const result = localspace.config({ version: 2 });
-if (result instanceof Error) {
-  // handle invalid/locked configuration
+interface LocalSpaceConfig {
+  description?: string;
+  durability?: IDBTransactionOptions['durability'];
+  bucket?: {
+    name: string;
+    durability?: 'relaxed' | 'strict';
+    persisted?: boolean;
+  };
+  maxBatchSize?: number;
+  driver?: string | string[];
+  reactNativeAsyncStorage?: ReactNativeAsyncStorage;
+  name?: string;
+  storeName?: string;
+  version?: number;
+  pluginInitPolicy?: 'fail' | 'disable-and-continue';
+  pluginErrorPolicy?: 'strict' | 'lenient';
 }
 
-// Only the driver form returns a promise you can await.
-await localspace.config({
-  driver: [localspace.INDEXEDDB, localspace.LOCALSTORAGE],
-});
+interface LocalSpaceOptions extends LocalSpaceConfig {
+  plugins?: LocalSpacePlugin[];
+  drivers?: readonly Driver[];
+}
 ```
 
-### `createInstance(options?: LocalSpaceOptions): LocalSpaceInstance`
+| Option                    | Default                 | Notes                                                                                                        |
+| ------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `name`                    | `'localforage'`         | permanently frozen compatibility default; set explicitly for new apps                                        |
+| `storeName`               | `'keyvaluepairs'`       | permanently frozen compatibility default                                                                     |
+| `version`                 | `1`                     | positive safe integer IndexedDB version                                                                      |
+| `driver`                  | IndexedDB, localStorage | ordered selection; memory is opt-in                                                                          |
+| `description`             | `''`                    | descriptive metadata                                                                                         |
+| `durability`              | browser default         | IndexedDB read-write durability hint                                                                         |
+| `bucket`                  | none                    | explicit Storage Bucket; failure never silently falls back                                                   |
+| `maxBatchSize`            | unset                   | non-negative safe integer; `0`/unset means no split                                                          |
+| `reactNativeAsyncStorage` | none                    | required when selecting the RN driver                                                                        |
+| `pluginInitPolicy`        | `'fail'`                | optionally disable a plugin whose initialization fails                                                       |
+| `pluginErrorPolicy`       | `'lenient'`             | unexpected custom-plugin errors may be reported and swallowed; structured/fail-closed errors still propagate |
+| `plugins`                 | `[]`                    | construction-time plugins                                                                                    |
+| `drivers`                 | `[]`                    | construction-scoped immutable driver definitions                                                             |
 
-Creates a new independent instance.
+The removed `size`, `strictValues`, `prewarmTransactions`,
+`connectionIdleMs`, and `maxConcurrentTransactions` options reject with
+`INVALID_CONFIG` instead of being ignored. In 3.0 value validation is always
+enabled.
 
-Invalid initial configuration throws `LocalSpaceError(INVALID_CONFIG)`
-synchronously; it is not converted into a later `DRIVER_UNAVAILABLE` error.
+### Plugin registration lock
 
-If every configured driver fails initialization, `DRIVER_UNAVAILABLE.details`
-contains an ordered `driverErrors` entry for each attempted driver and the
-original errors remain available through `cause`. IndexedDB quota failures use
-`QUOTA_EXCEEDED`; browser-specific `DOMException` text is retained in
-`details.causeMessage` rather than used as the public error message.
+`use(pluginOrPlugins)` registers plugins only before the first `ready()` or
+storage operation. It returns the same instance. Duplicate names or late
+registration reject atomically.
 
 ```ts
-const cache = localspace.createInstance({
-  name: 'cache',
-  storeName: 'api-responses',
-  plugins: [ttlPlugin({ defaultTTL: 60_000 })],
-});
+store.use(myPlugin);
+await store.ready();
 ```
+
+## Driver methods
 
 ### `ready(): Promise<void>`
 
-Waits for driver initialization to complete.
-
-```ts
-await localspace.ready();
-console.log('Driver ready:', localspace.driver());
-```
-
----
-
-## Driver Methods
+Selects and initializes a driver. Storage operations call it lazily, so an
+explicit call is optional but useful for surfacing initialization errors.
 
 ### `driver(): string | null`
 
-Returns the current driver name.
+Returns the selected driver name, or `null` before selection.
 
-```ts
-const driverName = localspace.driver();
-// 'asyncStorage' | 'localStorageWrapper'
-```
+### `setDriver(driverOrOrder): Promise<void>`
 
-### `setDriver(drivers: string | string[]): Promise<void>`
+Selects a supported driver from the requested order and initializes a fresh
+private session. It does not replace public method functions. Driver switching
+waits for earlier initialization, drains active work, releases the previous
+session, and retains failed cleanup for retry.
 
-Sets the driver(s) to use with fallback order.
+Call it only while the instance is idle. Lifecycle reentry or an active
+transaction/operation rejects rather than deadlocking.
 
-```ts
-// Single driver
-await localspace.setDriver(localspace.INDEXEDDB);
+### `supports(driverName): boolean`
 
-// With fallback
-await localspace.setDriver([localspace.INDEXEDDB, localspace.LOCALSTORAGE]);
-
-// Runtime-only fallback when persistent browser storage is blocked
-await localspace.setDriver([
-  localspace.INDEXEDDB,
-  localspace.LOCALSTORAGE,
-  localspace.MEMORY,
-]);
-```
-
-`localspace.MEMORY` uses the built-in in-memory driver
-(`'memoryStorageWrapper'`). It is shared by `name`/`storeName` during the current
-page lifetime, supports the full storage API, and loses data on reload. It is
-opt-in and is not included in the default driver order.
-
-Call `setDriver()` only while the instance is idle. While a storage operation
-is active it rejects with `LocalSpaceError(OPERATION_FAILED)` and
-`details.reason === 'active-operations'`; await the operation and retry.
-
-### `supports(driverName: string): boolean`
-
-Checks if a driver is supported.
-
-```ts
-if (localspace.supports(localspace.INDEXEDDB)) {
-  console.log('IndexedDB is available');
-}
-```
+Reports whether a registered driver definition has resolved as supported in
+the current realm.
 
 ### `capabilities(): LocalSpaceCapabilities`
-
-Returns the same frozen snapshot for the currently selected, initialized driver
-session. Call `await ready()` first; before initialization it throws
-`DRIVER_NOT_INITIALIZED`. Driver fallback or switching installs a new snapshot
-without changing any public method identity.
-
-```ts
-await localspace.ready();
-const capabilities = localspace.capabilities();
-
-if (capabilities.transactions) {
-  await localspace.runTransaction('readwrite', async (tx) => {
-    await tx.set('key', 'value');
-  });
-}
-```
 
 ```ts
 interface LocalSpaceCapabilities {
@@ -457,30 +388,103 @@ interface LocalSpaceCapabilities {
 }
 ```
 
-`atomicBatch: false` does not remove batch methods; it means the driver does not
-promise one all-or-nothing commit for an arbitrary batch. IndexedDB reports it
-only when batch chunking is disabled. `storageBuckets` reports runtime API
-availability for the IndexedDB driver, not that the current namespace is in a
-bucket.
+Returns a frozen snapshot for the selected initialized session. Before
+initialization it throws `DRIVER_NOT_INITIALIZED`; after close it throws
+`INSTANCE_CLOSED`.
 
-| Built-in driver           | transactions | atomicBatch        | dropInstance | persistent | storageBuckets   |
-| ------------------------- | ------------ | ------------------ | ------------ | ---------- | ---------------- |
-| IndexedDB                 | yes          | yes when unchunked | yes          | yes        | runtime-detected |
-| localStorage              | no           | no                 | yes          | yes        | no               |
-| Memory                    | yes          | no                 | yes          | no         | no               |
-| React Native AsyncStorage | no           | no                 | yes          | yes        | no               |
+| Driver          | `transactions` | `atomicBatch`   | `dropInstance`           | `persistent` | `storageBuckets`               |
+| --------------- | -------------- | --------------- | ------------------------ | ------------ | ------------------------------ |
+| IndexedDB       | `true`         | `!maxBatchSize` | `true`                   | `true`       | detected from selected backend |
+| localStorage    | `false`        | `false`         | `true`                   | `true`       | `false`                        |
+| memory          | `true`         | `false`         | `true`                   | `false`      | `false`                        |
+| RN AsyncStorage | `false`        | `false`         | adapter has `getAllKeys` | `true`       | `false`                        |
 
-Missing optional operations and explicitly disabled transaction/drop
-capabilities reject with `UNSUPPORTED_OPERATION` before plugin initialization,
-hooks, a transaction runner, or a driver operation can run.
+### `getDriver(name): Promise<Driver>`
 
-Custom drivers may declare conservative overrides with `_capabilities`, either
-as an object or a synchronous resolver invoked after driver initialization.
-LocalSpace snapshots and freezes object declarations without freezing the
-caller-owned metadata. `transactions: true`, `dropInstance: true`, and
-`atomicBatch: true` require the corresponding driver methods.
+Returns the immutable registered definition, not the active private session.
+Unknown names reject with `DRIVER_NOT_FOUND`.
 
-React Native AsyncStorage is opt-in from a separate entry:
+### `getSerializer(): Promise<Serializer>`
+
+Returns LocalSpace's compatibility serializer. Application code normally uses
+the higher-level StorageValue API.
+
+### `dropInstance(options?): Promise<void>`
+
+Deletes a namespace when supported. Without options it targets the current
+`name`/`storeName`; supplied options may select another namespace supported by
+the driver. It runs plugin drop observers and rejects early when
+`capabilities().dropInstance` is false.
+
+### Custom driver registration
+
+Construction-scoped registration is preferred:
+
+```ts
+const store = new LocalSpace({
+  driver: customDriver._driver,
+  drivers: [customDriver],
+});
+```
+
+For deliberate realm-wide registration:
+
+```ts
+import { registerDriver } from 'localspace';
+
+await registerDriver(customDriver);
+await registerDriver(replacement, { overwrite: true });
+```
+
+`instance.defineDriver()` no longer exists. LocalSpace snapshots and freezes a
+driver definition without modifying the caller's object. Each selected
+instance receives a distinct session receiver shared by `_initStorage`,
+operations, and `_closeStorage`.
+
+A driver requires `_driver`, `_initStorage`, `clear`, `getItem`, `iterate`,
+`key`, `keys`, `length`, `removeItem`, and `setItem`. `dropInstance`, batch
+methods, `runTransaction`, and `_closeStorage` are optional. `_support` may be a
+boolean or a sync/async probe.
+
+```ts
+interface DriverCapabilities {
+  transactions?: boolean;
+  atomicBatch?: boolean;
+  dropInstance?: boolean;
+  persistent?: boolean;
+  storageBuckets?: boolean;
+}
+```
+
+Declare guarantees with `_capabilities` or a synchronous capability resolver.
+Omitted values use conservative method-derived defaults. Unknown fields,
+non-boolean values, or guarantees without matching methods reject with
+`DRIVER_COMPLIANCE`.
+
+## Storage Buckets
+
+```ts
+const store = localspace.createInstance({
+  name: 'my-app',
+  bucket: {
+    name: 'critical-data',
+    durability: 'strict',
+    persisted: true,
+  },
+});
+```
+
+`bucket` is an explicit requirement, not a preference. If the Storage Buckets
+API is unavailable, opening fails, or the returned bucket lacks IndexedDB,
+`ready()` rejects. LocalSpace does not open the default IndexedDB backend and
+does not continue to localStorage. `capabilities().storageBuckets` describes
+the initialized backend when no bucket was explicitly required.
+
+## React Native
+
+The main entry does not register the React Native driver. Runtime module/global
+detection has been removed; an explicit AsyncStorage-compatible adapter is
+required.
 
 ```ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -488,295 +492,99 @@ import localspace from 'localspace';
 import { createReactNativeInstance } from 'localspace/react-native';
 
 const store = await createReactNativeInstance(localspace, {
-  name: 'myapp',
-  storeName: 'kv',
+  name: 'my-app',
+  storeName: 'data',
   reactNativeAsyncStorage: AsyncStorage,
 });
 ```
 
-For existing instances, use:
+The helper creates a construction-scoped driver instance, selects the RN
+driver first, and awaits readiness. A missing adapter rejects with
+`DRIVER_UNAVAILABLE`; a malformed adapter rejects with `INVALID_CONFIG`. RN
+selection never silently falls back.
+
+Realm-wide installation is available for advanced integrations:
 
 ```ts
-import localspace from 'localspace';
 import { installReactNativeAsyncStorageDriver } from 'localspace/react-native';
 
-await installReactNativeAsyncStorageDriver(localspace);
-await localspace.setDriver(localspace.REACTNATIVEASYNCSTORAGE);
+await installReactNativeAsyncStorageDriver();
 ```
 
-Integration smoke test harness (official AsyncStorage Jest mock) lives in `integration/react-native-jest/`.
-Real device-runtime template (Detox on simulator/emulator) lives in `integration/react-native-detox/` with CI workflow `.github/workflows/detox-mobile.yml`.
+The function takes no arguments. A separately constructed instance must still
+provide `reactNativeAsyncStorage`.
 
-### Custom driver registration
+## Plugins and lifecycle
 
-Define driver state on the session receiver rather than in the shared
-definition:
+### `use(plugin | plugins): LocalSpaceInstance`
 
-```ts
-import { LocalSpace, type Driver, type LocalSpaceInstance } from 'localspace';
-
-type CustomSession = LocalSpaceInstance & {
-  values: Map<string, unknown>;
-};
-
-const customDriver = {
-  _driver: 'customDriver',
-  async _initStorage(this: CustomSession) {
-    this.values = new Map();
-  },
-  async getItem<T>(this: CustomSession, key: string) {
-    return this.values.has(key) ? (this.values.get(key) as T) : null;
-  },
-  async setItem<T>(this: CustomSession, key: string, value: T) {
-    this.values.set(key, value);
-    return value;
-  },
-  async removeItem(this: CustomSession, key: string) {
-    this.values.delete(key);
-  },
-  async clear(this: CustomSession) {
-    this.values.clear();
-  },
-  async length(this: CustomSession) {
-    return this.values.size;
-  },
-  async key(this: CustomSession, index: number) {
-    return [...this.values.keys()][index] ?? null;
-  },
-  async keys(this: CustomSession) {
-    return [...this.values.keys()];
-  },
-  async iterate<T, U>(
-    this: CustomSession,
-    iterator: (value: T, key: string, n: number) => U
-  ) {
-    let iteration = 1;
-    for (const [key, value] of this.values) {
-      const result = iterator(value as T, key, iteration++);
-      if (result !== undefined) return result;
-    }
-    return undefined as U;
-  },
-} as Driver;
-
-const store = new LocalSpace({
-  driver: customDriver._driver,
-  drivers: [customDriver],
-});
-await store.ready();
-```
-
-Construction-scoped definitions are visible only to the new instance. Use the
-explicit module-level API only when every LocalSpace instance in the current
-JavaScript realm should see the definition:
-
-```ts
-import { registerDriver } from 'localspace';
-
-await registerDriver(customDriver);
-```
-
-`registerDriver()` rejects duplicate names by default. Passing
-`{ overwrite: true }` deliberately replaces a definition in the global scope;
-already initialized sessions keep the snapshot they selected.
-
-`instance.defineDriver(driver)` remains as a deprecated 2.x bridge. It now
-registers only on that instance and never changes what another instance sees.
-
-The driver definition is cloned by property descriptor and frozen; LocalSpace
-does not freeze, add methods to, or otherwise mutate the caller-owned object.
-Changing that object after registration cannot change an existing registry
-snapshot.
-
-`_initStorage()` and optional `_closeStorage()` are structurally typed with
-`LocalSpaceInstance` as their `this` receiver, but the runtime object is a
-private driver session rather than the public facade. Use a method or a
-non-arrow function when the callback needs that receiver. The session is
-lifecycle-guarded while the callback is pending, so same-instance storage and
-lifecycle calls reject with `details.reason === 'lifecycle-reentrancy'` instead
-of self-deadlocking. The same receiver object is used for initialization,
-driver operations, and cleanup; two instances selecting one definition receive
-different sessions and different state. If `_closeStorage()` rejects, a later
-`close()` or `setDriver()` can invoke it again; custom drivers must make cleanup
-retries safe.
-
-`_support`, batch methods, `runTransaction()`, and `dropInstance()` are optional
-driver capabilities. Calling an omitted capability through a selected instance
-rejects with `UNSUPPORTED_OPERATION`.
-
-### `getDriver(driverName: string): Promise<Driver>`
-
-Returns the immutable definition snapshot visible to this instance.
-
-```ts
-const idbDriver = await localspace.getDriver(localspace.INDEXEDDB);
-```
-
-Built-in web driver exports are also available:
-
-```ts
-import { indexedDBDriver, localStorageDriver, memoryDriver } from 'localspace';
-```
-
-### `dropInstance(options?: LocalSpaceConfig): Promise<void>`
-
-Deletes the database or specific store.
-
-```ts
-// Drop current instance's store
-await localspace.dropInstance();
-
-// Drop specific store
-await localspace.dropInstance({
-  name: 'myapp',
-  storeName: 'temp-data',
-});
-
-// Drop entire database (all stores)
-await localspace.dropInstance({
-  name: 'myapp',
-  // omit storeName to drop entire DB
-});
-```
-
----
-
-## Plugin Methods
-
-### `use(plugin: LocalSpacePlugin | LocalSpacePlugin[]): LocalSpaceInstance`
-
-Registers plugins after instance creation.
-
-```ts
-const store = localspace.createInstance({ name: 'mystore' });
-store.use(ttlPlugin({ defaultTTL: 60_000 }));
-store.use([compressionPlugin(), encryptionPlugin({ key: myKey })]);
-```
+Registers one or more plugins before the configuration lock. See
+[Plugin System](./plugins.md) for the complete hook contract.
 
 ### `close(): Promise<void>`
 
-Closes the instance without deleting stored data. Calls cleanup hooks only for
-plugins that were initialized, releases the active driver connection, and is
-safe to call more than once. A closed instance rejects later storage operations
-with
-`LocalSpaceError(INSTANCE_CLOSED)` before initializing plugins or invoking their
-operation hooks.
+Closes the instance without deleting data. It pauses background plugin work,
+runs `onDestroy` for initialized plugins, and releases the selected driver
+session. It is idempotent; later storage/lifecycle operations reject with
+`INSTANCE_CLOSED`.
+
+If cleanup rejects, the instance remains closed and a later `close()` retries
+only unfinished cleanup. `destroy()` was removed; use `close()` for disposal,
+`clear()` for current-store deletion, or `dropInstance()` for namespace
+deletion.
+
+Plugin lifecycle callbacks receive the public stable instance in
+`context.instance` and a callback-scoped guarded receiver in
+`context.lifecycleInstance`. Same-instance storage or lifecycle reentry during
+an async lifecycle callback rejects to prevent deadlocks. Operation hooks do
+not receive `lifecycleInstance`; transaction hooks receive
+`context.transactionScope`.
+
+## Error contract
 
 ```ts
-await store.close();
+type LocalSpaceErrorCode =
+  | 'CONFIG_LOCKED'
+  | 'INVALID_CONFIG'
+  | 'DRIVER_COMPLIANCE'
+  | 'DRIVER_NOT_FOUND'
+  | 'DRIVER_UNAVAILABLE'
+  | 'DRIVER_NOT_INITIALIZED'
+  | 'INSTANCE_CLOSED'
+  | 'UNSUPPORTED_OPERATION'
+  | 'INVALID_ARGUMENT'
+  | 'TRANSACTION_SCOPE_REQUIRED'
+  | 'TRANSACTION_INACTIVE'
+  | 'TRANSACTION_READONLY'
+  | 'SERIALIZATION_FAILED'
+  | 'DESERIALIZATION_FAILED'
+  | 'BLOB_UNSUPPORTED'
+  | 'OPERATION_FAILED'
+  | 'QUOTA_EXCEEDED'
+  | 'UNKNOWN';
 ```
 
-Calling `close()` on an unused instance does not initialize its driver or
-plugins. Use `clear()` or `dropInstance()` when data should be deleted.
-If custom-driver cleanup rejects, the instance remains terminal and rejects
-storage operations with `INSTANCE_CLOSED`, but another `close()` call retries
-the unfinished driver cleanup. Concurrent calls share an attempt, and cleanup
-that has already completed is not repeated. A failed `setDriver()` release is
-similarly retained for the next driver-switch attempt.
-If a concurrent legacy `destroy()` has already started plugin initialization,
-`close()` waits for that complete initialization pass before teardown.
-If the built-in TTL plugin is sweeping expired entries, `close()` stops its
-timer and waits for that sweep before releasing the driver.
-Call it only while the instance is idle. While a storage operation is active it
-rejects with `LocalSpaceError(OPERATION_FAILED)` and
-`details.reason === 'active-operations'`; await the operation and retry. The
-same rule prevents hooks, transaction runners, and custom drivers from awaiting
-a lifecycle transition that is waiting for their own operation.
-`context.instance` remains the public instance with stable identity across all
-plugin hooks. Plugin lifecycle callbacks must use the callback-scoped
-`context.lifecycleInstance` for same-instance calls across an async boundary;
-custom-driver lifecycle callbacks must use their `this` receiver. Those guarded
-receivers reject same-instance lifecycle and storage calls with
-`details.reason === 'lifecycle-reentrancy'` while the callback is pending,
-including across `await`. After settlement, retained receivers forward normally
-for later timer or event-handler work. A custom driver reuses a stable receiver
-for its lifecycle and operation methods, so identity-keyed state remains
-available. Guard state is isolated per plugin lifecycle callback and per
-selected custom driver, so unrelated retained receivers and concurrent callers
-are not treated as lifecycle reentry.
-
-### `destroy(): Promise<void>`
-
-Deprecated in 2.1. Use `close()`, which runs initialized plugin cleanup and also
-releases the active driver without deleting data. `destroy()` retains its 2.0
-plugin-only behavior throughout the 2.x line.
-
 ```ts
-// Legacy only; new code should call await store.close()
-await legacyStore.destroy();
-```
+import { LocalSpaceError } from 'localspace';
 
-## Configuration Options
-
-Full `LocalSpaceConfig` interface:
-
-```ts
-interface LocalSpaceConfig {
-  // Database configuration
-  name?: string; // Database name (default: 'localforage')
-  storeName?: string; // Store/table name (default: 'keyvaluepairs')
-  version?: number; // Database version (default: 1)
-  description?: string; // Database description
-  size?: number; // Deprecated compatibility hint; built-in drivers ignore it
-
-  // Driver configuration
-  driver?: string | string[]; // Driver(s) to use
-  // Built-ins: localspace.INDEXEDDB, localspace.LOCALSTORAGE, localspace.MEMORY
-  reactNativeAsyncStorage?: ReactNativeAsyncStorage; // Optional adapter used by the react-native driver
-
-  // IndexedDB specific
-  durability?: 'relaxed' | 'strict'; // Transaction durability hint
-  bucket?: {
-    // Storage Buckets API (Chromium 122+)
-    name: string;
-    durability?: 'relaxed' | 'strict';
-    persisted?: boolean;
-  };
-  prewarmTransactions?: boolean; // Deprecated; removed from 3.0 public config
-  connectionIdleMs?: number; // Deprecated; removed from 3.0 public config
-  maxConcurrentTransactions?: number; // Deprecated; removed from 3.0 public config
-
-  // Batch operations
-  maxBatchSize?: number; // Split large batches into chunks
-
-  // Plugin configuration
-  pluginInitPolicy?: 'fail' | 'disable-and-continue';
-  pluginErrorPolicy?: 'strict' | 'lenient';
-  strictValues?: boolean; // Opt in to the 3.0 StorageValue validator
-}
-
-interface LocalSpaceOptions extends LocalSpaceConfig {
-  plugins?: LocalSpacePlugin[];
-  drivers?: readonly Driver[]; // Definitions visible only to this instance
+try {
+  await store.setItem('bad', Number.NaN);
+} catch (error) {
+  if (error instanceof LocalSpaceError) {
+    console.log(error.code);
+    console.log(error.details);
+    console.log(error.cause);
+  }
 }
 ```
 
-`strictValues` defaults to `false` in 2.1 so existing applications retain their
-current driver-specific behavior. When enabled, item, batch, and transaction
-writes reject with `SERIALIZATION_FAILED` before a storage side effect if the
-value is outside the 3.0 cross-driver contract. Supported values are `null`,
-booleans, finite numbers, strings, dense arrays, plain objects, `ArrayBuffer`,
-and typed arrays. Date, Map, Set, RegExp, `undefined`, scalar BigInt, cyclic
-values, accessors, and class instances are rejected. 3.0 makes this validation
-unconditional.
+LocalSpace preserves an underlying browser, driver, crypto, or plugin error as
+`cause` when wrapping it. Use `code` for program logic and `details` for
+diagnostics; do not parse message text.
 
-The 2.1 read path recognizes the frozen 3.0 `StoredRecord` v1 representation
-after configured storage transforms have been removed. This applies to item,
-batch, iteration, and transaction-scope reads. 2.1 does not switch ordinary
-writes to the new representation; it remains a rollback bridge until the 3.0
-writer is enabled.
+## Platform boundary
 
-When the requested Storage Bucket cannot be opened, IndexedDB falls back to
-the default storage backend. Instances that resolve to that same backend share
-one connection context even if one of them originally requested a bucket.
-This fallback is deprecated: 3.0 rejects initialization when an explicitly
-requested bucket is unavailable or cannot provide IndexedDB.
-
-> **Default database name.** When `name`/`storeName` are omitted, localspace
-> uses `'localforage'` / `'keyvaluepairs'`. This lets an app migrating from
-> localForage reuse data without rewriting it when both libraries select the
-> same IndexedDB or localStorage backend (their serializer and key layout are
-> compatible). localspace does not support WebSQL, so migrate WebSQL data first
-> and confirm the selected driver as described in the
-> [migration guide](./migration-guide.md#migrate-from-localforage). Set `name`
-> and `storeName` explicitly for a fresh, app-owned namespace.
+The 3.0 release target is current unprefixed IndexedDB on recent Chromium,
+Firefox, and Safari engines; Node.js 22/24 for imports, types, tests, and custom
+drivers; and React Native 0.83.x with AsyncStorage 2.2.x. Prefixed IndexedDB,
+WebSQL, and a built-in persistent Node driver are outside the contract.

@@ -2,21 +2,108 @@
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-08-31
+
 ### Added
 
-- Added the exported recursive `StorageValue` type plus development diagnostics
-  for values that cannot round-trip consistently across 3.0 drivers.
-- Added the opt-in `strictValues` migration mode, which validates item, batch,
-  and transaction-scope writes before storage side effects.
-- Added 3.0 migration warnings and type/documentation previews for the config
-  setter, instance driver registration, IndexedDB tuning options, Storage Bucket
-  fallback, weak Memory transactions, and the `iterate()` undefined result.
-- Added the frozen `StoredRecord` v1 codec and a 2.1 forward reader across item,
-  batch, iteration, and transaction reads. Generated writer fixtures cover the
-  core format inside each frozen plugin envelope while 2.1 writes stay legacy.
-- Pinned the published 2.1.0 package/performance baseline and added an
-  integrity-checked, same-Chromium comparison harness with distributions and
-  relative results instead of machine-specific latency thresholds.
+- Added the recursive `StorageValue` contract for values that round-trip across
+  IndexedDB, localStorage, memory, and React Native AsyncStorage. Every item,
+  batch, plugin-output, and transaction-scope write is validated before storage
+  side effects.
+- Added collision-safe StoredRecord v1 encoding for every new logical value,
+  while retaining readers for unwrapped 2.x values and legacy built-in-plugin
+  payloads. Unknown record and envelope versions fail explicitly.
+- Added immutable construction-scoped driver definitions, private per-selection
+  driver sessions, and the explicit realm-wide `registerDriver()` API.
+- Added frozen post-readiness driver capabilities for transactions, atomic
+  batches, namespace deletion, persistence, and Storage Buckets.
+- Added query/destructive plugin observers for `iterate`, `keys`, `key`,
+  `length`, `clear`, and `dropInstance`, with a consistent decoded logical view.
+- Added plugin-aware IndexedDB and memory transaction scopes covering logical
+  get/set/remove, keys, async iteration, and clear.
+- Added a serializable, realm-and-namespace-scoped scheduler for memory
+  read-write transactions.
+- Added an explicit React Native driver capability contract and official
+  AsyncStorage Jest/React Native 0.83.x Detox fixtures.
+- Added Node 22/24 and Chromium/Firefox/WebKit release matrices.
+- Added integrity-pinned 2.1.0 performance/package baselines, same-run relative
+  comparison evidence, and exact package allowlist/size budgets.
+
+### Changed
+
+- Replaced runtime driver-method injection and wrapper refreshes with stable
+  facade dispatch. Captured/destructured method references and spies continue
+  using the active driver and plugin set across readiness and driver switches.
+- Made configuration construction-time state. `config()` now returns a
+  detached, deeply frozen snapshot and plugin registration locks at the first
+  readiness/storage operation.
+- Changed batch plugin execution to one hook form per plugin and phase: invoke
+  the batch hook once when present, otherwise map the matching single hook.
+  Priority ordering is preserved globally across both forms.
+- Changed `iterate()` to await async callbacks sequentially, expose only logical
+  decoded values, and return `U | undefined`.
+- Changed TTL visibility so item, batch, iteration, key, and length views agree
+  about expired entries; added aggregate clear/drop observers.
+- Changed compression codecs to a bytes-to-bytes contract and persist a
+  compression envelope only when its complete serialized representation is
+  smaller than the raw representation.
+- Restricted normal encryption to AES-GCM. AES-CBC/AES-CTR remain available only
+  through a read-only legacy migration plugin.
+- Made Storage Bucket configuration an explicit placement requirement. Bucket
+  unavailability/open failure no longer falls back to default IndexedDB or the
+  next driver.
+- Made React Native AsyncStorage injection mandatory; runtime globals,
+  `require`, and dynamic import are no longer probed.
+- Kept the historical default namespace permanently fixed at
+  `localforage/keyvaluepairs` so existing supported 2.x data remains addressable.
+
+### Transactions
+
+- Transaction runners must use only their supplied scope. Same-instance facade
+  calls reject with `TRANSACTION_SCOPE_REQUIRED`, readonly mutations reject
+  with `TRANSACTION_READONLY`, and inactive IndexedDB work fails explicitly.
+- IndexedDB maintains one native object-store transaction across awaited scope
+  and plugin work, including Web Crypto, compression, TTL, and async iteration.
+- Memory transactions now serialize competing writers and atomically commit or
+  roll back. The coordination boundary is the current JavaScript realm and
+  namespace; LocalSpace adds no cross-tab/process locking layer.
+- localStorage and React Native AsyncStorage keep a stable facade method but
+  report `transactions: false` and reject before invoking the runner.
+
+### Removed
+
+- Removed `config(options)`, `instance.defineDriver()`, and `destroy()`.
+- Removed the 2.1-only `strictValues` option because 3.0 validation is mandatory.
+- Removed `prewarmTransactions`, `connectionIdleMs`, and
+  `maxConcurrentTransactions` after pinned same-run measurements showed no
+  stable benefit; supplying them now rejects instead of being ignored.
+- Removed prefixed IndexedDB and legacy BlobBuilder branches.
+- Removed callback-era and deep-source package compatibility assumptions.
+
+### Packaging
+
+- Restricted public exports to `localspace`, `localspace/react-native`, and
+  `localspace/package.json`.
+- Removed `src/`, TypeScript intermediate JavaScript, declaration maps, and the
+  stale `source` package field from the tarball. Runtime maps retain embedded
+  TypeScript `sourcesContent`.
+- Added isolated ESM, CommonJS, React Native, declaration, forbidden-deep-import,
+  bundled-compression, and mapped-stack consumer checks.
+- Reduced the certified artifact from 138 to 63 files, from 756,538 to 432,120
+  packed bytes, and from 3,387,413 to 1,929,372 unpacked bytes. Final budgets
+  are enforced mechanically.
+
+### Migration
+
+- The final 2.1.x bridge is required for a data rollback after 3.0 writes.
+  Published `localspace@2.1.0` can read plugin envelope v1 but cannot read the
+  final core StoredRecord v1; do not use it as the rollback target.
+- Convert rich values such as `Date`, `Map`, `Set`, `RegExp`, scalar `bigint`,
+  accessors, cycles, sparse arrays, and class instances into explicit plain
+  data before writing.
+- See `docs/migration-guide.md` for transaction-scope, plugin hook, React
+  Native, Storage Bucket, custom-driver, encryption, package, and rollback
+  migrations.
 
 ## [2.1.0] - 2026-07-14
 

@@ -1,285 +1,497 @@
 # Migration Guide
 
-## Upgrade From 2.0.x To 2.1
+## Upgrade from 2.1.x to 3.0
+
+LocalSpace 3.0 makes driver behavior, stored values, plugins, and transactions
+explicit. It reads supported 2.x data, but it is a source-breaking upgrade and
+every application should stage the migration through the final 2.1.x bridge.
 
 ```bash
-pnpm add localspace@^2.1.0
+pnpm add localspace@^3.0.0
 ```
 
-### Validate Configuration Before Driver Selection
+Do not use an unpinned `latest` tag for a rollback plan. Record the exact 2.1.x
+bridge and 3.0 versions (including tarball integrity) used by the application.
 
-The constructor and `config(options)` now share one validation path. Invalid
-initial `version`, `maxBatchSize`, `connectionIdleMs`,
-`maxConcurrentTransactions`, `name`, or `storeName` values fail with
-`INVALID_CONFIG` before driver initialization. The constructor throws this
-error synchronously; the legacy `config(options)` setter continues returning
-the error value.
+### Before upgrading
 
-`version` must be a positive safe integer. The operational limits
-`maxBatchSize`, `connectionIdleMs`, and `maxConcurrentTransactions` are
-non-negative safe integers; `0` continues to mean no batch split, no idle
-close, and no transaction cap, respectively.
+1. Upgrade to the final 2.1.x bridge release named by the 3.0 release notes.
+2. Run development builds and clear every emitted migration warning.
+3. Enable `strictValues: true` on the bridge and exercise every write path.
+4. Refactor transaction runners to use only their supplied scope.
+5. Convert custom plugins to the 3.0 single-or-batch hook model.
+6. Back up representative production data and rehearse the exact package/data
+   upgrade and rollback sequence.
 
-The 2.0 namespace behavior is retained: `config(options)` replaces non-word
-`storeName` characters with `_`, while the constructor preserves them. This
-ensures unchanged setter-based applications reopen their existing data. When
-moving from the setter to constructor options, pass the already-normalized name
-explicitly (for example `my_store_name`). Full normalization unification is a
-3.0 migration.
+`strictValues` is a 2.1 bridge-only migration aid. LocalSpace 3.0 validates
+unconditionally and rejects the option itself.
 
-Driver and storage failures now use stable `LocalSpaceError` codes. In
-particular, all-driver initialization failure is `DRIVER_UNAVAILABLE`, quota
-failure is `QUOTA_EXCEEDED`, and other driver operation failure is
-`OPERATION_FAILED`. Inspect `error.code`; engine-specific text remains in
-`error.cause` and `error.details.causeMessage` for diagnostics.
+### Breaking-change summary
 
-### Migrate 2.1 Deprecations Before 3.0
+| 2.1.x API or behavior                                                  | 3.0 migration                                                                          |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ---------- |
+| `config(options)` setter                                               | pass all options to `new LocalSpace()` or `createInstance()`                           |
+| mutable objects returned from `config()`                               | treat the detached, deeply frozen snapshot as readonly                                 |
+| `instance.defineDriver()`                                              | use construction-scoped `drivers` or exported realm-wide `registerDriver()`            |
+| `destroy()`                                                            | use `close()` for disposal, `clear()`/`dropInstance()` for deletion                    |
+| broad arbitrary value generics                                         | store only `StorageValue`; convert rich values explicitly                              |
+| optional `strictValues`                                                | remove it; validation is always enabled                                                |
+| ordinary facade calls inside a transaction runner                      | use only `tx.get/set/remove/keys/iterate/clear`                                        |
+| memory snapshot rollback without isolation                             | rely on the new serialized realm/namespace contract, or remove transaction assumptions |
+| localStorage/RN transaction stubs                                      | check `capabilities().transactions`; unsupported calls reject early                    |
+| `prewarmTransactions`, `connectionIdleMs`, `maxConcurrentTransactions` | remove them; supplying them is `INVALID_CONFIG`                                        |
+| matching single and batch hooks both executing                         | remove `isBatch` dedup guards; 3.0 chooses the batch hook or maps the single hook      |
+| plugins not covering query/iteration/clear/drop                        | adopt dedicated observers and logical views                                            |
+| synchronous-only/always-`U` iterate assumptions                        | callbacks may be async; result is `U                                                   | undefined` |
+| RN adapter auto-detection                                              | import `localspace/react-native` and inject AsyncStorage explicitly                    |
+| Storage Bucket fallback to default backend                             | handle readiness failure; a requested bucket never falls back                          |
+| AES-CBC/AES-CTR normal encryption config                               | use the read-only legacy migration plugin, then write AES-GCM data elsewhere           |
+| package source/deep imports                                            | import only `localspace`, `localspace/react-native`, or `localspace/package.json`      |
+| prefixed IndexedDB/WebSQL assumptions                                  | require modern unprefixed IndexedDB; migrate WebSQL data first                         |
 
-LocalSpace 2.1 emits each deprecation category at most once in non-production
-runtimes. Warnings do not alter stored values or fallback order. They can be
-disabled across all localspace entry points in the current runtime realm when
-an application has its own migration telemetry:
+## Migrate configuration
 
-```ts
-import { setDeprecationWarnings } from 'localspace';
-
-setDeprecationWarnings(false);
-```
-
-| Deprecated 2.x behavior                                                   | Conservative migration                                                                                     |
-| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| AES-CBC or AES-CTR configuration                                          | Use the matching read-only 2.1 reader to migrate data to AES-GCM; legacy writes reject                     |
-| `size` configuration                                                      | Remove it; built-in drivers have always ignored it as a quota control                                      |
-| `destroy()`                                                               | Use idempotent, non-destructive `close()`                                                                  |
-| Mutating the object returned by `config()`                                | Treat configuration as readonly and pass options to `createInstance()`                                     |
-| Calling `config(options)`                                                 | Move every option to the constructor or `createInstance(options)`                                          |
-| Calling `instance.defineDriver()`                                         | Pass `drivers` at construction, or call exported `registerDriver()` for deliberate realm-wide registration |
-| `prewarmTransactions`, `connectionIdleMs`, or `maxConcurrentTransactions` | Remove reliance on these public tuning options; 3.0 keeps only benchmark-backed internals                  |
-| Storage Bucket fallback to default IndexedDB                              | Feature-detect before 3.0 and handle initialization failure explicitly                                     |
-| Memory snapshot-only transactions                                         | Do not rely on concurrent isolation until the 3.0 store-scoped contract                                    |
-| Assuming `iterate()` always returns `U`                                   | Handle `undefined` when no callback invocation terminates iteration early                                  |
-| Matching batch and single hooks in one custom plugin                      | Define one hook form per phase; retain the 2.x `isBatch` guard until migrated                              |
-| React Native adapter auto-detection                                       | Import `localspace/react-native` and inject `reactNativeAsyncStorage` explicitly                           |
-| Package deep imports                                                      | Import only `localspace` or `localspace/react-native`                                                      |
-
-Package deep imports have no executable compatibility entry on which a runtime
-warning could be attached: the `exports` map rejects them immediately. The
-release tests keep that boundary explicit rather than adding a temporary deep
-entry that would expand the supported package surface.
-
-### Audit Values Against The 3.0 Contract
-
-LocalSpace 2.1 warns in development when a logical write is outside the value
-contract shared by every 3.0 driver. Legacy behavior remains the default so the
-warning does not change a successful 2.x path. Enable strict migration mode to
-turn the same diagnostic into a pre-write `SERIALIZATION_FAILED` error:
+Move setter calls into construction:
 
 ```ts
+// 2.1.x
+const store = localspace.createInstance();
+await store.config({
+  name: 'my-app',
+  storeName: 'settings',
+});
+
+// 3.0
 const store = localspace.createInstance({
-  strictValues: true,
+  name: 'my-app',
+  storeName: 'settings',
 });
 ```
 
-Strict mode covers `setItem()`, every `setItems()` entry, and
-transaction-scope `set()`. Convert Date, Map, Set, RegExp, `undefined`, scalar
-BigInt, cyclic values, accessors, and class instances to explicit plain data.
-The accepted contract consists of `null`, booleans, finite numbers, strings,
-dense arrays, plain objects, `ArrayBuffer`, and typed arrays. This option is a
-2.1 migration aid; 3.0 validates unconditionally.
-
-### Close Instances Without Deleting Data
-
-Use `await instance.close()` when an instance is no longer needed. The method
-is idempotent, cleans only initialized plugins, releases the active driver
-connection, and leaves stored data intact. A closed instance is terminal and
-later operations reject with `INSTANCE_CLOSED` before plugin initialization or
-hooks; create a new instance to access the same persisted namespace again.
-
-Call `close()` and `setDriver()` only after current storage operations settle.
-While an operation is active they reject with `OPERATION_FAILED` and
-`details.reason === 'active-operations'`; wait for the operation and retry.
-Lifecycle calls from hooks, transaction runners, and custom drivers follow the
-same rule instead of waiting on themselves.
-
-`context.instance` remains the stable public instance in every plugin hook.
-Inside a plugin lifecycle callback, use that callback's
-`context.lifecycleInstance` for same-instance storage or lifecycle calls,
-especially across `await`; it rejects lifecycle reentry while the callback is
-pending and resumes normal forwarding after the callback settles. Custom-driver
-lifecycle callbacks use their stable `this` receiver for the same purpose.
-
-`destroy()` remains available during 2.x with its historical plugin-only
-cleanup behavior, but is deprecated. Use `clear()` or `dropInstance()` only
-when the intent is to delete data.
-
-### Prepare Plugin Data For 3.0 Rollback
-
-The 2.1 built-in plugin readers understand both legacy 2.x payloads and the
-versioned 3.0 envelope documented in the plugin guide. Writers remain on the
-legacy format in 2.1. This makes a data-layer rollback possible after a 3.0
-writer has been introduced, while unknown envelope versions fail explicitly
-instead of being exposed as plaintext or ordinary application objects.
-
-The 2.1 forward reader also understands the frozen core `StoredRecord` v1
-format on item, batch, iteration, and transaction-scope reads. The record uses
-the `localspace.record` namespace and a canonical `localspace.storage-value`
-payload. A 3.0 writer encodes the logical value into this record before TTL,
-compression, or encryption wraps it. The bridge release continues emitting
-legacy core and plugin representations; its new codec is a reader and fixture
-generator until the 3.0 write path is enabled.
-
-## Upgrade From 1.x To 2.0
-
-Install the new major version:
-
-```bash
-pnpm add localspace@^2
-```
-
-The core serializer, database names, store names, and key layout are unchanged,
-so existing core key/value data does not need to be rewritten. The breaking
-changes are in API behavior and package surface.
-
-### Breaking Changes
-
-| 1.x API or behavior                              | 2.0 migration                                                                                  |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| Completion callbacks and exported callback types | Use `await`, `.then()`, and `try`/`catch`                                                      |
-| `compatibilityMode`                              | Remove the option; all public operations are Promise-only                                      |
-| `coalesceWrites` and related options             | Remove them and call `setItems()` or `removeItems()` explicitly                                |
-| `coalesceFireAndForget`                          | Await the returned write promise; early success before persistence is no longer supported      |
-| `getPerformanceStats()`                          | Measure explicit operations in application telemetry                                           |
-| `syncPlugin`                                     | Implement application synchronization; start with the limited notification example if useful   |
-| `quotaPlugin`                                    | Enforce application policy outside the package; adapt the limited size guard example if useful |
-| localStorage or React Native `runTransaction()`  | Use explicit operations or select IndexedDB/memory when rollback is required                   |
-
-### Convert Completion Callbacks
-
-Replace completion callbacks with Promise control flow:
-
-```diff
--store.getItem('user', (error, user) => {
--  if (error) {
--    report(error);
--    return;
--  }
--  render(user);
--});
-+try {
-+  const user = await store.getItem('user');
-+  render(user);
-+} catch (error) {
-+  report(error);
-+}
-```
-
-Driver management is Promise-only too:
-
-```diff
--store.setDriver([store.INDEXEDDB], onSuccess, onError);
-+await store.setDriver([store.INDEXEDDB]);
-```
-
-Remove `Callback`, `CompatibilitySuccessCallback`, and
-`CompatibilityErrorCallback` imports.
-
-### Replace Automatic Write Coalescing
-
-Use explicit batches when writes belong together:
-
-```diff
--const store = localspace.createInstance({
--  coalesceWrites: true,
--  coalesceWindowMs: 8,
--});
--await Promise.all([
--  store.setItem('a', 1),
--  store.setItem('b', 2),
--]);
-+const store = localspace.createInstance();
-+await store.setItems([
-+  { key: 'a', value: 1 },
-+  { key: 'b', value: 2 },
-+]);
-```
-
-On IndexedDB, each batch chunk is transactional. `maxBatchSize` can split one
-call into multiple transactions, so omit it when the whole batch must be
-atomic.
-
-### Use Transactions Only On Capable Drivers
-
-LocalSpace 2.1 retains the 2.0 transaction runner contract. IndexedDB provides
-a native transaction while the runner is issuing transaction-scope requests.
-The memory driver restores a snapshot after a failed readwrite transaction but
-does not isolate concurrent callers. Ordinary instance operations awaited by a
-runner remain outside the transaction. The transaction-bound runner and
-cross-driver isolation contract are deferred to 3.0. localStorage and React
-Native AsyncStorage reject `runTransaction()` with `UNSUPPORTED_OPERATION`.
-
-In 2.1, treat Memory `runTransaction()` as rollback assistance for isolated
-tests, not as an isolation guarantee. 3.0 coordinates transactions and ordinary
-operations by Memory namespace; code that needs concurrency safety should wait
-for that contract rather than inferring it from a successful 2.1 rollback.
-
-LocalSpace 2.1 also rejects `runTransaction()` and `iterate()` while a built-in
-encryption, compression, or TTL plugin is active. Earlier 2.x releases exposed
-raw plugin envelopes or allowed transaction writes to bypass transformations.
-Use item/batch APIs until plugin-aware transaction scopes are available.
+`config()` and `config(key)` are reads only:
 
 ```ts
-if (store.driver() === store.INDEXEDDB || store.driver() === store.MEMORY) {
-  await store.runTransaction('readwrite', async (tx) => {
-    const count = (await tx.get<number>('count')) ?? 0;
-    await tx.set('count', count + 1);
-  });
+const snapshot = store.config();
+const name = store.config('name');
+
+// snapshot and nested fields are frozen; create a new instance to change them.
+```
+
+Constructor inputs are snapshotted. Later mutations to driver arrays, bucket
+objects, adapters, or plugin arrays do not reconfigure an instance. `use()` is
+allowed only before the first `ready()` or storage call.
+
+Remove these options entirely:
+
+```ts
+// Removed in 3.0; they are not ignored.
+{
+  size,
+  strictValues,
+  prewarmTransactions,
+  connectionIdleMs,
+  maxConcurrentTransactions,
 }
 ```
 
-Do not replace a rejected transaction with a loop when partial writes would be
-incorrect.
+Keep `maxBatchSize` only when intentional. On IndexedDB, setting it splits a
+large batch into multiple transactions, so `capabilities().atomicBatch` is
+`false`.
 
-### Move Application Policy Out Of The Package
+## Migrate values
 
-`syncPlugin` and `quotaPlugin` are no longer exported. Their names overstated
-what could be guaranteed across tabs, processes, concurrent writers, and
-browser quota enforcement.
+### Accepted contract
 
-- `examples/broadcast-notification-plugin.ts` demonstrates best-effort
-  single-item notifications. It does not replicate values or guarantee
-  delivery, ordering, or batch coverage. Its default channel isolates different
-  storage drivers because identically named IndexedDB and localStorage stores
-  do not share data.
-- `examples/size-limit-plugin.ts` demonstrates a serialized-value guard. It is
-  not browser quota management, does not evict data, and cannot enforce a limit
-  atomically across concurrent writers.
+The 3.0 `StorageValue` contract consists of:
 
-The 1.x `syncPlugin` persisted conflict-version maps in localStorage under keys
-prefixed with `__localspace_sync_versions__:`. Version 2.0 ignores those keys.
-After every 1.x tab or process has been retired, applications may remove them as
-obsolete plugin metadata.
+- `null`, booleans, finite numbers, and strings;
+- `ArrayBuffer` and standard integer/float typed arrays;
+- dense arrays of supported values;
+- plain or null-prototype objects with enumerable own data properties containing
+  supported values.
 
-Copy and adapt those examples only when their limitations match the
-application's policy.
+Everything else must be encoded by the application. Validation occurs before
+plugin and driver side effects for `setItem`, every `setItems` entry, and
+transaction `set`.
 
-## Migrate From localForage
+### Common conversions
 
-localspace keeps a familiar key/value API, but it is not a callback-compatible
-drop-in replacement. Promise-based localForage usage can usually begin with an
-import change:
+```ts
+// Date
+await store.setItem('created-at', date.toISOString());
 
-```diff
--import localforage from 'localforage';
-+import localspace from 'localspace';
+// Map with string keys
+await store.setItem('counts', Object.fromEntries(countMap));
 
-await localspace.setItem('key', value);
-const value = await localspace.getItem('key');
+// Set
+await store.setItem('tags', [...tagSet]);
+
+// RegExp
+await store.setItem('pattern', {
+  source: expression.source,
+  flags: expression.flags,
+});
+
+// bigint scalar
+await store.setItem('large-id', largeId.toString());
+
+// optional fields: omit them or choose null explicitly
+await store.setItem('profile', {
+  nickname: nickname ?? null,
+});
+
+// class instance
+await store.setItem('account', {
+  id: account.id,
+  active: account.active,
+});
 ```
 
-Before switching:
+Also remove cycles, accessors, symbol/non-enumerable properties, sparse arrays,
+`Blob`, `DataView`, `SharedArrayBuffer`, shared-memory views, `NaN`, and
+infinities.
 
-1. Convert completion callbacks to Promises.
-2. Move WebSQL-only data and driver selection to IndexedDB.
-3. Remove assumptions that every driver supports transactions.
-4. Test database names, store names, persisted values, and fallback order.
-5. Adopt batch APIs and plugins explicitly rather than as compatibility shims.
+TypeScript read/write generics now extend `StorageValue`. Prefer stored DTO type
+aliases that structurally satisfy the record contract:
+
+```ts
+type StoredUser = {
+  id: string;
+  roles: string[];
+  lastSeen: string | null;
+};
+
+await store.setItem<StoredUser>('user', value);
+const user = await store.getItem<StoredUser>('user');
+```
+
+Do not type a read as a rich runtime class and expect LocalSpace to construct
+it. Decode the stored DTO after reading.
+
+### Existing out-of-contract data
+
+3.0 retains legacy 2.x readers, but the old representation may already differ
+by driver (`Date`, `Map`, and similar values could have been stringified or
+lost during fallback). Use the 2.1 bridge to enumerate representative data,
+convert it to explicit plain DTOs, and write those DTOs before depending on the
+3.0 contract. Reading an old value does not automatically rewrite it.
+
+## Migrate transactions
+
+The 2.1 runner allowed ordinary instance operations while a driver transaction
+was active. That could escape the transaction, deadlock, or commit at a
+different time. 3.0 permits only the supplied transaction scope.
+
+```ts
+// 2.1.x: no longer valid
+await store.runTransaction('readwrite', async () => {
+  const current = (await store.getItem<number>('counter')) ?? 0;
+  await store.setItem('counter', current + 1);
+});
+
+// 3.0
+await store.runTransaction('readwrite', async (tx) => {
+  const current = (await tx.get<number>('counter')) ?? 0;
+  await tx.set('counter', current + 1);
+});
+```
+
+Available scope methods are `get`, `set`, `remove`, `keys`, `iterate`, and
+`clear`. During a runner, all ordinary facade operations on that instance,
+including a nested `runTransaction`, reject with
+`TRANSACTION_SCOPE_REQUIRED`. A retained scope is invalid after the runner
+settles. Readonly mutations reject with `TRANSACTION_READONLY`.
+
+Check capability after readiness:
+
+```ts
+await store.ready();
+
+if (store.capabilities().transactions) {
+  await store.runTransaction('readwrite', migrateAtomically);
+} else {
+  await migrateWithoutAtomicity(store);
+}
+```
+
+IndexedDB and memory support transactions. localStorage and React Native
+AsyncStorage do not. The facade method remains present on every instance for
+stable typing, but unsupported calls reject before the runner or plugins run.
+
+Memory now serializes read-write transactions across instances in the same
+JavaScript realm and `name`/`storeName`. IndexedDB uses native transaction
+scheduling. LocalSpace does not add cross-tab/process locks, notifications, or
+conflict resolution; memory isolation is realm-local and IndexedDB retains its
+own native cross-context semantics.
+
+Transaction-bound plugin hooks receive `context.transactionScope`. Replace
+same-instance facade calls inside those hooks with that scope.
+
+## Migrate custom plugins
+
+### Remove dual-hook guards
+
+In 2.x a batch operation could invoke both a batch hook and its matching single
+hook. Many plugins added an `isBatch` guard:
+
+```ts
+// 2.x compatibility pattern: remove this guard in 3.0.
+beforeSet(key, value, context) {
+  if (context.operationState.isBatch) return value;
+  return transform(value);
+},
+beforeSetItems(entries) {
+  return transformBatch(entries);
+},
+```
+
+In 3.0, for each plugin and phase, LocalSpace invokes the batch hook once when
+present; otherwise it maps the single hook. Choose either implementation:
+
+```ts
+// Simple form: automatically mapped for setItems().
+beforeSet<T>(_key: string, value: T): T {
+  return transform(value) as T;
+},
+
+// Or optimized batch form. If both are declared, this wins for batch calls.
+beforeSetItems(entries) {
+  return transformBatch(entries);
+},
+```
+
+Mapped single hooks may still observe `operationState.isBatch` and `batchSize`
+as context, but must not use them to deduplicate execution.
+
+### Add complete operation observers
+
+3.0 adds observer pairs for:
+
+- `iterate` (`afterIterate` receives `{ iterations, stopped }`);
+- `keys`, `key`, and `length`;
+- `clear` and `dropInstance`.
+
+Observer return values are ignored and result arrays/summaries are frozen.
+`clear`/`dropInstance` do not synthesize one remove hook per key.
+
+Query operations now materialize the logical decoded view when transforms can
+affect visibility. With TTL, an expired item is absent from `getItem`,
+`getItems`, `iterate`, `keys`, `key`, and `length`; decide whether custom
+visibility transforms need matching logic.
+
+### Validate plugin output
+
+Every value emitted by a write hook must satisfy `StorageValue`. Invalid output
+rejects with `SERIALIZATION_FAILED` and identifies the plugin. A transform may
+not use arbitrary classes or private marker objects as its persisted protocol.
+Use documented plugin hooks and versioned application DTOs.
+
+### Lifecycle and errors
+
+`destroy()` no longer exists. Plugin `onDestroy` runs during `close()` for
+initialized plugins. Inside `onInit`/`onDestroy`, use the callback-scoped
+`context.lifecycleInstance` when retaining or calling a same-instance receiver;
+reentry while the callback is pending rejects instead of deadlocking.
+
+`LocalSpaceError` and `PluginAbortError` propagate even under lenient policy.
+Unexpected custom-plugin errors are swallowed only under `pluginErrorPolicy:
+'lenient'` after `onError`/console reporting. Built-in transformations fail
+closed.
+
+## Migrate encryption
+
+Normal encryption is AES-GCM only:
+
+```ts
+const store = localspace.createInstance({
+  plugins: [
+    encryptionPlugin({
+      key: aesGcmKey,
+    }),
+  ],
+  pluginErrorPolicy: 'strict',
+});
+```
+
+For AES-CBC or AES-CTR data, open the old namespace with
+`legacyEncryptionMigrationPlugin`, read each value, and write it into a
+separate AES-GCM instance. The migration reader rejects every write and cannot
+be combined with normal encryption on one instance.
+
+Do not perform an in-place clear before the destination has been read back and
+verified. Invalid keys, malformed payloads, unknown versions, and crypto errors
+reject without overwriting the old value.
+
+## Migrate React Native
+
+3.0 does not inspect globals, call `require`, or create dynamic imports to find
+AsyncStorage. Inject it explicitly:
+
+```ts
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import localspace from 'localspace';
+import { createReactNativeInstance } from 'localspace/react-native';
+
+const store = await createReactNativeInstance(localspace, {
+  name: 'my-app',
+  storeName: 'data',
+  reactNativeAsyncStorage: AsyncStorage,
+});
+```
+
+The adapter must implement `getItem`, `setItem`, and `removeItem`. Optional
+`clear`, `getAllKeys`, and multi methods improve coverage/efficiency. A missing
+adapter produces `DRIVER_UNAVAILABLE`; malformed methods produce
+`INVALID_CONFIG`. Selecting the RN driver never falls through to a web/memory
+driver after adapter failure.
+
+`installReactNativeAsyncStorageDriver()` remains for deliberate realm-wide
+registration and takes no arguments. Every selected instance must still supply
+the adapter.
+
+## Migrate Storage Buckets
+
+2.1 could warn and silently use default IndexedDB when a requested bucket was
+unavailable. In 3.0 the request is a hard data-placement requirement:
+
+```ts
+try {
+  const store = localspace.createInstance({
+    name: 'my-app',
+    bucket: { name: 'critical-data', persisted: true },
+  });
+  await store.ready();
+} catch (error) {
+  // Decide explicitly whether to stop, prompt, or create a separate
+  // non-bucket instance. Reusing the same instance does not fall back.
+}
+```
+
+Do not silently construct a default-backend fallback unless the application is
+prepared for two physically distinct datasets.
+
+## Migrate iteration
+
+The callback may be async and is awaited sequentially. The return type is
+`Promise<U | undefined>`:
+
+```ts
+const found = await store.iterate<number, string>(async (value, key) => {
+  await inspect(value);
+  return value > 10 ? key : undefined;
+});
+
+if (found !== undefined) {
+  console.log('matched', found);
+}
+```
+
+Iteration exposes logical decoded values and participates in plugin observers.
+Do not rely on driver/plugin envelopes or leave async callback promises
+unawaited.
+
+## Driver registration and capabilities
+
+Replace instance mutation:
+
+```ts
+// Removed
+await store.defineDriver(customDriver);
+
+// Preferred: instance-scoped
+const store = new LocalSpace({
+  driver: customDriver._driver,
+  drivers: [customDriver],
+});
+
+// Deliberate realm-wide registration
+await registerDriver(customDriver);
+```
+
+LocalSpace snapshots definitions without injecting missing methods or state.
+Every selection creates an instance-owned session receiver.
+
+Custom drivers should declare `_capabilities`. Optional operations remain
+optional on the definition, while the public facade keeps a stable full method
+set. Missing/disabled operations reject with `UNSUPPORTED_OPERATION` before
+plugin initialization or driver side effects.
+
+## Data compatibility and rollback
+
+Source rollback and data rollback are different:
+
+- **Source rollback** means redeploying older JavaScript.
+- **Data rollback** means that older JavaScript can parse every record already
+  written by 3.0.
+
+  3.0 reads legacy core values and legacy 2.x TTL, compression, and encryption
+  payloads. 3.0 writes:
+
+- collision-safe core StoredRecord v1 (`localspace.record`, version 1);
+- frozen built-in plugin envelope v1 (`localspace.plugin`, version 1);
+- only payload shapes accepted by the bridge validators.
+
+The published `localspace@2.1.0` understands plugin envelope v1 but does **not**
+contain the final core StoredRecord v1 forward reader. It is therefore not a
+safe data rollback target after any 3.0 write. Use only the exact final 2.1.x
+bridge version identified and package-isolated in the 3.0 release evidence. If
+that bridge has not been published and verified, treat downgrade after 3.0
+writes as unsupported.
+
+A release rehearsal must use actual packages and a shared persistent fixture:
+
+1. write legacy fixtures with the pinned 2.1.x bridge;
+2. open/read them with the exact 3.0 candidate;
+3. write core and built-in-plugin values with 3.0;
+4. reinstall the same pinned 2.1.x bridge in isolation;
+5. read every 3.0 fixture without importing code from the workspace;
+6. verify malformed and unknown-version values fail without mutation.
+
+Static hand-authored fixtures are useful regression tests but do not prove this
+package-level rollback path.
+
+## Namespace compatibility
+
+The defaults `name: 'localforage'` and `storeName: 'keyvaluepairs'` are
+permanently frozen through 3.x. Dropping API-level localForage compatibility
+does not permit changing these values. Set an explicit application-owned
+namespace for new data, but keep the original names when reopening existing
+data.
+
+WebSQL is unsupported. Migrate WebSQL records to IndexedDB/localStorage before
+the LocalSpace upgrade; no automatic driver fallback can recover a WebSQL-only
+dataset.
+
+## Package boundary
+
+Replace imports from source or build internals:
+
+```ts
+// Unsupported
+import serializer from 'localspace/src/utils/serializer';
+import driver from 'localspace/dist/drivers/indexeddb';
+
+// Supported
+import localspace, { serializer } from 'localspace';
+import { createReactNativeInstance } from 'localspace/react-native';
+```
+
+The 3.0 tarball omits source files, TSC intermediate JavaScript, and declaration
+maps. Runtime source maps include their TypeScript source content.
+
+## Upgrade from 1.x or migrate from localForage
+
+Applications still on 1.x should first adopt the 2.1.x bridge and its Promise-
+only API, then follow every 3.0 step above. In particular:
+
+- replace completion callbacks with `await`/`.then()`;
+- replace automatic write coalescing with explicit batch calls;
+- move sync/quota policy into application plugins or services;
+- remove localStorage/RN transaction assumptions;
+- use `close()` for disposal.
+
+Promise-based localForage data in the default IndexedDB/localStorage namespace
+can be opened because the default database/store/key layout remains stable and
+3.0 reads legacy unwrapped values. Callback APIs are not supported. Existing
+rich values must still be converted to `StorageValue`, and WebSQL data requires
+an explicit migration first.

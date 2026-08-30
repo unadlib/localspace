@@ -1,357 +1,523 @@
 # Plugin System
 
-localspace ships with a first-class plugin engine. Attach middleware when creating an instance or call `use()` later; plugins can mutate payloads, observe driver context, and run async interceptors around every storage call.
+LocalSpace 3.0 plugins transform logical item operations and observe the full
+query/destructive surface without exposing driver-specific payloads. Plugins
+are instance-scoped, ordered, initialized lazily, and run inside transaction
+scopes when the operation is transactional.
 
 ```ts
+import localspace, {
+  compressionPlugin,
+  encryptionPlugin,
+  ttlPlugin,
+} from 'localspace';
+
 const store = localspace.createInstance({
-  name: 'secure-store',
-  storeName: 'primary',
+  name: 'my-app',
   plugins: [
     ttlPlugin({ defaultTTL: 60_000 }),
     compressionPlugin({ threshold: 1024 }),
     encryptionPlugin({ key: '0123456789abcdef0123456789abcdef' }),
   ],
+  pluginErrorPolicy: 'strict',
 });
 ```
 
-## Table of Contents
+## Registration and lifecycle
 
-- [Lifecycle and Hooks](#lifecycle-and-hooks)
-- [Plugin Execution Order](#plugin-execution-order)
-- [Built-in Plugins](#built-in-plugins)
-  - [TTL Plugin](#ttl-plugin)
-  - [Encryption Plugin](#encryption-plugin)
-  - [Compression Plugin](#compression-plugin)
-- [Plugin Combination Best Practices](#plugin-combination-best-practices)
-- [Plugin Troubleshooting](#plugin-troubleshooting)
-- [Custom Plugin Development](#custom-plugin-development)
+Plugins can be supplied in `LocalSpaceOptions.plugins` or registered with
+`use()` before the instance starts:
 
----
+```ts
+const store = localspace.createInstance({ name: 'my-app' });
+store.use([metricsPlugin, validationPlugin]);
+await store.ready();
+```
 
-## Lifecycle and Hooks
+The first `ready()` or storage call synchronously locks plugin registration.
+Later `use()` calls reject with `CONFIG_LOCKED`. Names must be non-empty and
+unique within the instance; a duplicate batch is rejected atomically.
 
-- **Registration** – supply `plugins` when calling `createInstance()` or chain `instance.use(plugin)` later. Each plugin can also expose `enabled` (boolean or function) and `priority` to control execution order.
+Lifecycle hooks:
 
-- **Lifecycle events** – `onInit(context)` is invoked after `ready()`, and `onDestroy` lets you tear down timers or channels. Call `await instance.close()` when disposing of an instance: initialized plugins receive one `onDestroy` call in reverse priority order, then the driver connection is released without deleting data. Context exposes the active driver, db info, config, and a shared `metadata` bag for cross-plugin coordination. `context.instance` is always the public instance and keeps the same identity across lifecycle and operation hooks. Lifecycle callbacks must use the callback-scoped `context.lifecycleInstance` for same-instance calls across async boundaries. That guarded receiver rejects reentry while the callback is pending and automatically releases afterward, so it can be retained for later timer or event-handler work. Each lifecycle callback owns an isolated guard scope, so another plugin's initialization or teardown cannot reactivate a settled receiver.
+```ts
+interface LocalSpacePlugin {
+  name: string;
+  version?: string;
+  priority?: number;
+  enabled?: boolean | (() => boolean);
 
-- **Interceptors** – hook into `beforeSet/afterSet`, `beforeGet/afterGet`, `beforeRemove/afterRemove`, plus batch-specific methods such as `beforeSetItems` or `beforeGetItems`. Hooks run sequentially: `before*` hooks execute from highest to lowest priority, while `after*` hooks unwind in reverse order so layered transformations (TTL → compression → encryption) remain invertible. Returning a value passes it to the next plugin, while throwing a `LocalSpaceError` aborts the operation.
+  onInit?(context: PluginContext): Promise<void> | void;
+  onDestroy?(context: PluginContext): Promise<void> | void;
+  onError?(error: unknown, info: PluginErrorInfo): Promise<void> | void;
+}
+```
 
-- **Per-call state** – plugins can stash data on `context.operationState` (e.g., capture the original value in `beforeSet` and reuse it in `afterSet`). For batch operations, `context.operationState.isBatch` is `true` and `context.operationState.batchSize` provides the total count.
+`onInit` runs lazily before the first plugin-aware operation. `onDestroy` runs
+once for every initialized plugin during `close()`. Initialization follows
+normal priority order; teardown runs in reverse order.
 
-- **Batch vs single hooks (deprecated combination)** – a 2.x batch call such as `setItems()` invokes **both** the batch hook (`beforeSetItems`) **and** the per-entry single hook (`beforeSet`, once per entry). On the per-entry single hook, `context.operationState.isBatch` is `true`. Defining both matching forms in a custom plugin is deprecated in 2.1; new plugins should define one form per phase. Existing plugins must keep the `if (context.operationState.isBatch) return value;` guard until migrated. The built-in TTL, encryption, and compression plugins retain this internal compatibility pattern through 2.x.
+`context.instance` is always the public instance and keeps stable identity.
+Lifecycle callbacks also receive `context.lifecycleInstance`, a callback-
+scoped receiver that rejects same-instance storage/lifecycle reentry while the
+callback is pending. This guard extends across `await` and prevents self-
+deadlocks. Operation hooks do not receive `lifecycleInstance`.
 
-- **Batch write return values** – `setItems()` and `afterSetItems` use caller-facing logical values when a built-in TTL, compression, or encryption transform is active. Their storage envelopes remain internal to the driver path. Entry lineage is tracked by key and occurrence across `beforeSetItems`, so custom hooks may add, reorder, or replace entries without borrowing another key's logical value; an `afterSetItems` hook may still explicitly customize the returned entries.
+## Ordering
 
-- **Error handling & policies** – unexpected exceptions are reported through `plugin.onError`. Throw a `LocalSpaceError` if you need to stop the pipeline (validation failures, failed decryptions, etc.). Init policy: default fail-fast; set `pluginInitPolicy: 'disable-and-continue'` to log and skip the failing plugin. Runtime policy: default `pluginErrorPolicy: 'lenient'` reports and continues. The built-in encryption plugin always fails closed, including with the lenient policy; use `strict` for compression, TTL, or any correctness-critical custom plugin.
+Plugins are sorted by descending `priority`. Equal priorities keep registration
+order.
 
----
+- before hooks run from highest to lowest priority;
+- after hooks run in reverse, from lowest to highest priority;
+- initialization follows before order;
+- destruction follows reverse order.
 
-## Plugin Execution Order
+This creates a nested transform pipeline. The built-in priorities are:
 
-Plugins are sorted by `priority` (higher runs first in `before*`, last in `after*`). Default priorities:
+| Plugin      | Priority | Write order | Read order |
+| ----------- | -------: | ----------- | ---------- |
+| TTL         |       10 | first       | last       |
+| Compression |        5 | after TTL   | before TTL |
+| Encryption  |        0 | last        | first      |
 
-| Plugin      | Priority | Notes                                                         |
-| ----------- | -------- | ------------------------------------------------------------- |
-| encryption  | 0        | Encrypts after compression so decrypt runs first in `after*`  |
-| compression | 5        | Runs before encryption so payload is compressible             |
-| ttl         | 10       | Runs outermost so TTL wrapper is transformed by other plugins |
+The default order encrypts the final stored representation and compresses
+before encryption. If custom priorities make encryption run before compression,
+LocalSpace emits a warning because encrypted bytes rarely compress usefully.
 
-**Recommended order**: `[ttlPlugin, compressionPlugin, encryptionPlugin]`
+## PluginContext
 
----
+```ts
+interface PluginContext {
+  instance: LocalSpaceInstance;
+  lifecycleInstance?: LocalSpaceInstance;
+  transactionScope?: TransactionScope;
+  driver: string | null;
+  dbInfo: DbInfo | null;
+  config: LocalSpaceConfigSnapshot;
+  metadata: Record<string, unknown>;
+  operation: PluginOperation | null;
+  operationState: Record<string, unknown>;
+}
+```
 
-## Built-in Plugins
+- `config` is a detached, frozen snapshot.
+- `metadata` is shared across contexts for the lifetime of the plugin manager;
+  namespace keys to avoid collisions.
+- `operationState` is per operation/context and is suitable for carrying a
+  before-hook result into its after hook.
+- mapped single hooks in a batch receive `operationState.isBatch === true` and
+  `batchSize`, but these fields are informational. Do not use an `isBatch`
+  guard to compensate for duplicate execution: 3.0 never invokes both matching
+  forms for the same plugin phase.
+- `transactionScope` is present for operations invoked through
+  `runTransaction()`. A plugin must use it instead of re-entering
+  `context.instance`.
 
-### Payload envelope compatibility
+## Item hooks
 
-LocalSpace 2.1 continues writing the legacy 2.x plugin payloads so an upgrade
-does not rewrite stored data. Its readers also accept the frozen 3.0 envelope:
+```ts
+interface LocalSpacePlugin {
+  beforeSet?<T>(key: string, value: T, context: PluginContext): Promise<T> | T;
+  afterSet?<T>(
+    key: string,
+    value: T,
+    context: PluginContext
+  ): Promise<void> | void;
+
+  beforeGet?(key: string, context: PluginContext): Promise<string> | string;
+  afterGet?<T>(
+    key: string,
+    value: T | null,
+    context: PluginContext
+  ): Promise<T | null> | T | null;
+
+  beforeRemove?(key: string, context: PluginContext): Promise<string> | string;
+  afterRemove?(key: string, context: PluginContext): Promise<void> | void;
+}
+```
+
+`beforeSet` and `afterGet` may transform logical values. Every value emitted by
+a write hook must still satisfy `StorageValue`; LocalSpace validates plugin
+output and reports the plugin name in `SERIALIZATION_FAILED` details.
+
+`beforeGet` and `beforeRemove` may rewrite a key. `afterSet` and `afterRemove`
+are observers.
+
+## Batch hooks: one form per plugin and phase
+
+```ts
+interface LocalSpacePlugin {
+  beforeSetItems?<T>(
+    entries: BatchItems<T>,
+    context: PluginContext
+  ): Promise<BatchItems<T>> | BatchItems<T>;
+  afterSetItems?<T>(
+    entries: BatchResponse<T>,
+    context: PluginContext
+  ): Promise<BatchResponse<T>> | BatchResponse<T>;
+
+  beforeGetItems?(
+    keys: string[],
+    context: PluginContext
+  ): Promise<string[]> | string[];
+  afterGetItems?<T>(
+    entries: BatchResponse<T>,
+    context: PluginContext
+  ): Promise<BatchResponse<T>> | BatchResponse<T>;
+
+  beforeRemoveItems?(
+    keys: string[],
+    context: PluginContext
+  ): Promise<string[]> | string[];
+  afterRemoveItems?(
+    keys: string[],
+    context: PluginContext
+  ): Promise<void> | void;
+}
+```
+
+For each plugin and phase:
+
+1. LocalSpace invokes the batch hook once when it exists.
+2. Otherwise it maps the matching single hook over each current entry.
+3. It never invokes both forms for that plugin phase.
+4. The next plugin receives the transformed order/key set from the previous
+   plugin.
+5. After phases apply the same choice in reverse plugin order.
+
+This rule is global across single and batch forms. A high-priority single hook
+runs before a lower-priority batch hook in the before phase; after order is
+reversed. Batch hooks may reorder, add, or remove entries, and LocalSpace
+reconciles per-item context by key. Built-in storage transforms are stricter:
+they may not change the logical batch key set or order.
+
+A custom plugin usually needs only single hooks:
+
+```ts
+import type { LocalSpacePlugin } from 'localspace';
+
+const normalizeStrings: LocalSpacePlugin = {
+  name: 'normalize-strings',
+  beforeSet: <T>(_key: string, value: T): T =>
+    (typeof value === 'string' ? value.trim() : value) as T,
+};
+```
+
+`setItems()` maps that hook automatically. Add `beforeSetItems` only when a
+true batch implementation is useful; do not retain a 2.x
+`if (context.operationState.isBatch) return value` deduplication guard.
+
+## Query and destructive observers
+
+```ts
+interface LocalSpacePlugin {
+  beforeIterate?(context: PluginContext): Promise<void> | void;
+  afterIterate?(
+    summary: Readonly<{ iterations: number; stopped: boolean }>,
+    context: PluginContext
+  ): Promise<void> | void;
+
+  beforeKeys?(context: PluginContext): Promise<void> | void;
+  afterKeys?(
+    keys: readonly string[],
+    context: PluginContext
+  ): Promise<void> | void;
+
+  beforeKey?(index: number, context: PluginContext): Promise<void> | void;
+  afterKey?(
+    index: number,
+    key: string | null,
+    context: PluginContext
+  ): Promise<void> | void;
+
+  beforeLength?(context: PluginContext): Promise<void> | void;
+  afterLength?(length: number, context: PluginContext): Promise<void> | void;
+
+  beforeClear?(context: PluginContext): Promise<void> | void;
+  afterClear?(context: PluginContext): Promise<void> | void;
+
+  beforeDropInstance?(
+    options: LocalSpaceConfigSnapshot | undefined,
+    context: PluginContext
+  ): Promise<void> | void;
+  afterDropInstance?(
+    options: LocalSpaceConfigSnapshot | undefined,
+    context: PluginContext
+  ): Promise<void> | void;
+}
+```
+
+These hooks are observers: return values are ignored. Arrays and summaries are
+frozen copies. Before observers use descending priority and after observers use
+reverse order.
+
+`iterate`, `keys`, `key`, and `length` operate on the decoded logical view, not
+raw driver records. Built-in TTL expiration is resolved during that scan, so an
+expired entry is absent consistently from every view. A stored logical `null`
+is still an item and remains visible in keys/length.
+
+`clear` and `dropInstance` do not synthesize per-item remove hooks; use their
+dedicated observers for aggregate deletion.
+
+## Transactions
+
+Plugins are supported by IndexedDB and memory transaction scopes. Scope
+`get`/`set`/`remove` and `keys`/`iterate`/`clear` use the same hooks and logical
+views as facade operations, while remaining bound to the driver transaction.
+
+```ts
+import { PluginAbortError, type LocalSpacePlugin } from 'localspace';
+
+const relationshipPlugin: LocalSpacePlugin = {
+  name: 'relationship-check',
+  beforeSet: async (key, value, context) => {
+    if (context.transactionScope && key === 'child') {
+      const parent = await context.transactionScope.get('parent');
+      if (parent === null) throw new PluginAbortError('parent is required');
+    }
+    return value;
+  },
+};
+```
+
+Calling `context.instance.getItem()` from a transaction hook rejects with
+`TRANSACTION_SCOPE_REQUIRED`; use `context.transactionScope`. A transaction
+scope is invalid after its runner settles.
+
+## Error policies
+
+```ts
+const store = localspace.createInstance({
+  pluginInitPolicy: 'fail',
+  pluginErrorPolicy: 'lenient',
+});
+```
+
+`pluginInitPolicy`:
+
+- `fail` (default) aborts the operation when initialization fails;
+- `disable-and-continue` reports the error and disables that plugin for the
+  instance.
+
+`pluginErrorPolicy`:
+
+- `strict` propagates every runtime hook error;
+- `lenient` reports an unexpected custom-plugin error through `onError` (or
+  the console) and uses the pre-hook value/result.
+
+`LocalSpaceError` and `PluginAbortError` always propagate under either policy.
+Built-in storage transforms convert malformed payload, crypto, compression,
+and expiration failures into structured LocalSpace errors, so they fail closed.
+For data transforms, `strict` remains the clearest application policy.
+
+```ts
+import { PluginAbortError } from 'localspace';
+
+const rejectReservedKeys: LocalSpacePlugin = {
+  name: 'reserved-key-policy',
+  beforeSet: (key, value) => {
+    if (key.startsWith('__')) {
+      throw new PluginAbortError('reserved key');
+    }
+    return value;
+  },
+  onError: (error, info) => {
+    reportPluginFailure(info.plugin, info.operation, error);
+  },
+};
+```
+
+## Frozen persisted formats
+
+LocalSpace 3.0 writes a core StoredRecord v1 for every logical value:
+
+```ts
+{
+  __localspace__: {
+    namespace: 'localspace.record',
+    version: 1,
+  },
+  payload: {
+    codec: 'localspace.storage-value',
+    data: encodedStorageValue,
+  },
+}
+```
+
+Built-in transform plugins use the plugin envelope frozen during 2.1:
 
 ```ts
 {
   __localspace__: {
     namespace: 'localspace.plugin',
-    kind: 'encryption' | 'compression' | 'ttl',
+    kind: 'ttl' | 'compression' | 'encryption',
     version: 1,
   },
-  payload: { /* kind-specific fields */ },
+  payload: pluginPayload,
 }
 ```
 
-Encryption payload fields are `algorithm`, `iv`, and `data`; compression uses
-`algorithm`, `data`, and `originalSize`; TTL uses `data` and `expiresAt`. The
-`__localspace__` namespace is reserved for internal envelopes. Readers reject
-an unknown version or malformed matching payload with
-`DESERIALIZATION_FAILED`; objects that merely resemble a legacy marker are
-left as user values.
+With built-in transforms, the StoredRecord is nested inside the transform
+pipeline; it is not replaced. Readers also accept each built-in plugin's 2.x
+marker-based legacy payload. A matching namespace/kind with an unknown version
+throws `DESERIALIZATION_FAILED`. Writers never guess or silently downgrade an
+unknown format.
 
-The 3.0 storage pipeline places these transform envelopes around one core
-`localspace.record` v1 value. On rollback, 2.1 first removes the configured
-transform envelopes and then decodes that core record. An application object is
-encoded inside the core record rather than inspected as an envelope, including
-when it exactly matches one of the reserved marker shapes.
+The envelope property, namespace, version, kinds, and outer shape are frozen
+for 3.0. Payloads must remain within the validators understood by the 2.1
+bridge reader. See the [Migration Guide](./migration-guide.md) before relying
+on a source rollback after 3.0 writes.
 
-### TTL Plugin
-
-Wraps values as `{ data, expiresAt }`, invalidates stale reads, and optionally runs background cleanup.
-
-**Options:**
-
-- `defaultTTL` (ms) and exact-key `keyTTL` overrides
-- `cleanupInterval` to periodically scan expired entries
-- `cleanupBatchSize` (default: 100) for efficient batch cleanup
-- `onExpire(key, value)` callback after the expired entry is removed. Under the
-  lenient policy callback failures are reported and the read still returns
-  `null`; under the strict policy the callback error is propagated after the
-  removal. Notifications started by a background sweep are detached from the
-  lifecycle barrier (there is no foreground caller to receive an error), so a
-  callback may safely await `close()` or `destroy()` on the same instance.
+## TTL plugin
 
 ```ts
-// Cache API responses for 5 minutes
-const cacheStore = localspace.createInstance({
-  name: 'api-cache',
-  plugins: [
-    ttlPlugin({
-      defaultTTL: 5 * 60 * 1000, // 5 minutes
-      keyTTL: {
-        'user-profile': 30 * 60 * 1000, // 30 minutes for user data
-        'session-token': 60 * 60 * 1000, // 1 hour for session
-      },
-      cleanupInterval: 60 * 1000, // Cleanup every minute
-      cleanupBatchSize: 50, // Process 50 keys at a time
-      onExpire: (key, value) => {
-        console.log(`Cache expired: ${key}`);
-      },
-    }),
-  ],
-});
+import { ttlPlugin } from 'localspace';
 
-// Single item and batch operations both respect TTL
-await cacheStore.setItem('user-profile', userData);
-await cacheStore.setItems([
-  { key: 'post-1', value: post1 },
-  { key: 'post-2', value: post2 },
-]);
-```
-
----
-
-### Encryption Plugin
-
-Encrypts serialized payloads using the Web Crypto API (AES-GCM by default) and decrypts transparently on reads.
-
-In LocalSpace 2.1, built-in storage transformations cover single and batch item
-operations. `iterate()` and `runTransaction()` reject before invoking the
-driver when encryption, compression, or TTL is active; use `keys()` with
-`getItems()` for processed iteration. Plugin-aware transaction scopes are
-planned for 3.0. This protection follows an internal capability attached by
-the built-in factories; custom plugins may use the names `encryption`,
-`compression`, or `ttl` without being treated as built-ins.
-
-**Options:**
-
-- Provide a `key` (CryptoKey/ArrayBuffer/string) or `keyDerivation` block (PBKDF2)
-- A supplied `CryptoKey` is checked per operation: encrypted reads require its
-  `decrypt` usage, while new AES-GCM writes require `encrypt`. This allows a
-  decrypt-only key to serve a read-only migration path without weakening writes.
-- Customize AES-GCM parameters, `ivLength`, `ivGenerator`, or `randomSource`.
-  AES-CBC and AES-CTR are deprecated read-only migration modes in 2.1: they
-  decrypt matching 2.0 payloads but reject every new write. AES-CTR readers
-  must receive the original `counter` and `length` parameters.
-- Works in browsers and modern Node runtimes (pass your own `subtle` when needed)
-
-```ts
-// Using a direct key
-const secureStore = localspace.createInstance({
-  name: 'secure-store',
-  plugins: [
-    encryptionPlugin({
-      key: '0123456789abcdef0123456789abcdef', // 32 bytes for AES-256
-    }),
-  ],
-});
-
-// Using PBKDF2 key derivation (recommended for password-based encryption)
-const passwordStore = localspace.createInstance({
-  name: 'password-store',
-  plugins: [
-    encryptionPlugin({
-      keyDerivation: {
-        passphrase: userPassword,
-        salt: 'unique-per-user-salt',
-        iterations: 150000, // Higher = more secure but slower
-        hash: 'SHA-256',
-        length: 256,
-      },
-    }),
-  ],
-});
-
-// Batch operations are also encrypted
-await secureStore.setItems([
-  { key: 'card-number', value: '4111-1111-1111-1111' },
-  { key: 'cvv', value: '123' },
-]);
-```
-
----
-
-### Compression Plugin
-
-Runs LZ-string compression (or a custom codec) when payloads exceed a `threshold` and restores them on read.
-
-**Options:**
-
-- `threshold` (bytes) controls when compression kicks in
-- Supply a custom `{ compress, decompress }` codec if you prefer pako/Brotli
-
-```ts
-const compressedStore = localspace.createInstance({
-  name: 'compressed-store',
-  plugins: [
-    compressionPlugin({
-      threshold: 1024, // Only compress if > 1KB
-      algorithm: 'lz-string', // Label stored in metadata
-    }),
-  ],
-});
-
-// Custom codec example (using pako)
-import pako from 'pako';
-
-const pakoStore = localspace.createInstance({
-  name: 'pako-store',
-  plugins: [
-    compressionPlugin({
-      threshold: 512,
-      algorithm: 'gzip',
-      codec: {
-        compress: (data) => pako.gzip(data),
-        decompress: (data) => pako.ungzip(data, { to: 'string' }),
-      },
-    }),
-  ],
+const plugin = ttlPlugin({
+  defaultTTL: 60_000,
+  keyTTL: {
+    session: 15 * 60_000,
+  },
+  cleanupInterval: 30_000,
+  cleanupBatchSize: 100,
+  onExpire: async (key, value) => {
+    await reportExpiration(key, value);
+  },
 });
 ```
 
----
+Options:
 
-## Plugin Combination Best Practices
+| Option             | Meaning                                                                            |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| `defaultTTL`       | default lifetime in milliseconds; missing/non-positive/non-finite means no wrapper |
+| `keyTTL`           | per-key lifetime overrides                                                         |
+| `cleanupInterval`  | optional background scan interval                                                  |
+| `cleanupBatchSize` | background scan chunk size, default 100                                            |
+| `onExpire`         | notification after an expired key is successfully removed                          |
 
-1. **Recommended plugin order** (from highest to lowest priority):
+Foreground reads await `onExpire` and follow `pluginErrorPolicy`. Background
+sweep notifications are detached from the close barrier so user callbacks can
+safely call/await `close()`; their failures cannot resurrect data. `close()`
+stops the timer and waits for the storage sweep itself.
 
-   ```ts
-   plugins: [
-     ttlPlugin({ ... }),         // priority: 10
-     compressionPlugin({ ... }), // priority: 5
-     encryptionPlugin({ ... }),  // priority: 0
-   ]
-   ```
+Expired values are hidden even when no periodic sweep is configured. Item,
+batch, iteration, key, and length operations agree on the logical view.
 
-2. **Always compress before encrypting**: Encrypted data has high entropy and compresses poorly. The default priorities handle this automatically.
-
-3. **Encryption always fails closed**. Key initialization, serialization, IV generation, encryption, and decryption failures propagate even when the global policy is lenient. Use strict policy when encryption is combined with other correctness-critical plugins:
-
-   ```ts
-   const secure = localspace.createInstance({
-     plugins: [ttlPlugin({ defaultTTL: 60_000 }), encryptionPlugin({ key })],
-     pluginErrorPolicy: 'strict', // Also propagates TTL and custom plugin errors
-   });
-   ```
-
-4. **Batch operations run through plugin hooks**: Built-in plugins support `setItems`, `getItems`, and `removeItems`, but plugin-specific side effects can differ.
-
-Cross-context synchronization is application policy, not a built-in plugin.
-See `examples/broadcast-notification-plugin.ts` for a deliberately limited
-best-effort notification example. Its default channel is isolated by active
-driver and storage namespace; notifications also include the driver so custom
-shared channels can filter messages from different physical backends.
-
-Application-level serialized-size limits are likewise not browser quota
-management and cannot be enforced atomically by a plugin. See
-`examples/size-limit-plugin.ts` for a deliberately limited guard that rejects
-writes without automatically deleting data.
-
----
-
-## Plugin Troubleshooting
-
-| Issue                      | Solution                                                                           |
-| -------------------------- | ---------------------------------------------------------------------------------- |
-| TTL items not expiring     | Ensure `cleanupInterval` is set, or read items to trigger expiration               |
-| Encryption operation fails | Inspect the propagated `LocalSpaceError`; encryption never falls back to plaintext |
-| Compression not working    | Verify payload exceeds `threshold`                                                 |
-| Plugin order seems wrong   | Check `priority` values; higher = runs first in `before*` hooks                    |
-
----
-
-## Custom Plugin Development
-
-Creating a plugin that times successful single-item and batch entry operations:
+## Compression plugin
 
 ```ts
-import localspace, { LocalSpacePlugin, PluginContext } from 'localspace';
+import { compressionPlugin } from 'localspace';
 
-interface TimingEntry {
-  operation: 'set' | 'get' | 'remove';
-  key: string;
-  duration: number;
+const plugin = compressionPlugin({
+  threshold: 1024,
+  algorithm: 'lz-string',
+});
+```
+
+The default codec is bundled. `threshold` is the minimum uncompressed UTF-8
+serialized byte length at which compression is attempted. LocalSpace stores a
+compression envelope only when the serialized complete envelope, including
+metadata and base64 expansion, is smaller than the raw representation.
+
+Custom codecs are bytes-to-bytes:
+
+```ts
+const plugin = compressionPlugin({
+  threshold: 256,
+  algorithm: 'my-codec-v1',
+  codec: {
+    compress(data: Uint8Array): Uint8Array {
+      return encode(data);
+    },
+    decompress(data: Uint8Array): Uint8Array {
+      return decode(data);
+    },
+  },
+});
+```
+
+Both methods must return a real `Uint8Array`. LocalSpace copies codec output,
+checks canonical base64, checks the persisted algorithm for versioned payloads,
+and requires decompressed bytes to match `originalSize`.
+
+## Encryption plugin
+
+Normal writes use AES-GCM only:
+
+```ts
+import { encryptionPlugin } from 'localspace';
+
+const plugin = encryptionPlugin({
+  key: '0123456789abcdef0123456789abcdef',
+});
+```
+
+Raw key material must be 16, 24, or 32 bytes. A supplied `CryptoKey` must be a
+secret AES-GCM key with the usages needed by the operation. A fresh secure IV
+is generated for every write. Custom `subtle`, `ivGenerator`, and
+`randomSource` implementations are available for controlled runtimes.
+
+PBKDF2 derivation:
+
+```ts
+const plugin = encryptionPlugin({
+  keyDerivation: {
+    passphrase: userPassword,
+    salt: applicationSalt,
+    iterations: 200_000,
+    hash: 'SHA-256',
+    length: 256,
+  },
+});
+```
+
+Only one of `key` and `keyDerivation` may be supplied. Web Crypto and a secure
+random source are required. Invalid configuration, serialization, encryption,
+decryption, malformed envelopes, and algorithm mismatches all fail closed.
+
+### Legacy AES-CBC/AES-CTR migration
+
+`encryptionPlugin()` rejects AES-CBC and AES-CTR. Use the separate read-only
+migration plugin for existing 2.x payloads:
+
+```ts
+import { encryptionPlugin, legacyEncryptionMigrationPlugin } from 'localspace';
+
+const legacy = localspace.createInstance({
+  name: 'legacy-vault',
+  storeName: 'data',
+  plugins: [
+    legacyEncryptionMigrationPlugin({
+      key: legacyKey,
+      algorithm: { name: 'AES-CBC' },
+    }),
+  ],
+  pluginErrorPolicy: 'strict',
+});
+
+const modern = localspace.createInstance({
+  name: 'modern-vault',
+  storeName: 'data',
+  plugins: [encryptionPlugin({ key: modernAesGcmKey })],
+  pluginErrorPolicy: 'strict',
+});
+
+for (const key of await legacy.keys()) {
+  const value = await legacy.getItem(key);
+  if (value !== null) await modern.setItem(key, value);
 }
-
-function timingPlugin(report: (entry: TimingEntry) => void): LocalSpacePlugin {
-  const startedAtKey = 'timing-plugin-started-at';
-
-  const start = (context: PluginContext) => {
-    context.operationState[startedAtKey] = performance.now();
-  };
-
-  const finish = (
-    operation: TimingEntry['operation'],
-    key: string,
-    context: PluginContext
-  ) => {
-    const startedAt = context.operationState[startedAtKey];
-    if (typeof startedAt === 'number') {
-      report({ operation, key, duration: performance.now() - startedAt });
-    }
-  };
-
-  return {
-    name: 'timing',
-    beforeSet(_key, value, context) {
-      start(context);
-      return value;
-    },
-    afterSet(key, _value, context) {
-      finish('set', key, context);
-    },
-    beforeGet(key, context) {
-      start(context);
-      return key;
-    },
-    afterGet(key, value, context) {
-      finish('get', key, context);
-      return value;
-    },
-    beforeRemove(key, context) {
-      start(context);
-      return key;
-    },
-    afterRemove(key, context) {
-      finish('remove', key, context);
-    },
-  };
-}
-
-const timedStore = localspace.createInstance({
-  name: 'timed-store',
-  plugins: [
-    timingPlugin((entry) => {
-      console.log(`${entry.operation} ${entry.key}: ${entry.duration}ms`);
-    }),
-  ],
-});
-
-await timedStore.setItem('key', 'value');
 ```
+
+The legacy migration plugin allows decrypt reads only and rejects every write
+with `UNSUPPORTED_OPERATION`. It intentionally uses the same plugin name as
+normal encryption so the two cannot be combined accidentally on one instance.
+
+## Application-level synchronization
+
+Plugins do not turn storage into a cross-tab transaction or replication
+system. [`examples/broadcast-notification-plugin.ts`](../examples/broadcast-notification-plugin.ts)
+shows best-effort per-driver notifications. Applications that need conflict
+resolution, distributed locks, acknowledgements, or durable replication must
+define that protocol above LocalSpace.
