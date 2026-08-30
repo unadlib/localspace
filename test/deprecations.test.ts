@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe('migration deprecation warnings', () => {
-  it('warns when using the weak 2.1 Memory transaction contract', async () => {
+  it('does not warn for the serializable Memory transaction contract', async () => {
     const instance = new LocalSpace({
       name: `weak-memory-${Math.random().toString(36).slice(2)}`,
       storeName: 'store',
@@ -34,9 +34,7 @@ describe('migration deprecation warnings', () => {
     await instance.setDriver([instance.MEMORY]);
     await instance.runTransaction('readonly', async (tx) => tx.keys());
 
-    expect(warnings()).toContain(
-      '[localspace] Deprecation: Memory `runTransaction()` in 2.1 provides snapshot rollback without isolation; 3.0 requires store-scoped serializable isolation.'
-    );
+    expect(warnings()).toEqual([]);
   });
 
   it('warns when a requested Storage Bucket falls back', async () => {

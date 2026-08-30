@@ -18,7 +18,6 @@ import {
   normalizeKey,
 } from '../utils/helpers.js';
 import serializer from '../utils/serializer.js';
-import { warnDeprecation } from '../utils/deprecations.js';
 
 type MemoryStore = Map<string, unknown>;
 
@@ -40,6 +39,33 @@ type MemoryDriverContext = LocalSpaceInstance &
 
 const DRIVER_NAME = 'memoryStorageWrapper';
 const memoryDatabases: Record<string, Record<string, MemoryStore>> = {};
+type MemoryStoreScheduler = {
+  tail: Promise<void>;
+};
+const memoryStoreSchedulers = new WeakMap<MemoryStore, MemoryStoreScheduler>();
+
+const getStoreScheduler = (store: MemoryStore): MemoryStoreScheduler => {
+  const existing = memoryStoreSchedulers.get(store);
+  if (existing) {
+    return existing;
+  }
+  const created: MemoryStoreScheduler = { tail: Promise.resolve() };
+  memoryStoreSchedulers.set(store, created);
+  return created;
+};
+
+const runStoreOperation = <T>(
+  store: MemoryStore,
+  operation: () => Promise<T> | T
+): Promise<T> => {
+  const scheduler = getStoreScheduler(store);
+  const result = scheduler.tail.then(operation);
+  scheduler.tail = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+};
 
 const withMemoryErrorContext = <T>(
   promise: Promise<T>,
@@ -124,9 +150,11 @@ async function _initStorage(
 
 function clear(this: MemoryDriverContext): Promise<void> {
   const promise = withMemoryErrorContext(
-    this.ready().then(() => {
-      this._dbInfo.store.clear();
-    }),
+    this.ready().then(() =>
+      runStoreOperation(this._dbInfo.store, () => {
+        this._dbInfo.store.clear();
+      })
+    ),
     'clear'
   );
 
@@ -137,13 +165,15 @@ function getItem<T>(this: MemoryDriverContext, key: string): Promise<T | null> {
   const normalizedKey = normalizeKey(key);
 
   const promise = withMemoryErrorContext(
-    this.ready().then(async () => {
-      if (!this._dbInfo.store.has(normalizedKey)) {
-        return null;
-      }
+    this.ready().then(() =>
+      runStoreOperation(this._dbInfo.store, async () => {
+        if (!this._dbInfo.store.has(normalizedKey)) {
+          return null;
+        }
 
-      return cloneValue(this._dbInfo.store.get(normalizedKey) as T);
-    }),
+        return cloneValue(this._dbInfo.store.get(normalizedKey) as T);
+      })
+    ),
     'getItem',
     { key: normalizedKey }
   );
@@ -158,24 +188,26 @@ function getItems<T>(
   const normalizedKeys = keys.map((key) => normalizeKey(key));
 
   const promise = withMemoryErrorContext(
-    this.ready().then(async () => {
-      const results: BatchResponse<T> = [];
-      const batchSize = this._dbInfo.maxBatchSize ?? normalizedKeys.length;
+    this.ready().then(() =>
+      runStoreOperation(this._dbInfo.store, async () => {
+        const results: BatchResponse<T> = [];
+        const batchSize = this._dbInfo.maxBatchSize ?? normalizedKeys.length;
 
-      for (const batch of chunkArray(normalizedKeys, batchSize)) {
-        for (const key of batch) {
-          if (!this._dbInfo.store.has(key)) {
-            results.push({ key, value: null });
-            continue;
+        for (const batch of chunkArray(normalizedKeys, batchSize)) {
+          for (const key of batch) {
+            if (!this._dbInfo.store.has(key)) {
+              results.push({ key, value: null });
+              continue;
+            }
+
+            const value = await cloneValue(this._dbInfo.store.get(key) as T);
+            results.push({ key, value });
           }
-
-          const value = await cloneValue(this._dbInfo.store.get(key) as T);
-          results.push({ key, value });
         }
-      }
 
-      return results;
-    }),
+        return results;
+      })
+    ),
     'getItems',
     { keys: normalizedKeys }
   );
@@ -185,25 +217,27 @@ function getItems<T>(
 
 function iterate<T, U>(
   this: MemoryDriverContext,
-  iterator: (value: T, key: string, iterationNumber: number) => U
+  iterator: (value: T, key: string, iterationNumber: number) => U | Promise<U>
 ): Promise<U> {
   const promise = withMemoryErrorContext(
-    this.ready().then(async () => {
-      let iterationNumber = 1;
+    this.ready().then(() =>
+      runStoreOperation(this._dbInfo.store, async () => {
+        let iterationNumber = 1;
 
-      for (const [key, value] of this._dbInfo.store.entries()) {
-        const result = iterator(
-          (await cloneValue(value as T)) as T,
-          key,
-          iterationNumber++
-        );
-        if (result !== undefined) {
-          return result;
+        for (const [key, value] of this._dbInfo.store.entries()) {
+          const result = await iterator(
+            (await cloneValue(value as T)) as T,
+            key,
+            iterationNumber++
+          );
+          if (result !== undefined) {
+            return result;
+          }
         }
-      }
 
-      return undefined as U;
-    }),
+        return undefined as U;
+      })
+    ),
     'iterate'
   );
 
@@ -212,7 +246,12 @@ function iterate<T, U>(
 
 function key(this: MemoryDriverContext, n: number): Promise<string | null> {
   const promise = withMemoryErrorContext(
-    this.ready().then(() => Array.from(this._dbInfo.store.keys())[n] ?? null),
+    this.ready().then(() =>
+      runStoreOperation(
+        this._dbInfo.store,
+        () => Array.from(this._dbInfo.store.keys())[n] ?? null
+      )
+    ),
     'key',
     { keyIndex: n }
   );
@@ -222,7 +261,11 @@ function key(this: MemoryDriverContext, n: number): Promise<string | null> {
 
 function keys(this: MemoryDriverContext): Promise<string[]> {
   const promise = withMemoryErrorContext(
-    this.ready().then(() => Array.from(this._dbInfo.store.keys())),
+    this.ready().then(() =>
+      runStoreOperation(this._dbInfo.store, () =>
+        Array.from(this._dbInfo.store.keys())
+      )
+    ),
     'keys'
   );
 
@@ -231,7 +274,9 @@ function keys(this: MemoryDriverContext): Promise<string[]> {
 
 function length(this: MemoryDriverContext): Promise<number> {
   const promise = withMemoryErrorContext(
-    this.ready().then(() => this._dbInfo.store.size),
+    this.ready().then(() =>
+      runStoreOperation(this._dbInfo.store, () => this._dbInfo.store.size)
+    ),
     'length'
   );
 
@@ -242,9 +287,11 @@ function removeItem(this: MemoryDriverContext, key: string): Promise<void> {
   const normalizedKey = normalizeKey(key);
 
   const promise = withMemoryErrorContext(
-    this.ready().then(() => {
-      this._dbInfo.store.delete(normalizedKey);
-    }),
+    this.ready().then(() =>
+      runStoreOperation(this._dbInfo.store, () => {
+        this._dbInfo.store.delete(normalizedKey);
+      })
+    ),
     'removeItem',
     { key: normalizedKey }
   );
@@ -256,15 +303,17 @@ function removeItems(this: MemoryDriverContext, keys: string[]): Promise<void> {
   const normalizedKeys = keys.map((key) => normalizeKey(key));
 
   const promise = withMemoryErrorContext(
-    this.ready().then(() => {
-      const batchSize = this._dbInfo.maxBatchSize ?? normalizedKeys.length;
+    this.ready().then(() =>
+      runStoreOperation(this._dbInfo.store, () => {
+        const batchSize = this._dbInfo.maxBatchSize ?? normalizedKeys.length;
 
-      for (const batch of chunkArray(normalizedKeys, batchSize)) {
-        for (const key of batch) {
-          this._dbInfo.store.delete(key);
+        for (const batch of chunkArray(normalizedKeys, batchSize)) {
+          for (const key of batch) {
+            this._dbInfo.store.delete(key);
+          }
         }
-      }
-    }),
+      })
+    ),
     'removeItems',
     { keys: normalizedKeys }
   );
@@ -280,11 +329,13 @@ function setItem<T>(
   const normalizedKey = normalizeKey(key);
 
   const promise = withMemoryErrorContext(
-    this.ready().then(async () => {
-      const normalizedValue = await normalizeStoredValue(value);
-      this._dbInfo.store.set(normalizedKey, normalizedValue);
-      return normalizedValue as T;
-    }),
+    this.ready().then(() =>
+      runStoreOperation(this._dbInfo.store, async () => {
+        const normalizedValue = await normalizeStoredValue(value);
+        this._dbInfo.store.set(normalizedKey, normalizedValue);
+        return normalizedValue as T;
+      })
+    ),
     'setItem',
     { key: normalizedKey }
   );
@@ -300,28 +351,30 @@ function setItems<T>(
   const itemKeys = normalized.map((entry) => entry.key);
 
   const promise = withMemoryErrorContext(
-    this.ready().then(async () => {
-      const batchSize = this._dbInfo.maxBatchSize ?? normalized.length;
-      const stored: BatchResponse<T> = [];
+    this.ready().then(() =>
+      runStoreOperation(this._dbInfo.store, async () => {
+        const batchSize = this._dbInfo.maxBatchSize ?? normalized.length;
+        const stored: BatchResponse<T> = [];
 
-      for (const batch of chunkArray(normalized, batchSize)) {
-        const payloads: Array<KeyValuePair<T | null>> = [];
+        for (const batch of chunkArray(normalized, batchSize)) {
+          const payloads: Array<KeyValuePair<T | null>> = [];
 
-        for (const entry of batch) {
-          payloads.push({
-            key: entry.key,
-            value: await normalizeStoredValue(entry.value),
-          });
+          for (const entry of batch) {
+            payloads.push({
+              key: entry.key,
+              value: await normalizeStoredValue(entry.value),
+            });
+          }
+
+          for (const entry of payloads) {
+            this._dbInfo.store.set(entry.key, entry.value);
+            stored.push({ key: entry.key, value: entry.value as T });
+          }
         }
 
-        for (const entry of payloads) {
-          this._dbInfo.store.set(entry.key, entry.value);
-          stored.push({ key: entry.key, value: entry.value as T });
-        }
-      }
-
-      return stored;
-    }),
+        return stored;
+      })
+    ),
     'setItems',
     { keys: itemKeys }
   );
@@ -334,7 +387,7 @@ function dropInstance(
   options?: LocalSpaceConfig
 ): Promise<void> {
   const promise = withMemoryErrorContext(
-    this.ready().then(() => {
+    this.ready().then(async () => {
       const current = this._dbInfo;
       const name = options?.name ?? current.name;
 
@@ -355,13 +408,18 @@ function dropInstance(
       }
 
       if (!hasOptions || hasStoreName) {
-        database[storeName]?.clear();
+        const store = database[storeName];
+        if (store) {
+          await runStoreOperation(store, () => store.clear());
+        }
         return;
       }
 
-      for (const store of Object.values(database)) {
-        store.clear();
-      }
+      await Promise.all(
+        Object.values(database).map((store) =>
+          runStoreOperation(store, () => store.clear())
+        )
+      );
     }),
     'dropInstance',
     {
@@ -378,12 +436,8 @@ function runTransaction<T>(
   mode: TransactionMode,
   runner: (scope: TransactionScope) => Promise<T> | T
 ): Promise<T> {
-  warnDeprecation(
-    'weak-memory-transaction',
-    'Memory `runTransaction()` in 2.1 provides snapshot rollback without isolation; 3.0 requires store-scoped serializable isolation.'
-  );
   const promise = withMemoryErrorContext(
-    this.ready().then(async () => {
+    this.ready().then(() => {
       if (mode !== 'readonly' && mode !== 'readwrite') {
         throw createLocalSpaceError(
           'INVALID_ARGUMENT',
@@ -396,80 +450,80 @@ function runTransaction<T>(
         );
       }
 
-      const store = this._dbInfo.store;
-      const snapshot = mode === 'readwrite' ? new Map(store) : null;
+      const committedStore = this._dbInfo.store;
+      return runStoreOperation(committedStore, async () => {
+        const transactionStore =
+          mode === 'readwrite' ? new Map(committedStore) : committedStore;
 
-      const makeReadOnlyGuard = () => {
-        if (mode === 'readonly') {
-          throw createLocalSpaceError(
-            'TRANSACTION_READONLY',
-            'Transaction is readonly',
-            {
-              driver: DRIVER_NAME,
-              operation: 'runTransaction',
-              transactionMode: mode,
-            }
-          );
-        }
-      };
-
-      const scope: TransactionScope = {
-        get: async <V>(targetKey: string) => {
-          const normalizedKey = normalizeKey(targetKey);
-          if (!store.has(normalizedKey)) {
-            return null;
-          }
-          return cloneValue(store.get(normalizedKey) as V);
-        },
-        set: async <V>(targetKey: string, value: V) => {
-          makeReadOnlyGuard();
-          const normalizedKey = normalizeKey(targetKey);
-          const normalizedValue = await normalizeStoredValue(value);
-          store.set(normalizedKey, normalizedValue);
-          return normalizedValue as V;
-        },
-        remove: async (targetKey: string) => {
-          makeReadOnlyGuard();
-          store.delete(normalizeKey(targetKey));
-        },
-        keys: async () => Array.from(store.keys()),
-        iterate: async <V, U>(
-          iterator: (
-            value: V,
-            key: string,
-            iterationNumber: number
-          ) => U | Promise<U>
-        ) => {
-          let iterationNumber = 1;
-          for (const [entryKey, entryValue] of store.entries()) {
-            const result = await iterator(
-              (await cloneValue(entryValue as V)) as V,
-              entryKey,
-              iterationNumber++
+        const makeReadOnlyGuard = () => {
+          if (mode === 'readonly') {
+            throw createLocalSpaceError(
+              'TRANSACTION_READONLY',
+              'Transaction is readonly',
+              {
+                driver: DRIVER_NAME,
+                operation: 'runTransaction',
+                transactionMode: mode,
+              }
             );
-            if (result !== undefined) {
-              return result;
-            }
           }
-          return undefined as U;
-        },
-        clear: async () => {
-          makeReadOnlyGuard();
-          store.clear();
-        },
-      };
+        };
 
-      try {
-        return await runner(scope);
-      } catch (error) {
-        if (snapshot) {
-          store.clear();
-          for (const [entryKey, entryValue] of snapshot.entries()) {
-            store.set(entryKey, entryValue);
+        const scope: TransactionScope = {
+          get: async <V>(targetKey: string) => {
+            const normalizedKey = normalizeKey(targetKey);
+            if (!transactionStore.has(normalizedKey)) {
+              return null;
+            }
+            return cloneValue(transactionStore.get(normalizedKey) as V);
+          },
+          set: async <V>(targetKey: string, value: V) => {
+            makeReadOnlyGuard();
+            const normalizedKey = normalizeKey(targetKey);
+            const normalizedValue = await normalizeStoredValue(value);
+            transactionStore.set(normalizedKey, normalizedValue);
+            return normalizedValue as V;
+          },
+          remove: async (targetKey: string) => {
+            makeReadOnlyGuard();
+            transactionStore.delete(normalizeKey(targetKey));
+          },
+          keys: async () => Array.from(transactionStore.keys()),
+          iterate: async <V, U>(
+            iterator: (
+              value: V,
+              key: string,
+              iterationNumber: number
+            ) => U | Promise<U>
+          ) => {
+            let iterationNumber = 1;
+            for (const [entryKey, entryValue] of transactionStore.entries()) {
+              const result = await iterator(
+                (await cloneValue(entryValue as V)) as V,
+                entryKey,
+                iterationNumber++
+              );
+              if (result !== undefined) {
+                return result;
+              }
+            }
+            return undefined;
+          },
+          clear: async () => {
+            makeReadOnlyGuard();
+            transactionStore.clear();
+          },
+        };
+
+        const result = await runner(scope);
+        if (mode === 'readwrite') {
+          committedStore.clear();
+          for (const [entryKey, entryValue] of transactionStore.entries()) {
+            committedStore.set(entryKey, entryValue);
           }
         }
-        throw error;
-      }
+        return result;
+      });
     }),
     'runTransaction',
     { transactionMode: mode }

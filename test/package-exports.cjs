@@ -84,10 +84,8 @@ async function main() {
     algorithm: { name: 'AES-CBC' },
   });
   assert.equal(legacyMigrationPlugin.name, 'encryption');
-  const weakTransactionWarning =
-    '[localspace] Deprecation: Memory `runTransaction()` in 2.1 provides snapshot rollback without isolation; 3.0 requires store-scoped serializable isolation.';
-  assert.deepEqual(probeUnsetNodeEnv('cjs'), [weakTransactionWarning]);
-  assert.deepEqual(probeUnsetNodeEnv('esm'), [weakTransactionWarning]);
+  assert.deepEqual(probeUnsetNodeEnv('cjs'), []);
+  assert.deepEqual(probeUnsetNodeEnv('esm'), []);
 
   const originalWarn = console.warn;
   const originalNodeEnv = process.env.NODE_ENV;
@@ -190,7 +188,7 @@ async function main() {
     }
     console.warn = originalWarn;
   }
-  assert.deepEqual(crossEntryWarnings, [weakTransactionWarning]);
+  assert.deepEqual(crossEntryWarnings, []);
 
   const esmReactNative = await import('localspace/react-native');
   assert.equal(typeof esmReactNative.createReactNativeInstance, 'function');
