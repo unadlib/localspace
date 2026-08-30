@@ -349,6 +349,7 @@ const mobileStore = await createReactNativeInstance(localspace, {
 - **IndexedDB durability:** Chrome 121+ uses relaxed durability by default
 - **Non-transactional drivers:** localStorage and React Native AsyncStorage reject `runTransaction()`
 - **Benchmarks are environment-specific:** run `pnpm test:benchmark` locally; no fixed speedup is used as a correctness gate
+- **3.0 baseline comparisons:** run `pnpm benchmark:compare:2.1` for an interleaved comparison against the integrity-pinned published 2.1.0 artifact; see [`benchmarks/README.md`](./benchmarks/README.md)
 
 ---
 

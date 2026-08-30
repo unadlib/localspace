@@ -130,3 +130,4 @@ vite.config.ts.timestamp-*
 
 test-results
 /generated-docs/
+/benchmark-results/

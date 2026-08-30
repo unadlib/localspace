@@ -1,0 +1,249 @@
+{
+  "schemaVersion": 1,
+  "id": "localspace-2.1.0-published",
+  "source": {
+    "gitRef": "v2.1.0",
+    "gitCommit": "0e860f32726676ea481d0056c7df03e688fd93b1"
+  },
+  "package": {
+    "specifier": "localspace@2.1.0",
+    "version": "2.1.0",
+    "integrity": "sha512-RtYVIpzO7cOWQ3FbwBzGwhbNSrVUPYIhqN/uORUNpbhb6USvBkQ9Lp1dkaMtIriyVOXQ4FFek5SKZNqYBdLw+Q==",
+    "shasum": "03744b0248d682a3112d84fe070cda0a04d97495",
+    "entryCount": 108,
+    "packedBytes": 594376,
+    "unpackedBytes": 2630510,
+    "groups": {
+      "root": { "files": 3, "bytes": 20311 },
+      "dist": { "files": 86, "bytes": 2352203 },
+      "src": { "files": 19, "bytes": 257996 }
+    }
+  },
+  "contract": {
+    "browser": "chromium",
+    "warmups": 1,
+    "samples": 7,
+    "main": {
+      "itemCount": 240,
+      "payloadBytes": 256,
+      "maxBatchSize": 48,
+      "transactionCount": 96
+    },
+    "legacyFeatureProbes": {
+      "concurrencyCount": 80,
+      "idleMs": 20,
+      "idleWaitMs": 40
+    }
+  },
+  "observation": {
+    "capturedAt": "2026-08-31T01:06:25.481Z",
+    "units": "milliseconds",
+    "environment": {
+      "node": "v24.16.0",
+      "playwright": "1.60.0",
+      "chromium": "148.0.7778.96",
+      "platform": "darwin",
+      "arch": "arm64"
+    },
+    "summary": {
+      "main.readyMs": {
+        "median": 0.5,
+        "p25": 0.45,
+        "p75": 0.5,
+        "min": 0.3,
+        "max": 0.5
+      },
+      "main.single.setMs": {
+        "median": 26.4,
+        "p25": 26.3,
+        "p75": 26.85,
+        "min": 25.6,
+        "max": 27.3
+      },
+      "main.single.getMs": {
+        "median": 16.2,
+        "p25": 16,
+        "p75": 16.4,
+        "min": 15.6,
+        "max": 18.5
+      },
+      "main.single.iterateMs": {
+        "median": 1.5,
+        "p25": 1.5,
+        "p75": 1.55,
+        "min": 1.5,
+        "max": 1.7
+      },
+      "main.batch.setMs": {
+        "median": 6,
+        "p25": 6,
+        "p75": 6.05,
+        "min": 5.8,
+        "max": 6.3
+      },
+      "main.batch.getMs": {
+        "median": 2.6,
+        "p25": 2.45,
+        "p75": 2.65,
+        "min": 2.3,
+        "max": 2.7
+      },
+      "main.batch.removeMs": {
+        "median": 12.8,
+        "p25": 11.75,
+        "p75": 13.95,
+        "min": 9.1,
+        "max": 14.6
+      },
+      "main.transactionMs": {
+        "median": 8.3,
+        "p25": 8.05,
+        "p75": 8.75,
+        "min": 7.9,
+        "max": 9.3
+      },
+      "legacy.prewarmOffReadyMs": {
+        "median": 0.4,
+        "p25": 0.35,
+        "p75": 0.4,
+        "min": 0.3,
+        "max": 0.6
+      },
+      "legacy.prewarmOnReadyMs": {
+        "median": 0.4,
+        "p25": 0.4,
+        "p75": 0.45,
+        "min": 0.4,
+        "max": 0.6
+      },
+      "legacy.unlimitedConcurrencyMs": {
+        "median": 7.2,
+        "p25": 7,
+        "p75": 7.35,
+        "min": 6.6,
+        "max": 7.5
+      },
+      "legacy.cappedConcurrencyMs": {
+        "median": 9.1,
+        "p25": 8.4,
+        "p75": 9.75,
+        "min": 8,
+        "max": 42.3
+      },
+      "legacy.idleReopenMs": {
+        "median": 0.2,
+        "p25": 0.2,
+        "p75": 0.25,
+        "min": 0.2,
+        "max": 1.4
+      }
+    },
+    "samples": [
+      {
+        "main": {
+          "readyMs": 0.5,
+          "single": { "setMs": 27.1, "getMs": 16, "iterateMs": 1.7 },
+          "batch": { "setMs": 6, "getMs": 2.6, "removeMs": 9.1 },
+          "transactionMs": 8.2
+        },
+        "legacy": {
+          "prewarmOffReadyMs": 0.4,
+          "prewarmOnReadyMs": 0.4,
+          "unlimitedConcurrencyMs": 7.4,
+          "cappedConcurrencyMs": 9.9,
+          "idleReopenMs": 0.2
+        }
+      },
+      {
+        "main": {
+          "readyMs": 0.5,
+          "single": { "setMs": 26.4, "getMs": 16.4, "iterateMs": 1.6 },
+          "batch": { "setMs": 6, "getMs": 2.6, "removeMs": 11.3 },
+          "transactionMs": 7.9
+        },
+        "legacy": {
+          "prewarmOffReadyMs": 0.6,
+          "prewarmOnReadyMs": 0.4,
+          "unlimitedConcurrencyMs": 7.1,
+          "cappedConcurrencyMs": 9.6,
+          "idleReopenMs": 0.3
+        }
+      },
+      {
+        "main": {
+          "readyMs": 0.3,
+          "single": { "setMs": 26.4, "getMs": 16, "iterateMs": 1.5 },
+          "batch": { "setMs": 6, "getMs": 2.3, "removeMs": 12.2 },
+          "transactionMs": 8.8
+        },
+        "legacy": {
+          "prewarmOffReadyMs": 0.3,
+          "prewarmOnReadyMs": 0.4,
+          "unlimitedConcurrencyMs": 6.9,
+          "cappedConcurrencyMs": 8,
+          "idleReopenMs": 0.2
+        }
+      },
+      {
+        "main": {
+          "readyMs": 0.5,
+          "single": { "setMs": 25.6, "getMs": 16.4, "iterateMs": 1.5 },
+          "batch": { "setMs": 5.8, "getMs": 2.5, "removeMs": 13.9 },
+          "transactionMs": 8.7
+        },
+        "legacy": {
+          "prewarmOffReadyMs": 0.3,
+          "prewarmOnReadyMs": 0.4,
+          "unlimitedConcurrencyMs": 7.5,
+          "cappedConcurrencyMs": 9.1,
+          "idleReopenMs": 0.2
+        }
+      },
+      {
+        "main": {
+          "readyMs": 0.5,
+          "single": { "setMs": 26.2, "getMs": 15.6, "iterateMs": 1.5 },
+          "batch": { "setMs": 6.1, "getMs": 2.4, "removeMs": 12.8 },
+          "transactionMs": 9.3
+        },
+        "legacy": {
+          "prewarmOffReadyMs": 0.4,
+          "prewarmOnReadyMs": 0.6,
+          "unlimitedConcurrencyMs": 7.2,
+          "cappedConcurrencyMs": 8,
+          "idleReopenMs": 1.4
+        }
+      },
+      {
+        "main": {
+          "readyMs": 0.4,
+          "single": { "setMs": 27.3, "getMs": 18.5, "iterateMs": 1.5 },
+          "batch": { "setMs": 6.3, "getMs": 2.7, "removeMs": 14 },
+          "transactionMs": 8.3
+        },
+        "legacy": {
+          "prewarmOffReadyMs": 0.4,
+          "prewarmOnReadyMs": 0.4,
+          "unlimitedConcurrencyMs": 7.3,
+          "cappedConcurrencyMs": 8.8,
+          "idleReopenMs": 0.2
+        }
+      },
+      {
+        "main": {
+          "readyMs": 0.5,
+          "single": { "setMs": 26.6, "getMs": 16.2, "iterateMs": 1.5 },
+          "batch": { "setMs": 6, "getMs": 2.7, "removeMs": 14.6 },
+          "transactionMs": 7.9
+        },
+        "legacy": {
+          "prewarmOffReadyMs": 0.4,
+          "prewarmOnReadyMs": 0.5,
+          "unlimitedConcurrencyMs": 6.6,
+          "cappedConcurrencyMs": 42.3,
+          "idleReopenMs": 0.2
+        }
+      }
+    ]
+  }
+}

@@ -14,6 +14,9 @@
 - Added the frozen `StoredRecord` v1 codec and a 2.1 forward reader across item,
   batch, iteration, and transaction reads. Generated writer fixtures cover the
   core format inside each frozen plugin envelope while 2.1 writes stay legacy.
+- Pinned the published 2.1.0 package/performance baseline and added an
+  integrity-checked, same-Chromium comparison harness with distributions and
+  relative results instead of machine-specific latency thresholds.
 
 ## [2.1.0] - 2026-07-14
 
