@@ -39,6 +39,10 @@ import {
   globalDriverRegistry,
   registerBuiltInDriver,
 } from './core/driver-registry.js';
+import {
+  DRIVER_OPERATIONS,
+  type DriverOperation,
+} from './core/driver-contract.js';
 
 const DefaultDrivers: Record<'INDEXEDDB' | 'LOCALSTORAGE' | 'MEMORY', Driver> =
   {
@@ -83,43 +87,7 @@ const warnLegacyIndexedDbPerformanceOptions = (
   }
 };
 
-const OptionalDriverMethods = [
-  'dropInstance',
-  'setItems',
-  'getItems',
-  'removeItems',
-  'runTransaction',
-];
-
-const LibraryMethods = [
-  'clear',
-  'getItem',
-  'getItems',
-  'iterate',
-  'key',
-  'keys',
-  'length',
-  'removeItem',
-  'removeItems',
-  'setItem',
-  'setItems',
-  'runTransaction',
-].concat(OptionalDriverMethods);
-
-const PluginAwareMethods = [
-  'setItem',
-  'getItem',
-  'removeItem',
-  'setItems',
-  'getItems',
-  'removeItems',
-  'iterate',
-  'runTransaction',
-] as const;
-
-type PluginAwareMethod = (typeof PluginAwareMethods)[number];
 type RawDriverMethod = (...args: any[]) => Promise<unknown>;
-const PluginAwareMethodSet = new Set<string>(PluginAwareMethods);
 
 type LifecycleCallback =
   | 'plugin-init'
@@ -148,7 +116,7 @@ type ActiveLifecycleInvocation = {
 };
 
 const LifecycleReentrantMethods = new Set<string>([
-  ...LibraryMethods,
+  ...DRIVER_OPERATIONS,
   'ready',
   'setDriver',
   'close',
@@ -164,9 +132,7 @@ type DriverClose = () => Promise<void>;
 
 type DriverSession = {
   driver: string;
-  definition: Readonly<Driver>;
-  receiver: DriverAugmentedInstance;
-  receiverContext: LifecycleReceiverContext;
+  operations: Readonly<Record<DriverOperation, RawDriverMethod>>;
   initialize(): Promise<void>;
   close: DriverClose | null;
   syncFacade(): void;
@@ -217,38 +183,10 @@ const DefaultConfig: LocalSpaceConfig = {
   pluginErrorPolicy: 'lenient',
 };
 
-type ReadyAwareInstance = {
-  ready: () => Promise<void>;
-  _assertOpen: (operation: string) => void;
-  _runTrackedOperation: (
-    operation: string,
-    args: unknown[],
-    executor: () => unknown
-  ) => Promise<unknown>;
-} & Record<string, unknown>;
-
-type ReadyWrappedMethod = (...args: unknown[]) => unknown;
-
 type DriverAugmentedInstance = LocalSpaceInstance &
-  ReadyAwareInstance &
   Partial<Driver> & {
     _initStorage?: (config: LocalSpaceConfig) => Promise<void>;
   };
-
-function callWhenReady(
-  instance: ReadyAwareInstance,
-  libraryMethod: string
-): void {
-  const readyWrapper = function (...args: unknown[]) {
-    return instance._runTrackedOperation(libraryMethod, args, async () => {
-      await instance.ready();
-      instance._assertOpen(libraryMethod);
-      const method = instance[libraryMethod] as ReadyWrappedMethod;
-      return method.apply(instance, args);
-    });
-  } as ReadyWrappedMethod;
-  instance[libraryMethod] = readyWrapper;
-}
 
 export class LocalSpace implements LocalSpaceInstance {
   readonly INDEXEDDB = 'asyncStorage';
@@ -278,9 +216,6 @@ export class LocalSpace implements LocalSpaceInstance {
   private _invokingLifecycleCallback: LifecycleCallback | null = null;
   private _pluginManager: PluginManager;
   private readonly _driverRegistry = new DriverRegistry(globalDriverRegistry);
-  private _rawDriverMethods: Partial<
-    Record<PluginAwareMethod, RawDriverMethod>
-  > = {};
 
   constructor(options?: LocalSpaceOptions) {
     const { plugins = [], drivers = [], ...configOverrides } = options ?? {};
@@ -299,8 +234,6 @@ export class LocalSpace implements LocalSpaceInstance {
       createInvocation: (lifecycle) =>
         this._createLifecycleInvocation(lifecycle),
     });
-
-    this._wrapLibraryMethodsWithReady();
 
     const driverInitializationPromises = drivers.map((driver) =>
       this._driverRegistry.register(driver)
@@ -323,6 +256,48 @@ export class LocalSpace implements LocalSpaceInstance {
       }
     );
   }
+
+  clear = (): Promise<void> => this._dispatchOperation('clear', []);
+
+  getItem: LocalSpaceInstance['getItem'] = ((...args: unknown[]) =>
+    this._dispatchOperation('getItem', args)) as LocalSpaceInstance['getItem'];
+
+  getItems: LocalSpaceInstance['getItems'] = ((...args: unknown[]) =>
+    this._dispatchOperation(
+      'getItems',
+      args
+    )) as LocalSpaceInstance['getItems'];
+
+  iterate = <T, U>(
+    iteratorCallback: (value: T, key: string, iterationNumber: number) => U
+  ): Promise<U> => this._dispatchOperation<U>('iterate', [iteratorCallback]);
+
+  key = (keyIndex: number): Promise<string | null> =>
+    this._dispatchOperation<string | null>('key', [keyIndex]);
+
+  keys = (): Promise<string[]> => this._dispatchOperation('keys', []);
+
+  length = (): Promise<number> => this._dispatchOperation('length', []);
+
+  removeItem = (key: string): Promise<void> =>
+    this._dispatchOperation('removeItem', [key]);
+
+  removeItems = (keys: string[]): Promise<void> =>
+    this._dispatchOperation('removeItems', [keys]);
+
+  runTransaction = <T>(
+    mode: TransactionMode,
+    runner: (scope: TransactionScope) => Promise<T> | T
+  ): Promise<T> => this._dispatchOperation<T>('runTransaction', [mode, runner]);
+
+  setItem = <T>(key: string, value: T): Promise<T> =>
+    this._dispatchOperation<T>('setItem', [key, value]);
+
+  setItems = <T>(entries: BatchItems<T>): Promise<BatchResponse<T>> =>
+    this._dispatchOperation<BatchResponse<T>>('setItems', [entries]);
+
+  dropInstance = (options?: LocalSpaceConfig): Promise<void> =>
+    this._dispatchOperation('dropInstance', [options]);
 
   config(options: LocalSpaceConfig): true | Error | Promise<void>;
   config<K extends keyof LocalSpaceConfig>(
@@ -410,7 +385,6 @@ export class LocalSpace implements LocalSpaceInstance {
   use(plugin: LocalSpacePlugin | LocalSpacePlugin[]): LocalSpaceInstance {
     const plugins = Array.isArray(plugin) ? plugin : [plugin];
     this._pluginManager.registerPlugins(plugins);
-    this._refreshPluginWrappers();
     return this;
   }
 
@@ -649,7 +623,6 @@ export class LocalSpace implements LocalSpaceInstance {
       const session = this._createDriverSession(driver);
       this._activeDriverSession = session;
       this._driverInitialized = false;
-      this._extend(driver, session.receiver, session);
       this._driver = driver._driver;
       setDriverToConfig();
 
@@ -675,7 +648,6 @@ export class LocalSpace implements LocalSpaceInstance {
         }
         this._driverInitialized = false;
         this._dbInfo = null;
-        this._wrapLibraryMethodsWithReady();
         throw error;
       }
     };
@@ -789,7 +761,6 @@ export class LocalSpace implements LocalSpaceInstance {
       })
       .finally(() => {
         this._driverSet = transition;
-        this._wrapLibraryMethodsWithReady();
         if (this._operationPause === operationPause) {
           this._operationPause = null;
         }
@@ -849,11 +820,35 @@ export class LocalSpace implements LocalSpaceInstance {
       }
     };
     const receiver = lifecycleScope.instance as DriverAugmentedInstance;
+    const operations = {} as Record<DriverOperation, RawDriverMethod>;
+
+    for (const operation of DRIVER_OPERATIONS) {
+      const configured = definition[operation] as RawDriverMethod | undefined;
+      const candidate: RawDriverMethod =
+        typeof configured === 'function'
+          ? (...args: unknown[]) => configured.apply(receiver, args)
+          : () =>
+              Promise.reject(
+                createLocalSpaceError(
+                  'UNSUPPORTED_OPERATION',
+                  `Method ${operation} is not implemented by the current driver`,
+                  { driver: definition._driver, operation }
+                )
+              );
+
+      operations[operation] = (...args: unknown[]) => {
+        try {
+          this._assertOpen(operation);
+          return Promise.resolve(candidate(...args)).finally(syncFacade);
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      };
+    }
+
     session = {
       driver: definition._driver,
-      definition,
-      receiver,
-      receiverContext,
+      operations: Object.freeze(operations),
       initialize: () =>
         lifecycleScope
           .invoke('driver-init', () =>
@@ -877,80 +872,24 @@ export class LocalSpace implements LocalSpaceInstance {
     return session;
   }
 
-  _extend(
-    libraryMethodsAndProperties: Partial<Driver>,
-    receiver: DriverAugmentedInstance = this as DriverAugmentedInstance,
-    session?: DriverSession
-  ): void {
-    const source = libraryMethodsAndProperties as Partial<
-      Record<string, unknown>
-    >;
-    const guarded: Partial<Record<string, unknown>> = {};
+  private _dispatchOperation<T>(
+    operation: DriverOperation,
+    args: unknown[]
+  ): Promise<T> {
+    return this._runTrackedOperation(operation, args, async () => {
+      await this.ready();
+      this._assertOpen(operation);
 
-    const unsupportedMethod =
-      (method: string): RawDriverMethod =>
-      () =>
-        Promise.reject(
-          createLocalSpaceError(
-            'UNSUPPORTED_OPERATION',
-            `Method ${method} is not implemented by the current driver`,
-            { driver: session?.driver, operation: method }
-          )
-        );
-
-    for (const method of new Set(LibraryMethods)) {
-      const configured = source[method];
-      const candidate =
-        typeof configured === 'function'
-          ? configured
-          : OptionalDriverMethods.includes(method)
-            ? unsupportedMethod(method)
-            : undefined;
-      if (!candidate) continue;
-      const guardedMethod: RawDriverMethod = (...args: unknown[]) => {
-        try {
-          this._assertOpen(method);
-          return Promise.resolve(candidate.apply(receiver, args)).finally(
-            session?.syncFacade
-          );
-        } catch (error) {
-          return Promise.reject(error);
-        }
-      };
-      guarded[method] = PluginAwareMethodSet.has(method)
-        ? guardedMethod
-        : this._createTrackedOperationWrapper(method, guardedMethod);
-    }
-
-    extend(
-      this as unknown as Record<string, unknown>,
-      guarded as Record<string, unknown>
-    );
-    this._capturePluginAwareMethods(guarded as Partial<Driver>);
-  }
-
-  private _capturePluginAwareMethods(source: Partial<Driver>): void {
-    for (const method of PluginAwareMethods) {
-      const candidate = (source as Partial<Record<string, unknown>>)[method];
-      if (typeof candidate === 'function') {
-        this._rawDriverMethods[method] = (candidate as RawDriverMethod).bind(
-          this
-        );
-      }
-    }
-    this._refreshPluginWrappers();
-  }
-
-  private _refreshPluginWrappers(): void {
-    for (const method of PluginAwareMethods) {
-      const original = this._rawDriverMethods[method];
-      if (!original) {
-        continue;
+      const session = this._activeDriverSession;
+      if (!this._driverInitialized || !session) {
+        throw this._notInitializedError(operation);
       }
 
+      const original = session.operations[operation];
       let implementation: RawDriverMethod = original;
-      const hasPlugins = this._pluginManager?.hasPlugins() ?? false;
-      switch (method) {
+      const hasPlugins = this._pluginManager.hasPlugins();
+
+      switch (operation) {
         case 'setItem':
           implementation = hasPlugins
             ? this._createSetItemWrapper(original)
@@ -987,23 +926,14 @@ export class LocalSpace implements LocalSpaceInstance {
         case 'iterate': {
           const recordAware = this._createStoredRecordIterateWrapper(original);
           implementation = hasPlugins
-            ? this._createStorageTransformGuard(recordAware, method)
+            ? this._createStorageTransformGuard(recordAware, operation)
             : recordAware;
           break;
         }
       }
 
-      (this as unknown as Record<string, unknown>)[method] =
-        this._createTrackedOperationWrapper(method, implementation);
-    }
-  }
-
-  private _createTrackedOperationWrapper(
-    operation: string,
-    executor: RawDriverMethod
-  ): RawDriverMethod {
-    return (...args: unknown[]) =>
-      this._runTrackedOperation(operation, args, () => executor(...args));
+      return implementation(...args);
+    }) as Promise<T>;
   }
 
   _runTrackedOperation(
@@ -1020,16 +950,9 @@ export class LocalSpace implements LocalSpaceInstance {
 
     const operationPause = this._operationPause;
     if (operationPause) {
-      return operationPause.then(() => {
-        this._assertOpen(operation);
-        const currentMethod = (this as unknown as Record<string, unknown>)[
-          operation
-        ];
-        if (typeof currentMethod !== 'function') {
-          throw this._notInitializedError(operation);
-        }
-        return currentMethod.apply(this, args);
-      });
+      return operationPause.then(() =>
+        this._runTrackedOperation(operation, args, executor)
+      );
     }
 
     let operationPromise: Promise<unknown>;
@@ -1491,12 +1414,6 @@ export class LocalSpace implements LocalSpaceInstance {
     return supportedDrivers;
   }
 
-  _wrapLibraryMethodsWithReady(): void {
-    for (const libraryMethod of LibraryMethods) {
-      callWhenReady(this as unknown as ReadyAwareInstance, libraryMethod);
-    }
-  }
-
   private async _drainActiveOperations(): Promise<void> {
     while (this._activeOperations.size > 0) {
       await Promise.allSettled([...this._activeOperations]);
@@ -1545,15 +1462,11 @@ export class LocalSpace implements LocalSpaceInstance {
         ) {
           const contextualValue = receiverContext?.has(property)
             ? receiverContext.get(property)
-            : definition && property in definition
-              ? Reflect.get(definition, property, receiver)
-              : Reflect.get(target, property, target);
+            : Reflect.get(target, property, target);
           if (typeof contextualValue === 'function') {
-            const callbackReceiver =
-              receiverContext?.has(property) ||
-              (definition && property in definition)
-                ? receiver
-                : target;
+            const callbackReceiver = receiverContext?.has(property)
+              ? receiver
+              : target;
             return (...args: unknown[]) => {
               const invocation = getActiveInvocation();
               if (invocation) {
@@ -1740,63 +1653,5 @@ export class LocalSpace implements LocalSpaceInstance {
     if (this._closed) {
       throw this._closedError(operation);
     }
-  }
-
-  // Driver methods (will be replaced by actual driver implementations)
-  async iterate<T, U>(
-    _iteratorCallback: (value: T, key: string, iterationNumber: number) => U
-  ): Promise<U> {
-    throw this._notInitializedError('iterate');
-  }
-
-  async getItems<T>(_keys: string[]): Promise<BatchResponse<T>> {
-    throw this._notInitializedError('getItems');
-  }
-
-  async getItem<T>(_key: string): Promise<T | null> {
-    throw this._notInitializedError('getItem');
-  }
-
-  async setItem<T>(_key: string, _value: T): Promise<T> {
-    throw this._notInitializedError('setItem');
-  }
-
-  async setItems<T>(_entries: BatchItems<T>): Promise<BatchResponse<T>> {
-    throw this._notInitializedError('setItems');
-  }
-
-  async removeItem(_key: string): Promise<void> {
-    throw this._notInitializedError('removeItem');
-  }
-
-  async removeItems(_keys: string[]): Promise<void> {
-    throw this._notInitializedError('removeItems');
-  }
-
-  async runTransaction<T>(
-    _mode: TransactionMode,
-    _runner: (scope: TransactionScope) => Promise<T> | T
-  ): Promise<T> {
-    throw this._notInitializedError('runTransaction');
-  }
-
-  async clear(): Promise<void> {
-    throw this._notInitializedError('clear');
-  }
-
-  async length(): Promise<number> {
-    throw this._notInitializedError('length');
-  }
-
-  async key(_keyIndex: number): Promise<string | null> {
-    throw this._notInitializedError('key');
-  }
-
-  async keys(): Promise<string[]> {
-    throw this._notInitializedError('keys');
-  }
-
-  async dropInstance(_options?: LocalSpaceConfig): Promise<void> {
-    throw this._notInitializedError('dropInstance');
   }
 }

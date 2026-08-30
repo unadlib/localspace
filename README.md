@@ -116,10 +116,18 @@ import localspace from 'localspace';
 
 ### Storage Methods
 
+Storage methods are stable facade dispatchers. Their references do not change
+when the instance becomes ready, a driver falls back or switches, or plugins
+are registered. Captured/destructured methods keep using the current driver and
+plugin set, and an attached spy is not silently replaced.
+
 ```ts
 // Set and get items
 await localspace.setItem('key', value);
 const value = await localspace.getItem<T>('key');
+
+const { getItem } = localspace;
+await getItem('key'); // safe to call without rebinding
 
 // Remove items
 await localspace.removeItem('key');

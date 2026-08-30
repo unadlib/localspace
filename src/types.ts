@@ -499,10 +499,8 @@ export interface LocalSpaceInstance {
   _config: LocalSpaceConfig;
   _defaultConfig: LocalSpaceConfig;
   _initStorage?(config: LocalSpaceConfig): Promise<void>;
-  _extend?(methods: Partial<Driver>): void;
   _defineDriver?(driver: Driver): Promise<void>;
   _getSupportedDrivers?(drivers: string[]): string[];
-  _wrapLibraryMethodsWithReady?(): void;
 }
 
 /**

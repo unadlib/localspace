@@ -4,6 +4,20 @@ Complete reference for all localspace methods with TypeScript signatures.
 
 ## Core Methods
 
+Every storage operation is installed once as a bound facade dispatcher. Calling
+`ready()`, `use()`, or `setDriver()` changes internal dispatch state, not the
+public function object. Captured methods, React dependency arrays, and spies
+therefore continue to observe the current initialized driver and current plugin
+registry:
+
+```ts
+const get = store.getItem;
+await store.ready();
+store.use(plugin);
+await store.setDriver(store.MEMORY);
+await get('key'); // current driver and plugins, no `.bind(store)` required
+```
+
 ### `getItem<T>(key: string): Promise<T | null>`
 
 Retrieves an item from storage.

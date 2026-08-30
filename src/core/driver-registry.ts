@@ -1,25 +1,17 @@
 import { createLocalSpaceError } from '../errors.js';
 import type { Driver, DriverRegistrationOptions } from '../types.js';
+import {
+  OPTIONAL_DRIVER_OPERATIONS,
+  REQUIRED_DRIVER_OPERATIONS,
+} from './driver-contract.js';
 
 const REQUIRED_DRIVER_METHODS = [
   '_initStorage',
-  'iterate',
-  'getItem',
-  'setItem',
-  'removeItem',
-  'clear',
-  'length',
-  'key',
-  'keys',
+  ...REQUIRED_DRIVER_OPERATIONS,
 ] as const;
-
 const OPTIONAL_DRIVER_METHODS = [
   '_closeStorage',
-  'setItems',
-  'getItems',
-  'removeItems',
-  'runTransaction',
-  'dropInstance',
+  ...OPTIONAL_DRIVER_OPERATIONS,
 ] as const;
 
 type DriverEntry = {
