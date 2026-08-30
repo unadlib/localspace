@@ -30,8 +30,12 @@ jobs:
         run: pnpm lint
       - name: Check types
         run: pnpm check:type
-      - name: Run unit tests
+      - name: Run unit tests on Node.js 22
+        if: matrix.node-version == '22.x'
         run: pnpm test:unit
+      - name: Run unit tests with coverage on Node.js 24
+        if: matrix.node-version == '24.x'
+        run: pnpm test:coverage
       - name: Build package
         run: pnpm build
       - name: Verify package exports
@@ -40,6 +44,9 @@ jobs:
         run: pnpm test:types:package
       - name: Verify isolated package tarball
         run: node scripts/verify-package-tarball.mjs --skip-build
+      - name: Verify React Native Jest integration
+        if: matrix.node-version == '24.x'
+        run: pnpm test:rn:integration
 
   browsers:
     name: Playwright ${{ matrix.browser }}
@@ -68,6 +75,14 @@ jobs:
         run: pnpm build
       - name: Run ${{ matrix.browser }} tests
         run: pnpm exec playwright test --project=${{ matrix.browser }}
+
+      - name: Enforce 2.1.0 performance regression budgets
+        if: matrix.browser == 'chromium'
+        run: node scripts/compare-v2.1-baseline.mjs --skip-build --skip-legacy-probes
+
+      - name: Rehearse 2.1 bridge to 3.0 data rollback
+        if: matrix.browser == 'chromium'
+        run: node scripts/rehearse-data-rollback.mjs --skip-candidate-build
 
       - name: Upload Playwright traces
         if: failure()

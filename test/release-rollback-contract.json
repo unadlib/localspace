@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "bridge": {
+    "sourceCommit": "8c8173495705f6847690e04d561006f306829c0d",
+    "sourcePackageVersion": "2.1.0",
+    "requiredPublishedVersion": "2.1.1",
+    "publishedVersion": null,
+    "publishedIntegrity": null
+  },
+  "candidateVersion": "3.0.0",
+  "fixture": {
+    "databaseName": "localspace-3-release-rollback",
+    "coreStoreName": "rollback-core",
+    "pluginStoreName": "rollback-plugins"
+  }
+}
