@@ -245,10 +245,11 @@ describe('Edge cases and concurrency tests', () => {
       expect(value).toBe('');
     });
 
-    it('should handle undefined value (converts to null)', async () => {
-      await instance.setItem('undefined-value', undefined as any);
-      const value = await instance.getItem('undefined-value');
-      expect(value).toBe(null);
+    it('should reject undefined without creating a key', async () => {
+      await expect(
+        instance.setItem('undefined-value', undefined as never)
+      ).rejects.toMatchObject({ code: 'SERIALIZATION_FAILED' });
+      await expect(instance.getItem('undefined-value')).resolves.toBeNull();
     });
 
     it('should handle very long keys', async () => {

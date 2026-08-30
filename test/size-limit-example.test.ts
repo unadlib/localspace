@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import localspace from '../src';
 import {
   SizeLimitExceededError,
-  SizeLimitMeasurementError,
   sizeLimitPlugin,
 } from '../examples/size-limit-plugin';
 
@@ -55,7 +54,7 @@ describe('size limit plugin example', () => {
     expect(await store.getItem('second')).toBeNull();
   });
 
-  it('rejects values whose serialized size cannot be measured', async () => {
+  it('rejects unsupported values before the plugin measures them', async () => {
     const consoleError = vi
       .spyOn(console, 'error')
       .mockImplementation(() => undefined);
@@ -63,11 +62,14 @@ describe('size limit plugin example', () => {
     const cyclic: { self?: unknown } = {};
     cyclic.self = cyclic;
 
-    await expect(store.setItem('cyclic', cyclic)).rejects.toBeInstanceOf(
-      SizeLimitMeasurementError
-    );
+    await expect(
+      store.setItem('cyclic', cyclic as never)
+    ).rejects.toMatchObject({
+      code: 'SERIALIZATION_FAILED',
+      details: { valuePath: '$.self' },
+    });
 
-    expect(consoleError).toHaveBeenCalled();
+    expect(consoleError).not.toHaveBeenCalled();
     expect(await store.getItem('cyclic')).toBeNull();
   });
 

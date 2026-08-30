@@ -10,6 +10,7 @@ export type InternalConfigOptions = Partial<LocalSpaceConfig> & {
   connectionIdleMs?: number;
   maxConcurrentTransactions?: number;
   size?: unknown;
+  strictValues?: unknown;
 };
 
 const INTEGER_OPTIONS = [
@@ -58,6 +59,13 @@ export function normalizeConfigOptions(
       'INVALID_CONFIG',
       'Configuration option "size" was removed in LocalSpace 3.0.',
       { configKey: 'size', reason: 'removed-option' }
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(options, 'strictValues')) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Configuration option "strictValues" was removed because LocalSpace 3.0 always validates StorageValue writes.',
+      { configKey: 'strictValues', reason: 'removed-option' }
     );
   }
 
@@ -109,20 +117,6 @@ export function normalizeConfigOptions(
     );
   }
 
-  if (
-    options.strictValues !== undefined &&
-    typeof options.strictValues !== 'boolean'
-  ) {
-    throw createLocalSpaceError(
-      'INVALID_CONFIG',
-      'Configuration option "strictValues" must be a boolean.',
-      {
-        configKey: 'strictValues',
-        providedType: typeof options.strictValues,
-      }
-    );
-  }
-
   return normalized;
 }
 
@@ -160,12 +154,12 @@ export function createConfigSnapshot(
       : {}),
     ...(config.bucket ? { bucket: Object.freeze({ ...config.bucket }) } : {}),
   };
-  const snapshotRecord = snapshot as LocalSpaceConfig &
-    Record<string, unknown>;
+  const snapshotRecord = snapshot as LocalSpaceConfig & Record<string, unknown>;
   delete snapshotRecord.prewarmTransactions;
   delete snapshotRecord.connectionIdleMs;
   delete snapshotRecord.maxConcurrentTransactions;
   delete snapshotRecord.size;
+  delete snapshotRecord.strictValues;
 
   return Object.freeze(snapshot) as LocalSpaceConfigSnapshot;
 }

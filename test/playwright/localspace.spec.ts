@@ -625,10 +625,10 @@ test.describe('localspace data type handling', () => {
     expect(value).toBe(null);
   });
 
-  test('saves undefined as null', async ({ page }) => {
+  test('rejects undefined before localStorage is mutated', async ({ page }) => {
     await ensureFixtureReady(page);
 
-    const value = await page.evaluate(async (storeName) => {
+    const result = await page.evaluate(async (storeName) => {
       const localspace = (window as any).localspace;
       const instance = localspace.createInstance({
         name: 'playwright-suite',
@@ -639,11 +639,18 @@ test.describe('localspace data type handling', () => {
       await instance.ready();
       await instance.clear();
 
-      await instance.setItem('undefined', undefined);
-      return instance.getItem('undefined');
+      try {
+        await instance.setItem('undefined', undefined);
+        return { code: null, keys: await instance.keys() };
+      } catch (error) {
+        return {
+          code: (error as { code?: string }).code ?? null,
+          keys: await instance.keys(),
+        };
+      }
     }, randomStoreName('undefined-type'));
 
-    expect(value).toBe(null);
+    expect(result).toEqual({ code: 'SERIALIZATION_FAILED', keys: [] });
   });
 
   test('saves and retrieves array values', async ({ page }) => {

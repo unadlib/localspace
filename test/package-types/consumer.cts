@@ -31,6 +31,16 @@ const migrationValue: StorageValue = {
   binary: new Uint8Array([1, 2, 3]),
   nested: [null, true, 1, 'value'],
 };
+void instance.setItem('migration', migrationValue);
+void instance.setItems([{ key: 'migration', value: migrationValue }]);
+void instance.getItem<StorageValue>('migration');
+void instance.getItems<StorageValue>(['migration']);
+void instance.iterate<StorageValue>(() => undefined);
+void instance.runTransaction('readwrite', async (transaction) => {
+  await transaction.set('migration', migrationValue);
+  await transaction.get<StorageValue>('migration');
+  await transaction.iterate<StorageValue>(() => undefined);
+});
 const customDriver: Driver = {
   ...memoryDriver,
   _driver: 'package-types-cjs',
@@ -62,6 +72,21 @@ const typecheckRemovedApis = (): void => {
   configSnapshot.name = 'changed';
   // @ts-expect-error mutable internal config is not public
   instance._config.name = 'changed';
+  // @ts-expect-error strictValues was a 2.1 migration-only option
+  const strictOptions: LocalSpaceOptions = { strictValues: true };
+  // @ts-expect-error Date is outside the 3.0 StorageValue contract
+  void instance.setItem('date', new Date());
+  // @ts-expect-error undefined is outside the 3.0 StorageValue contract
+  void instance.setItem('undefined', undefined);
+  // @ts-expect-error Map is outside the 3.0 StorageValue contract
+  void instance.setItems([{ key: 'map', value: new Map() }]);
+  // @ts-expect-error reads cannot promise values outside StorageValue
+  void instance.getItem<Date>('date');
+  void instance.runTransaction('readwrite', (transaction) => {
+    // @ts-expect-error transaction writes use the same StorageValue contract
+    return transaction.set('date', new Date());
+  });
+  void strictOptions;
 };
 setDeprecationWarnings(false);
 void registerDriver(customDriver, { overwrite: true });

@@ -344,7 +344,7 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
       return value;
     }
     const ttlMs = resolveTtl(key, options);
-    if (!ttlMs || ttlMs <= 0) {
+    if (!ttlMs || ttlMs <= 0 || !Number.isFinite(ttlMs)) {
       return value;
     }
     return {
@@ -394,7 +394,7 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
     const now = Date.now();
     const wrapped = normalized.map(({ key, value }) => {
       const ttlMs = resolveTtl(key, options);
-      if (!ttlMs || ttlMs <= 0) {
+      if (!ttlMs || ttlMs <= 0 || !Number.isFinite(ttlMs)) {
         return { key, value };
       }
       return {

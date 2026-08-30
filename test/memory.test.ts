@@ -39,7 +39,9 @@ describe('memory driver', () => {
     const instance = await createMemoryInstance(name);
 
     await expect(instance.setItem('string', 'value')).resolves.toBe('value');
-    await expect(instance.setItem('undefined', undefined)).resolves.toBe(null);
+    await expect(
+      instance.setItem('undefined', undefined as never)
+    ).rejects.toMatchObject({ code: 'SERIALIZATION_FAILED' });
     await expect(instance.getItem('string')).resolves.toBe('value');
     await expect(instance.getItem('missing')).resolves.toBe(null);
     await expect(instance.getItem('undefined')).resolves.toBe(null);
@@ -49,7 +51,7 @@ describe('memory driver', () => {
 
     await instance.setItem('a', 1);
     await instance.setItem('b', 2);
-    await expect(instance.length()).resolves.toBe(3);
+    await expect(instance.length()).resolves.toBe(2);
     await instance.clear();
     await expect(instance.length()).resolves.toBe(0);
   });
@@ -91,7 +93,7 @@ describe('memory driver', () => {
     await expect(
       instance.setItems([
         { key: 'a', value: 1 },
-        { key: 'b', value: undefined },
+        { key: 'b', value: null },
         { key: 'c', value: 3 },
       ])
     ).resolves.toEqual([

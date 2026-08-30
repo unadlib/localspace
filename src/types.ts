@@ -30,11 +30,7 @@ export type StorageBinary =
   | BigInt64Array
   | BigUint64Array;
 
-/**
- * Values that LocalSpace 3.0 will round-trip consistently across every driver.
- * LocalSpace 2.1 keeps its broad generic APIs for compatibility; enable
- * `strictValues` to validate writes against this contract before upgrading.
- */
+/** Values LocalSpace round-trips consistently across every 3.0 driver. */
 export type StorageValue =
   | StoragePrimitive
   | StorageBinary
@@ -111,12 +107,6 @@ export interface LocalSpaceConfig {
    * - 'strict': propagate all plugin errors to the caller
    */
   pluginErrorPolicy?: 'strict' | 'lenient';
-
-  /**
-   * Validate every logical write against the LocalSpace 3.0 StorageValue
-   * contract. Defaults to false in 2.1 for compatibility; 3.0 is always strict.
-   */
-  strictValues?: boolean;
 }
 
 export type DeepReadonly<T> = T extends (...args: any[]) => unknown
@@ -218,19 +208,21 @@ export interface Driver {
   /**
    * Iterate through all items
    */
-  iterate<T, U>(
+  iterate<T extends StorageValue = StorageValue, U = void>(
     iteratorCallback: (value: T, key: string, iterationNumber: number) => U
   ): Promise<U>;
 
   /**
    * Get item by key
    */
-  getItem<T>(key: string): Promise<T | null>;
+  getItem<T extends StorageValue = StorageValue>(
+    key: string
+  ): Promise<T | null>;
 
   /**
    * Set item
    */
-  setItem<T>(key: string, value: T): Promise<T>;
+  setItem<T extends StorageValue>(key: string, value: T): Promise<T>;
 
   /**
    * Remove item
@@ -240,12 +232,16 @@ export interface Driver {
   /**
    * Batch set multiple items atomically when supported by the driver.
    */
-  setItems?<T>(entries: BatchItems<T>): Promise<BatchResponse<T>>;
+  setItems?<T extends StorageValue>(
+    entries: BatchItems<T>
+  ): Promise<BatchResponse<T>>;
 
   /**
    * Batch get multiple items in order.
    */
-  getItems?<T>(keys: string[]): Promise<BatchResponse<T>>;
+  getItems?<T extends StorageValue = StorageValue>(
+    keys: string[]
+  ): Promise<BatchResponse<T>>;
 
   /**
    * Batch remove multiple items.
@@ -406,19 +402,21 @@ export interface LocalSpaceInstance {
   /**
    * Iterate through items
    */
-  iterate<T, U>(
+  iterate<T extends StorageValue = StorageValue, U = void>(
     iteratorCallback: (value: T, key: string, iterationNumber: number) => U
   ): Promise<U>;
 
   /**
    * Get item
    */
-  getItem<T>(key: string): Promise<T | null>;
+  getItem<T extends StorageValue = StorageValue>(
+    key: string
+  ): Promise<T | null>;
 
   /**
    * Set item
    */
-  setItem<T>(key: string, value: T): Promise<T>;
+  setItem<T extends StorageValue>(key: string, value: T): Promise<T>;
 
   /**
    * Remove item
@@ -433,12 +431,16 @@ export interface LocalSpaceInstance {
   /**
    * Batch set items
    */
-  setItems<T>(entries: BatchItems<T>): Promise<BatchResponse<T>>;
+  setItems<T extends StorageValue>(
+    entries: BatchItems<T>
+  ): Promise<BatchResponse<T>>;
 
   /**
    * Batch get items in order
    */
-  getItems<T>(keys: string[]): Promise<BatchResponse<T>>;
+  getItems<T extends StorageValue = StorageValue>(
+    keys: string[]
+  ): Promise<BatchResponse<T>>;
 
   /**
    * Batch remove items
@@ -496,11 +498,11 @@ export type BatchItems<T> =
 export type BatchResponse<T> = Array<{ key: string; value: T | null }>;
 
 export interface TransactionScope {
-  get<T>(key: string): Promise<T | null>;
-  set<T>(key: string, value: T): Promise<T>;
+  get<T extends StorageValue = StorageValue>(key: string): Promise<T | null>;
+  set<T extends StorageValue>(key: string, value: T): Promise<T>;
   remove(key: string): Promise<void>;
   keys(): Promise<string[]>;
-  iterate<T, U>(
+  iterate<T extends StorageValue = StorageValue, U = void>(
     iterator: (value: T, key: string, iterationNumber: number) => U
   ): Promise<U>;
   clear(): Promise<void>;

@@ -397,7 +397,7 @@ describe('Plugin batch operations', () => {
     const items = [
       { key: 'a', value: 'val-a' },
       { key: 'b', value: 'val-b' },
-      { key: 'undefined', value: undefined },
+      { key: 'null', value: null },
     ];
 
     await expect(store.setItems(items)).resolves.toEqual(items);

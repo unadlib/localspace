@@ -4,6 +4,7 @@ import localspace, {
   encryptionPlugin,
   ttlPlugin,
   type LocalSpacePlugin,
+  type PluginContext,
 } from '../src';
 import {
   PLUGIN_ENVELOPE_NAMESPACE,
@@ -38,6 +39,10 @@ const createStorePair = async (prefix: string, plugin: LocalSpacePlugin) => {
   await raw.setDriver([raw.MEMORY]);
   return { store, raw };
 };
+
+const pluginReadContext = {
+  operationState: Object.create(null) as Record<string, unknown>,
+} as PluginContext;
 
 describe('versioned plugin envelope reader', () => {
   it('recognizes only the reserved namespace and expected kind', () => {
@@ -123,22 +128,37 @@ describe('versioned plugin envelope reader', () => {
   });
 
   it('preserves legacy TTL representations for undefined and infinite expiry', async () => {
+    const plugin = ttlPlugin({ defaultTTL: Number.POSITIVE_INFINITY });
     const { store, raw } = await createStorePair(
       'ttl-legacy-representations',
-      ttlPlugin({ defaultTTL: Number.POSITIVE_INFINITY })
+      plugin
     );
 
     await store.setItem('infinite', 'value');
     await expect(store.getItem('infinite')).resolves.toBe('value');
+    await expect(raw.getItem('infinite')).resolves.toBe('value');
 
-    await raw.setItem('undefined', {
-      __ls_ttl: true,
-      expiresAt: Date.now() + 60_000,
-    });
-    await expect(store.getItem('undefined')).resolves.toBeNull();
+    await expect(
+      plugin.afterGet!(
+        'undefined',
+        { __ls_ttl: true, expiresAt: Date.now() + 60_000 } as never,
+        pluginReadContext
+      )
+    ).resolves.toBeNull();
+    await expect(
+      plugin.afterGet!(
+        'infinite',
+        {
+          __ls_ttl: true,
+          data: 'value',
+          expiresAt: Number.POSITIVE_INFINITY,
+        } as never,
+        pluginReadContext
+      )
+    ).resolves.toBe('value');
   });
 
-  it('round-trips TTL-wrapped undefined through JSON-backed storage', async () => {
+  it('rejects undefined before TTL or JSON-backed storage can transform it', async () => {
     const store = localspace.createInstance({
       name: uniqueName('ttl-undefined-localstorage'),
       storeName: 'store',
@@ -146,8 +166,10 @@ describe('versioned plugin envelope reader', () => {
     });
     await store.setDriver([store.LOCALSTORAGE]);
 
-    await store.setItem('undefined', undefined);
-    await expect(store.getItem('undefined')).resolves.toBeNull();
+    await expect(
+      store.setItem('undefined', undefined as never)
+    ).rejects.toMatchObject({ code: 'SERIALIZATION_FAILED' });
+    await expect(store.keys()).resolves.toEqual([]);
   });
 
   it('keeps versioned TTL payload validation strict', async () => {
@@ -164,16 +186,17 @@ describe('versioned plugin envelope reader', () => {
       code: 'DESERIALIZATION_FAILED',
     });
 
-    await raw.setItem(
-      'infinite-expiry',
-      envelope('ttl', {
-        data: 'value',
-        expiresAt: Number.POSITIVE_INFINITY,
-      })
-    );
-    await expect(store.getItem('infinite-expiry')).rejects.toMatchObject({
-      code: 'DESERIALIZATION_FAILED',
-    });
+    const plugin = ttlPlugin();
+    await expect(
+      plugin.afterGet!(
+        'infinite-expiry',
+        envelope('ttl', {
+          data: 'value',
+          expiresAt: Number.POSITIVE_INFINITY,
+        }) as never,
+        pluginReadContext
+      )
+    ).rejects.toMatchObject({ code: 'DESERIALIZATION_FAILED' });
   });
 
   it('keeps writing legacy compression payloads and reads the versioned form', async () => {

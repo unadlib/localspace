@@ -172,10 +172,12 @@ describe('IndexedDB driver tests', () => {
       expect(count).toBe(3);
     });
 
-    it('should normalize nullish values during interaction', async () => {
+    it('should preserve null and reject undefined during interaction', async () => {
       await instance.clear();
       await instance.setItem('nullish-null', null);
-      await instance.setItem('nullish-undefined', undefined);
+      await expect(
+        instance.setItem('nullish-undefined', undefined as never)
+      ).rejects.toMatchObject({ code: 'SERIALIZATION_FAILED' });
 
       const observed: Record<string, any> = {};
       await instance.iterate((value, key) => {
@@ -183,7 +185,7 @@ describe('IndexedDB driver tests', () => {
       });
 
       expect(observed['nullish-null']).toBe(null);
-      expect(observed['nullish-undefined']).toBe(null);
+      expect(observed).not.toHaveProperty('nullish-undefined');
     });
   });
 
@@ -249,59 +251,30 @@ describe('IndexedDB driver tests', () => {
     });
   });
 
-  describe('Blob handling', () => {
-    it('should store and retrieve Blobs', async () => {
+  describe('StorageValue boundary', () => {
+    it('should reject Blobs before IndexedDB storage', async () => {
       const blob = new Blob(['test content'], { type: 'text/plain' });
-      await instance.setItem('blobKey', blob);
-
-      const retrieved = await instance.getItem<any>('blobKey');
-
-      // In some environments, Blobs may be encoded and decoded
-      // Check if it's a Blob or an encoded blob object
-      if (retrieved && typeof retrieved === 'object') {
-        if (retrieved instanceof Blob) {
-          expect(retrieved.type).toBe('text/plain');
-          const text = await retrieved.text();
-          expect(text).toBe('test content');
-        } else if (retrieved.__local_forage_encoded_blob) {
-          // It's an encoded blob
-          expect(retrieved.__local_forage_encoded_blob).toBe(true);
-          expect(retrieved.type).toBe('text/plain');
-          expect(retrieved.data).toBeDefined();
-        } else {
-          // Some environments may not support Blobs fully
-          expect(retrieved).toBeDefined();
-        }
-      }
+      await expect(
+        instance.setItem('blobKey', blob as never)
+      ).rejects.toMatchObject({
+        code: 'SERIALIZATION_FAILED',
+        details: { key: 'blobKey', valueType: 'Blob' },
+      });
+      await expect(instance.getItem('blobKey')).resolves.toBeNull();
     });
 
-    it('should handle multiple Blob types', async () => {
+    it('should reject a complete batch when one entry contains a Blob', async () => {
       const textBlob = new Blob(['text'], { type: 'text/plain' });
-      const jsonBlob = new Blob(['{"key":"value"}'], {
-        type: 'application/json',
+      await expect(
+        instance.setItems([
+          { key: 'valid', value: 'value' },
+          { key: 'blob', value: textBlob },
+        ] as never)
+      ).rejects.toMatchObject({
+        code: 'SERIALIZATION_FAILED',
+        details: { key: 'blob', valueType: 'Blob' },
       });
-
-      await instance.setItem('textBlob', textBlob);
-      await instance.setItem('jsonBlob', jsonBlob);
-
-      const retrievedText = await instance.getItem<any>('textBlob');
-      const retrievedJson = await instance.getItem<any>('jsonBlob');
-
-      expect(retrievedText).toBeDefined();
-      expect(retrievedJson).toBeDefined();
-
-      // Check if they're Blobs or encoded blobs
-      if (retrievedText instanceof Blob) {
-        expect(retrievedText.type).toBe('text/plain');
-      } else if (retrievedText?.__local_forage_encoded_blob) {
-        expect(retrievedText.type).toBe('text/plain');
-      }
-
-      if (retrievedJson instanceof Blob) {
-        expect(retrievedJson.type).toBe('application/json');
-      } else if (retrievedJson?.__local_forage_encoded_blob) {
-        expect(retrievedJson.type).toBe('application/json');
-      }
+      await expect(instance.keys()).resolves.toEqual([]);
     });
   });
 
@@ -800,7 +773,7 @@ describe('IndexedDB driver tests', () => {
   });
 
   describe('Connection idle handling', () => {
-    it('should reopen after idle timeout for blob setItem', async () => {
+    it('should reopen after idle timeout for binary setItem', async () => {
       const idleInstance = localspace.createInstance({
         name: `indexeddb-idle-${Math.random().toString(36).slice(2)}`,
         storeName: 'idleStore',
@@ -812,27 +785,18 @@ describe('IndexedDB driver tests', () => {
 
       await new Promise((resolve) => setTimeout(resolve, 25));
 
-      const blob = new Blob(['idle-blob'], { type: 'text/plain' });
-      const stored = await idleInstance.setItem('blob-after-idle', blob);
-      expect(stored).toBeTruthy();
+      const binary = new Uint8Array([1, 2, 3]);
+      const stored = await idleInstance.setItem('binary-after-idle', binary);
+      expect(Array.from(stored)).toEqual([1, 2, 3]);
 
-      const retrieved = await idleInstance.getItem<any>('blob-after-idle');
-      if (retrieved instanceof Blob) {
-        expect(await retrieved.text()).toBe('idle-blob');
-      } else if (
-        retrieved &&
-        typeof retrieved === 'object' &&
-        '__local_forage_encoded_blob' in retrieved
-      ) {
-        expect((retrieved as any).__local_forage_encoded_blob).toBe(true);
-      } else {
-        expect(retrieved).toBeDefined();
-      }
+      const retrieved =
+        await idleInstance.getItem<Uint8Array>('binary-after-idle');
+      expect(Array.from(retrieved ?? [])).toEqual([1, 2, 3]);
 
       await idleInstance.dropInstance();
     });
 
-    it('should run transaction with blob after idle close', async () => {
+    it('should run transaction with binary data after idle close', async () => {
       const idleTxInstance = localspace.createInstance({
         name: `indexeddb-idle-tx-${Math.random().toString(36).slice(2)}`,
         storeName: 'idleTxStore',
@@ -844,25 +808,15 @@ describe('IndexedDB driver tests', () => {
 
       await new Promise((resolve) => setTimeout(resolve, 25));
 
-      const blob = new Blob(['tx-blob'], { type: 'text/plain' });
+      const binary = new Uint8Array([4, 5, 6]);
       await idleTxInstance.runTransaction('readwrite', async (tx) => {
         const current = await tx.get<string>('seed');
         await tx.set('echo', current ?? 'missing');
-        await tx.set('blob-tx', blob);
+        await tx.set('binary-tx', binary);
       });
 
-      const retrieved = await idleTxInstance.getItem<any>('blob-tx');
-      if (retrieved instanceof Blob) {
-        expect(await retrieved.text()).toBe('tx-blob');
-      } else if (
-        retrieved &&
-        typeof retrieved === 'object' &&
-        '__local_forage_encoded_blob' in retrieved
-      ) {
-        expect((retrieved as any).__local_forage_encoded_blob).toBe(true);
-      } else {
-        expect(retrieved).toBeDefined();
-      }
+      const retrieved = await idleTxInstance.getItem<Uint8Array>('binary-tx');
+      expect(Array.from(retrieved ?? [])).toEqual([4, 5, 6]);
       expect(await idleTxInstance.getItem('echo')).toBe('value');
 
       await idleTxInstance.dropInstance();

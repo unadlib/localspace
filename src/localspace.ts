@@ -14,6 +14,7 @@ import type {
   PluginOperation,
   LocalSpaceCapabilities,
   LocalSpaceConfigSnapshot,
+  StorageValue,
 } from './types.js';
 import { extend, isArray, normalizeBatchEntries } from './utils/helpers.js';
 import {
@@ -34,7 +35,10 @@ import {
   type PluginInternalOperation,
 } from './core/plugin-capabilities.js';
 import { validateStorageValueWrite } from './core/storage-value.js';
-import { decodeStoredRecordValue } from './core/stored-record.js';
+import {
+  canonicalizeStorageValue,
+  decodeStoredRecordValue,
+} from './core/stored-record.js';
 import {
   DriverRegistry,
   globalDriverRegistry,
@@ -69,6 +73,65 @@ const BuiltInDriverInitialization = Promise.all(
 ).then(() => undefined);
 
 type RawDriverMethod = (...args: any[]) => Promise<unknown>;
+
+type StorageValueWriteOperation = 'setItem' | 'setItems' | 'runTransaction';
+
+type StorageValueWriteDetails = {
+  operation: StorageValueWriteOperation;
+  key?: string;
+  valueSource?: 'application' | 'plugin-output';
+  plugin?: string;
+};
+
+const acceptStorageValueWrite = (
+  value: unknown,
+  context: StorageValueWriteDetails
+): StorageValue => {
+  validateStorageValueWrite(value, context);
+  return value;
+};
+
+const prepareStorageValueWrite = (
+  value: unknown,
+  context: StorageValueWriteDetails
+): StorageValue =>
+  canonicalizeStorageValue(acceptStorageValueWrite(value, context));
+
+const validatePluginStorageValueBatch = (
+  entries: BatchItems<StorageValue>,
+  context: { plugin: string }
+): BatchItems<StorageValue> => {
+  for (const entry of normalizeBatchEntries(entries)) {
+    acceptStorageValueWrite(entry.value, {
+      operation: 'setItems',
+      key: entry.key,
+      valueSource: 'plugin-output',
+      plugin: context.plugin,
+    });
+  }
+  return entries;
+};
+
+const prepareStorageValueBatch = (
+  entries: BatchItems<unknown>,
+  context: {
+    valueSource?: 'application' | 'plugin-output';
+    plugin?: string;
+  } = {}
+): Array<{ key: string; value: StorageValue }> => {
+  const normalized = normalizeBatchEntries(entries);
+  for (const entry of normalized) {
+    validateStorageValueWrite(entry.value, {
+      operation: 'setItems',
+      key: entry.key,
+      ...context,
+    });
+  }
+  return normalized.map(({ key, value }) => ({
+    key,
+    value: canonicalizeStorageValue(value as StorageValue),
+  }));
+};
 
 type LifecycleCallback =
   | 'plugin-init'
@@ -245,7 +308,7 @@ export class LocalSpace implements LocalSpaceInstance {
       args
     )) as LocalSpaceInstance['getItems'];
 
-  iterate = <T, U>(
+  iterate = <T extends StorageValue = StorageValue, U = void>(
     iteratorCallback: (value: T, key: string, iterationNumber: number) => U
   ): Promise<U> => this._dispatchOperation<U>('iterate', [iteratorCallback]);
 
@@ -267,10 +330,12 @@ export class LocalSpace implements LocalSpaceInstance {
     runner: (scope: TransactionScope) => Promise<T> | T
   ): Promise<T> => this._dispatchOperation<T>('runTransaction', [mode, runner]);
 
-  setItem = <T>(key: string, value: T): Promise<T> =>
+  setItem = <T extends StorageValue>(key: string, value: T): Promise<T> =>
     this._dispatchOperation<T>('setItem', [key, value]);
 
-  setItems = <T>(entries: BatchItems<T>): Promise<BatchResponse<T>> =>
+  setItems = <T extends StorageValue>(
+    entries: BatchItems<T>
+  ): Promise<BatchResponse<T>> =>
     this._dispatchOperation<BatchResponse<T>>('setItems', [entries]);
 
   dropInstance = (options?: LocalSpaceConfig): Promise<void> =>
@@ -927,25 +992,32 @@ export class LocalSpace implements LocalSpaceInstance {
 
   private _createSetItemWrapper(original: RawDriverMethod) {
     return (async (key: string, value: unknown) => {
-      validateStorageValueWrite(value, {
-        strict: this.#config.strictValues === true,
+      const logicalValue = prepareStorageValueWrite(value, {
         operation: 'setItem',
         key,
       });
       await this._ensurePluginsInitialized('setItem');
       const context = this._pluginManager.createContext('setItem');
-      context.operationState.originalValue = value;
+      context.operationState.originalValue = logicalValue;
       const processedValue = await this._pluginManager.beforeSet(
         key,
-        value,
-        context
+        logicalValue,
+        context,
+        (pluginValue, plugin) =>
+          acceptStorageValueWrite(pluginValue, {
+            operation: 'setItem',
+            key,
+            valueSource: 'plugin-output',
+            plugin: plugin.name,
+          })
       );
-      const driverResult = await original(key, processedValue);
+      const storedValue = canonicalizeStorageValue(processedValue);
+      const driverResult = await original(key, storedValue);
       context.operationState.driverResult = driverResult;
-      await this._pluginManager.afterSet(key, processedValue, context);
+      await this._pluginManager.afterSet(key, storedValue, context);
       const returnValue = (context.operationState.returnValue ??
         context.operationState.originalValue ??
-        value) as unknown;
+        logicalValue) as unknown;
       return returnValue;
     }) as typeof this.setItem;
   }
@@ -954,12 +1026,11 @@ export class LocalSpace implements LocalSpaceInstance {
     original: RawDriverMethod
   ): RawDriverMethod {
     return (key: string, value: unknown) => {
-      validateStorageValueWrite(value, {
-        strict: this.#config.strictValues === true,
+      const canonicalValue = prepareStorageValueWrite(value, {
         operation: 'setItem',
         key,
       });
-      return original(key, value);
+      return original(key, canonicalValue);
     };
   }
 
@@ -1001,13 +1072,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
   private _createSetItemsWrapper(original: RawDriverMethod) {
     return (async (entries: BatchItems<unknown>) => {
-      for (const entry of normalizeBatchEntries(entries)) {
-        validateStorageValueWrite(entry.value, {
-          strict: this.#config.strictValues === true,
-          operation: 'setItems',
-          key: entry.key,
-        });
-      }
+      const canonicalEntries = prepareStorageValueBatch(entries);
       await this._ensurePluginsInitialized('setItems');
       const batchContext = this._pluginManager.createContext('setItems');
       batchContext.operationState.isBatch = true;
@@ -1015,7 +1080,14 @@ export class LocalSpace implements LocalSpaceInstance {
         entries: prepared,
         logicalEntries,
         hasStorageTransforms: preserveLogicalValues,
-      } = await this._pluginManager.beforeSetItems(entries, batchContext);
+      } = await this._pluginManager.beforeSetItems(
+        canonicalEntries,
+        batchContext,
+        (pluginEntries, plugin) =>
+          validatePluginStorageValueBatch(pluginEntries, {
+            plugin: plugin.name,
+          })
+      );
       const normalized = this._pluginManager.normalizeBatch(prepared);
       batchContext.operationState.batchSize = normalized.length;
       const processedEntries: Array<{
@@ -1035,11 +1107,19 @@ export class LocalSpace implements LocalSpaceInstance {
         entryContext.operationState.originalValue = logicalValue;
         entryContext.operationState.isBatch = true;
         entryContext.operationState.batchSize = normalized.length;
-        const processedValue = await this._pluginManager.beforeSet(
+        const pluginValue = await this._pluginManager.beforeSet(
           entry.key,
           entry.value,
-          entryContext
+          entryContext,
+          (pluginValue, plugin) =>
+            acceptStorageValueWrite(pluginValue, {
+              operation: 'setItems',
+              key: entry.key,
+              valueSource: 'plugin-output',
+              plugin: plugin.name,
+            })
         );
+        const processedValue = canonicalizeStorageValue(pluginValue);
         const entryRecord = {
           key: entry.key,
           value: processedValue,
@@ -1122,14 +1202,7 @@ export class LocalSpace implements LocalSpaceInstance {
     original: RawDriverMethod
   ): RawDriverMethod {
     return (entries: BatchItems<unknown>) => {
-      for (const entry of normalizeBatchEntries(entries)) {
-        validateStorageValueWrite(entry.value, {
-          strict: this.#config.strictValues === true,
-          operation: 'setItems',
-          key: entry.key,
-        });
-      }
-      return original(entries);
+      return original(prepareStorageValueBatch(entries));
     };
   }
 
@@ -1291,17 +1364,16 @@ export class LocalSpace implements LocalSpaceInstance {
       return original(mode, (scope: TransactionScope) => {
         const validatingScope: TransactionScope = {
           ...scope,
-          get: async <T>(key: string) =>
+          get: async <T extends StorageValue>(key: string) =>
             decodeStoredRecordValue(await scope.get<T>(key)) as T | null,
-          set: <T>(key: string, value: T) => {
-            validateStorageValueWrite(value, {
-              strict: this.#config.strictValues === true,
+          set: <T extends StorageValue>(key: string, value: T) => {
+            const canonicalValue = prepareStorageValueWrite(value, {
               operation: 'runTransaction',
               key,
             });
-            return scope.set(key, value);
+            return scope.set(key, canonicalValue) as Promise<T>;
           },
-          iterate: <T, U>(
+          iterate: <T extends StorageValue, U>(
             iterator: (value: T, key: string, iterationNumber: number) => U
           ) =>
             scope.iterate<T, U>((value, key, iterationNumber) =>

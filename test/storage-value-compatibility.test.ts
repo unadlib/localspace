@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import localspace, {
   LocalSpace,
   type LocalSpaceInstance,
@@ -6,13 +6,10 @@ import localspace, {
   type StorageValue,
 } from '../src';
 import { inspectStorageValue } from '../src/core/storage-value';
-import { resetDeprecationWarningsForTests } from '../src/utils/deprecations';
+import { canonicalizeStorageValue } from '../src/core/stored-record';
 
 const uniqueName = (prefix: string) =>
   `${prefix}-${Math.random().toString(36).slice(2)}`;
-
-const warnings = () =>
-  vi.mocked(console.warn).mock.calls.map(([message]) => String(message));
 
 async function createMemoryInstance(
   options: LocalSpaceOptions = {},
@@ -31,20 +28,12 @@ async function createMemoryInstance(
   return instance;
 }
 
-beforeEach(() => {
-  resetDeprecationWarningsForTests();
-  vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-});
-
-afterEach(() => {
-  resetDeprecationWarningsForTests();
-  vi.restoreAllMocks();
-});
-
-describe('2.1 StorageValue migration contract', () => {
-  it('exports and accepts the supported recursive value type', async () => {
+describe('3.0 StorageValue contract', () => {
+  it('exports, canonicalizes, and copies the supported recursive value type', async () => {
     const nullPrototype = Object.create(null) as Record<string, StorageValue>;
     nullPrototype.enabled = true;
+    const binary = new Uint16Array([1, 2]);
+    const unordered = { z: 1, a: 2 };
     const values: StorageValue[] = [
       null,
       false,
@@ -54,53 +43,54 @@ describe('2.1 StorageValue migration contract', () => {
       [1, { nested: 'value' }],
       nullPrototype,
       new ArrayBuffer(4),
-      new Uint16Array([1, 2]),
+      binary,
+      unordered,
     ];
     if (typeof BigInt64Array !== 'undefined') {
       values.push(new BigInt64Array([1n]));
     }
 
-    const instance = await createMemoryInstance({ strictValues: true });
+    const instance = await createMemoryInstance();
     await expect(
       instance.setItems(
         values.map((value, index) => ({ key: String(index), value }))
       )
     ).resolves.toHaveLength(values.length);
-    expect(warnings()).toEqual([]);
+
+    binary[0] = 99;
+    unordered.a = 99;
+    await expect(instance.getItem<number>('3')).resolves.toSatisfy(
+      (value) => value === 0 && !Object.is(value, -0)
+    );
+    const storedBinary = await instance.getItem<Uint16Array>('8');
+    expect(storedBinary?.constructor.name).toBe('Uint16Array');
+    expect(Array.from(storedBinary ?? [])).toEqual([1, 2]);
+    const storedObject = await instance.getItem<Record<string, number>>('9');
+    expect(storedObject).toEqual({ a: 2, z: 1 });
+    expect(Object.keys(storedObject ?? {})).toEqual(['a', 'z']);
+    expect(
+      Object.getPrototypeOf(canonicalizeStorageValue(nullPrototype))
+    ).toBeNull();
   });
 
-  it('warns once without changing legacy writes by default', async () => {
-    const instance = await createMemoryInstance();
-    const date = new Date('2026-08-31T00:00:00.000Z');
-
-    await expect(instance.setItem('date', date)).resolves.toEqual(date);
-    await expect(
-      instance.setItem('map', new Map([['key', 1]]))
-    ).resolves.toEqual(new Map([['key', 1]]));
-
-    expect(warnings()).toEqual([
-      '[localspace] Deprecation: Value at $ is outside the LocalSpace 3.0 StorageValue contract: only plain objects are supported. Convert it before upgrading to 3.0, or enable `strictValues: true` to reject it now.',
-    ]);
-  });
-
-  it('rejects an unsupported item before plugin initialization or storage', async () => {
+  it('rejects unsupported values by default before plugin initialization or storage', async () => {
     const onInit = vi.fn();
-    const name = uniqueName('strict-item');
+    const name = uniqueName('invalid-item');
     const instance = await createMemoryInstance({
       name,
-      strictValues: true,
       plugins: [{ name: 'observer', onInit }],
     });
 
     await expect(
       instance.setItem('profile', {
         nested: { lastSeen: new Date('2026-08-31T00:00:00.000Z') },
-      })
+      } as never)
     ).rejects.toMatchObject({
       code: 'SERIALIZATION_FAILED',
       details: {
         operation: 'setItem',
         key: 'profile',
+        valueSource: 'application',
         valuePath: '$.nested.lastSeen',
         valueType: 'Date',
       },
@@ -113,18 +103,19 @@ describe('2.1 StorageValue migration contract', () => {
   });
 
   it.each(['MEMORY', 'INDEXEDDB', 'LOCALSTORAGE'] as const)(
-    'enforces strict item validation before the %s driver',
+    'enforces item validation before the %s driver',
     async (driverKey) => {
       const instance = localspace.createInstance({
         name: uniqueName(`strict-${driverKey.toLowerCase()}`),
         storeName: 'store',
-        strictValues: true,
       });
       await instance.setDriver([instance[driverKey]]);
       await instance.ready();
       await instance.clear();
 
-      await expect(instance.setItem('date', new Date())).rejects.toMatchObject({
+      await expect(
+        instance.setItem('date', new Date() as never)
+      ).rejects.toMatchObject({
         code: 'SERIALIZATION_FAILED',
         details: { operation: 'setItem', key: 'date', valueType: 'Date' },
       });
@@ -132,14 +123,17 @@ describe('2.1 StorageValue migration contract', () => {
     }
   );
 
-  it('validates a complete batch before writing any entry', async () => {
-    const instance = await createMemoryInstance({ strictValues: true });
+  it('validates a complete batch before writing or initializing plugins', async () => {
+    const onInit = vi.fn();
+    const instance = await createMemoryInstance({
+      plugins: [{ name: 'observer', onInit }],
+    });
 
     await expect(
       instance.setItems([
         { key: 'valid', value: { count: 1 } },
         { key: 'invalid', value: new Set([1]) },
-      ])
+      ] as never)
     ).rejects.toMatchObject({
       code: 'SERIALIZATION_FAILED',
       details: {
@@ -148,16 +142,76 @@ describe('2.1 StorageValue migration contract', () => {
         valueType: 'Set',
       },
     });
+    expect(onInit).not.toHaveBeenCalled();
+    await expect(instance.keys()).resolves.toEqual([]);
+  });
+
+  it('rejects unsupported plugin output before the driver side effect', async () => {
+    const instance = await createMemoryInstance({
+      plugins: [
+        {
+          name: 'invalid-output',
+          priority: 10,
+          beforeSet: () => new Date() as never,
+        },
+        {
+          name: 'would-mask-invalid-output',
+          beforeSet: () => 'masked',
+        },
+      ],
+    });
+
+    await expect(instance.setItem('key', 'value')).rejects.toMatchObject({
+      code: 'SERIALIZATION_FAILED',
+      details: {
+        operation: 'setItem',
+        key: 'key',
+        valueSource: 'plugin-output',
+        plugin: 'invalid-output',
+        valueType: 'Date',
+      },
+    });
+    await expect(instance.keys()).resolves.toEqual([]);
+  });
+
+  it('rejects unsupported batch-plugin output before the driver side effect', async () => {
+    const instance = await createMemoryInstance({
+      plugins: [
+        {
+          name: 'invalid-batch-output',
+          priority: 10,
+          beforeSetItems: () =>
+            [{ key: 'key', value: new Map([['invalid', true]]) }] as never,
+        },
+        {
+          name: 'would-mask-invalid-batch-output',
+          beforeSetItems: () => [{ key: 'key', value: 'masked' }],
+        },
+      ],
+    });
+
+    await expect(
+      instance.setItems([{ key: 'key', value: 'value' }])
+    ).rejects.toMatchObject({
+      code: 'SERIALIZATION_FAILED',
+      details: {
+        operation: 'setItems',
+        key: 'key',
+        valueSource: 'plugin-output',
+        plugin: 'invalid-batch-output',
+        valueType: 'Map',
+      },
+    });
     await expect(instance.keys()).resolves.toEqual([]);
   });
 
   it('validates transaction-scope writes and lets the driver roll back', async () => {
-    const instance = await createMemoryInstance({ strictValues: true });
+    const instance = await createMemoryInstance();
 
     await expect(
       instance.runTransaction('readwrite', async (tx) => {
         await tx.set('first', 1);
-        await tx.set('invalid', undefined);
+        await tx.set('invalid', undefined as never);
       })
     ).rejects.toMatchObject({
       code: 'SERIALIZATION_FAILED',
@@ -171,11 +225,10 @@ describe('2.1 StorageValue migration contract', () => {
     await expect(instance.keys()).resolves.toEqual([]);
   });
 
-  it('wraps IndexedDB transaction scopes with the same strict validator', async () => {
+  it('wraps IndexedDB transaction scopes with the same validator', async () => {
     const instance = localspace.createInstance({
       name: uniqueName('strict-indexeddb-transaction'),
       storeName: 'store',
-      strictValues: true,
     });
     await instance.setDriver([instance.INDEXEDDB]);
     await instance.ready();
@@ -184,7 +237,7 @@ describe('2.1 StorageValue migration contract', () => {
     await expect(
       instance.runTransaction('readwrite', async (tx) => {
         await tx.set('first', 1);
-        await tx.set('invalid', new Map([['key', 'value']]));
+        await tx.set('invalid', new Map([['key', 'value']]) as never);
       })
     ).rejects.toMatchObject({
       code: 'SERIALIZATION_FAILED',
@@ -204,9 +257,11 @@ describe('2.1 StorageValue migration contract', () => {
       enumerable: true,
       get: getter,
     });
-    const instance = await createMemoryInstance({ strictValues: true });
+    const instance = await createMemoryInstance();
 
-    await expect(instance.setItem('accessor', value)).rejects.toMatchObject({
+    await expect(
+      instance.setItem('accessor', value as never)
+    ).rejects.toMatchObject({
       code: 'SERIALIZATION_FAILED',
       details: {
         valuePath: '$.secret',
@@ -241,6 +296,16 @@ describe('2.1 StorageValue migration contract', () => {
     });
   });
 
+  it('rejects objects that forge a supported binary tag', () => {
+    const forged = {
+      [Symbol.toStringTag]: 'Uint8Array',
+      byteLength: 4,
+      buffer: new ArrayBuffer(4),
+    };
+
+    expect(inspectStorageValue(forged)).not.toBeNull();
+  });
+
   it('rejects cycles with the failing path', () => {
     const value: { child?: unknown } = {};
     value.child = value;
@@ -252,11 +317,11 @@ describe('2.1 StorageValue migration contract', () => {
     });
   });
 
-  it('validates strictValues at construction', () => {
-    expect(() => new LocalSpace({ strictValues: 'yes' } as never)).toThrowError(
+  it('rejects the removed strictValues option at construction', () => {
+    expect(() => new LocalSpace({ strictValues: true } as never)).toThrowError(
       expect.objectContaining({
         code: 'INVALID_CONFIG',
-        details: { configKey: 'strictValues', providedType: 'string' },
+        details: { configKey: 'strictValues', reason: 'removed-option' },
       })
     );
   });

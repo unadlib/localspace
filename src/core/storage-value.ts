@@ -1,8 +1,12 @@
 import { createLocalSpaceError } from '../errors.js';
-import { warnDeprecation } from '../utils/deprecations.js';
+import type { StorageValue } from '../types.js';
 
 const objectToString = Object.prototype.toString;
 const hasOwn = Object.prototype.hasOwnProperty;
+const arrayBufferByteLength = Object.getOwnPropertyDescriptor(
+  ArrayBuffer.prototype,
+  'byteLength'
+)!.get!;
 
 const SUPPORTED_BINARY_TAGS = new Set([
   '[object ArrayBuffer]',
@@ -26,9 +30,10 @@ type StorageValueIssue = {
 };
 
 type StorageValueWriteContext = {
-  strict: boolean;
   operation: 'setItem' | 'setItems' | 'runTransaction';
   key?: string;
+  valueSource?: 'application' | 'plugin-output';
+  plugin?: string;
 };
 
 const propertyPath = (parent: string, key: string): string =>
@@ -67,6 +72,15 @@ const hasPlainObjectPrototype = (value: object): boolean => {
   );
 };
 
+const isArrayBuffer = (value: object): value is ArrayBuffer => {
+  try {
+    arrayBufferByteLength.call(value);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const findStorageValueIssue = (
   value: unknown,
   path: string,
@@ -91,27 +105,28 @@ const findStorageValueIssue = (
   }
 
   const tag = objectToString.call(value);
-  if (SUPPORTED_BINARY_TAGS.has(tag)) {
+  if (isArrayBuffer(value)) {
     try {
-      // Accessing byteLength also rejects detached or forged binary objects.
-      const byteLength = (value as ArrayBuffer | ArrayBufferView).byteLength;
-      if (
-        tag !== '[object ArrayBuffer]' &&
-        objectToString.call((value as ArrayBufferView).buffer) ===
-          '[object SharedArrayBuffer]'
-      ) {
-        return issue(
-          path,
-          'binary views backed by shared memory are not supported',
-          value
-        );
-      }
+      const byteLength = arrayBufferByteLength.call(value) as number;
       return typeof byteLength === 'number'
         ? null
         : issue(path, 'binary values must expose a byteLength', value);
     } catch {
       return issue(path, 'detached binary values are not supported', value);
     }
+  }
+  if (ArrayBuffer.isView(value)) {
+    if (!SUPPORTED_BINARY_TAGS.has(tag) || tag === '[object ArrayBuffer]') {
+      return issue(path, 'only supported typed-array views are allowed', value);
+    }
+    if (objectToString.call(value.buffer) === '[object SharedArrayBuffer]') {
+      return issue(
+        path,
+        'binary views backed by shared memory are not supported',
+        value
+      );
+    }
+    return null;
   }
 
   if (ancestors.has(value)) {
@@ -208,28 +223,23 @@ export const inspectStorageValue = (
   }
 };
 
-export const validateStorageValueWrite = (
+export const validateStorageValueWrite: (
   value: unknown,
   context: StorageValueWriteContext
-): void => {
+) => asserts value is StorageValue = (value, context) => {
   const valueIssue = inspectStorageValue(value);
   if (!valueIssue) return;
 
   const details = {
     operation: context.operation,
     ...(context.key === undefined ? {} : { key: context.key }),
+    valueSource: context.valueSource ?? 'application',
+    ...(context.plugin === undefined ? {} : { plugin: context.plugin }),
     valuePath: valueIssue.path,
     valueType: valueIssue.valueType,
     valueReason: valueIssue.reason,
   };
   const message = `Value at ${valueIssue.path} is outside the LocalSpace 3.0 StorageValue contract: ${valueIssue.reason}.`;
 
-  if (context.strict) {
-    throw createLocalSpaceError('SERIALIZATION_FAILED', message, details);
-  }
-
-  warnDeprecation(
-    'unsupported-storage-value',
-    `${message} Convert it before upgrading to 3.0, or enable \`strictValues: true\` to reject it now.`
-  );
+  throw createLocalSpaceError('SERIALIZATION_FAILED', message, details);
 };

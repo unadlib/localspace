@@ -273,11 +273,7 @@ const decodeValue = (
   path: string,
   ancestors: WeakSet<object>
 ): StorageValue => {
-  if (
-    node === null ||
-    typeof node === 'string' ||
-    typeof node === 'boolean'
-  ) {
+  if (node === null || typeof node === 'string' || typeof node === 'boolean') {
     return node;
   }
   if (typeof node === 'number') {
@@ -317,9 +313,7 @@ const decodeValue = (
             `${path}[${index}]`
           );
         }
-        decoded.push(
-          decodeValue(item.value, `${path}[${index}]`, ancestors)
-        );
+        decoded.push(decodeValue(item.value, `${path}[${index}]`, ancestors));
       }
       if (
         Reflect.ownKeys(items).some(
@@ -430,10 +424,7 @@ const decodeValue = (
         !Object.values(binaryKinds).includes(kind as StoredBinaryKind) ||
         typeof data !== 'string'
       ) {
-        return deserializationFailure(
-          'binary kind or data is invalid',
-          path
-        );
+        return deserializationFailure('binary kind or data is invalid', path);
       }
       return decodeBinary(kind as StoredBinaryKind, data, path);
     }
@@ -500,4 +491,16 @@ export const readStoredRecord = (value: unknown): StoredRecordReadResult => {
 export const decodeStoredRecordValue = (value: unknown): unknown => {
   const record = readStoredRecord(value);
   return record.matched ? record.value : value;
+};
+
+/** Validate, copy, and normalize a StorageValue through the frozen v1 codec. */
+export const canonicalizeStorageValue = (value: StorageValue): StorageValue => {
+  const record = readStoredRecord(createStoredRecord(value));
+  if (!record.matched) {
+    throw createLocalSpaceError(
+      'SERIALIZATION_FAILED',
+      'Failed to canonicalize LocalSpace StorageValue.'
+    );
+  }
+  return record.value;
 };

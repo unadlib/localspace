@@ -4,6 +4,7 @@ import {
   type BatchItems,
   type LocalSpacePlugin,
   type PluginContext,
+  type StorageValue,
 } from '../src';
 
 export interface SizeLimitExceededInfo {
@@ -67,7 +68,7 @@ const readCurrentValues = async (
   context: PluginContext
 ): Promise<Map<string, unknown>> => {
   const values = new Map<string, unknown>();
-  await context.instance.iterate<unknown, void>((value, key) => {
+  await context.instance.iterate<StorageValue, void>((value, key) => {
     values.set(key, value);
   });
   return values;

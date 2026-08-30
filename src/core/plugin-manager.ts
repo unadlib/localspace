@@ -404,7 +404,8 @@ export class PluginManager {
   async beforeSet<T>(
     key: string,
     value: T,
-    context: PluginContext
+    context: PluginContext,
+    prepareOutput?: (value: T, plugin: LocalSpacePlugin) => T
   ): Promise<T> {
     let current = value;
     for (const plugin of this.getActivePlugins()) {
@@ -418,6 +419,9 @@ export class PluginManager {
         context,
         current
       );
+      if (prepareOutput) {
+        current = prepareOutput(current, plugin);
+      }
     }
     return current;
   }
@@ -511,7 +515,11 @@ export class PluginManager {
 
   async beforeSetItems<T>(
     entries: BatchItems<T>,
-    context: PluginContext
+    context: PluginContext,
+    prepareOutput?: (
+      entries: BatchItems<T>,
+      plugin: LocalSpacePlugin
+    ) => BatchItems<T>
   ): Promise<PreparedSetItems<T>> {
     let current = entries;
     let lineage = createBatchLineage(entries);
@@ -530,6 +538,9 @@ export class PluginManager {
         context,
         current
       );
+      if (prepareOutput) {
+        current = prepareOutput(current, plugin);
+      }
       lineage = updateBatchLineage(lineage, current, isStorageTransform);
     }
     return {
