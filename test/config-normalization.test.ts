@@ -1,32 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { LocalSpace } from '../src';
+import { describe, expect, it, vi } from 'vitest';
+import { LocalSpace, type LocalSpacePlugin } from '../src';
 import { LocalSpaceError } from '../src/errors';
 
-describe('configuration normalization', () => {
-  it('preserves the 2.0 setter namespace while leaving constructor names unchanged', async () => {
-    const name = `store-name-compat-${Math.random().toString(36).slice(2)}`;
-    const constructed = new LocalSpace({ storeName: 'store&name-v1' });
-    const configured = new LocalSpace({ name });
-    const legacyWriter = new LocalSpace({
-      name,
-      storeName: 'store_name_v1',
-    });
-
-    expect(configured.config({ storeName: 'store&name-v1' })).toBe(true);
-    expect(constructed.config('storeName')).toBe('store&name-v1');
-    expect(configured.config('storeName')).toBe('store_name_v1');
-
-    await Promise.all([
-      configured.setDriver([configured.MEMORY]),
-      legacyWriter.setDriver([legacyWriter.MEMORY]),
-    ]);
-    await legacyWriter.setItem('persisted', '2.0-setter-data');
-    await expect(configured.getItem('persisted')).resolves.toBe(
-      '2.0-setter-data'
-    );
-    await configured.dropInstance();
-  });
-
+describe('immutable configuration', () => {
   it.each([
     ['version', 'invalid'],
     ['version', Number.NaN],
@@ -36,22 +12,14 @@ describe('configuration normalization', () => {
     ['maxBatchSize', Number.POSITIVE_INFINITY],
     ['maxBatchSize', -1],
     ['maxBatchSize', 1.5],
-    ['connectionIdleMs', -1],
-    ['maxConcurrentTransactions', -1],
     ['strictValues', 'yes'],
   ])('rejects invalid constructor option %s=%s', (key, value) => {
-    let error: unknown;
-    try {
-      new LocalSpace({ [key]: value } as never);
-    } catch (cause) {
-      error = cause;
-    }
-
-    expect(error).toBeInstanceOf(LocalSpaceError);
-    expect(error).toMatchObject({
-      code: 'INVALID_CONFIG',
-      details: { configKey: key },
-    });
+    expect(() => new LocalSpace({ [key]: value } as never)).toThrowError(
+      expect.objectContaining<Partial<LocalSpaceError>>({
+        code: 'INVALID_CONFIG',
+        details: expect.objectContaining({ configKey: key }),
+      })
+    );
   });
 
   it.each([
@@ -68,88 +36,169 @@ describe('configuration normalization', () => {
     );
   });
 
-  it('returns setter validation errors without applying partial config', () => {
-    const instance = new LocalSpace({ storeName: 'original' });
-
-    const result = instance.config({
-      storeName: 'changed',
-      maxBatchSize: Number.NaN,
-    });
-
-    expect(result).toBeInstanceOf(LocalSpaceError);
-    expect(result).toMatchObject({
-      code: 'INVALID_CONFIG',
-      details: { configKey: 'maxBatchSize' },
-    });
-    expect(instance.config('storeName')).toBe('original');
+  it('rejects the removed size option at runtime', () => {
+    expect(() => new LocalSpace({ size: 4_980_736 } as never)).toThrowError(
+      expect.objectContaining<Partial<LocalSpaceError>>({
+        code: 'INVALID_CONFIG',
+        details: expect.objectContaining({
+          configKey: 'size',
+          reason: 'removed-option',
+        }),
+      })
+    );
   });
 
-  it('accepts finite positive integer operational limits', () => {
-    const instance = new LocalSpace({
-      version: 2,
-      maxBatchSize: 50,
-      connectionIdleMs: 1_000,
-      maxConcurrentTransactions: 4,
-    });
+  it('accepts supported finite operational limits', () => {
+    const instance = new LocalSpace({ version: 2, maxBatchSize: 50 });
 
     expect(instance.config('version')).toBe(2);
     expect(instance.config('maxBatchSize')).toBe(50);
-    expect(instance.config('connectionIdleMs')).toBe(1_000);
-    expect(instance.config('maxConcurrentTransactions')).toBe(4);
   });
 
-  it('accepts zero as the disabled or unbounded operational limit', async () => {
-    const constructed = new LocalSpace({
-      maxBatchSize: 0,
-      connectionIdleMs: 0,
-      maxConcurrentTransactions: 0,
+  it('does not expose internal IndexedDB tuning state in config snapshots', () => {
+    const instance = new LocalSpace({
+      prewarmTransactions: false,
+      connectionIdleMs: 10,
+      maxConcurrentTransactions: 1,
+    } as never);
+    const snapshot = instance.config() as Record<string, unknown>;
+
+    expect(snapshot).not.toHaveProperty('prewarmTransactions');
+    expect(snapshot).not.toHaveProperty('connectionIdleMs');
+    expect(snapshot).not.toHaveProperty('maxConcurrentTransactions');
+  });
+
+  it('detaches and deeply freezes every nested public config value', () => {
+    const drivers = ['memoryStorageWrapper'];
+    const bucket = { name: 'app-bucket', durability: 'strict' as const };
+    const adapter = {
+      getItem: vi.fn(async () => null),
+      setItem: vi.fn(async () => undefined),
+      removeItem: vi.fn(async () => undefined),
+    };
+    const originalGetItem = adapter.getItem;
+    const instance = new LocalSpace({
+      driver: drivers,
+      bucket,
+      reactNativeAsyncStorage: adapter,
     });
-    const configured = new LocalSpace();
 
-    expect(
-      configured.config({
-        maxBatchSize: 0,
-        connectionIdleMs: 0,
-        maxConcurrentTransactions: 0,
-      })
-    ).toBe(true);
+    drivers.push('changed');
+    bucket.name = 'changed';
+    adapter.getItem = vi.fn(async () => 'changed');
 
-    for (const instance of [constructed, configured]) {
-      expect(instance.config('maxBatchSize')).toBe(0);
-      expect(instance.config('connectionIdleMs')).toBe(0);
-      expect(instance.config('maxConcurrentTransactions')).toBe(0);
-    }
+    const snapshot = instance.config();
+    const adapterSnapshot = snapshot.reactNativeAsyncStorage!;
 
-    await configured.setDriver([configured.MEMORY]);
-    await expect(
-      configured.setItems([
-        { key: 'first', value: 1 },
-        { key: 'second', value: 2 },
-      ])
-    ).resolves.toEqual([
-      { key: 'first', value: 1 },
-      { key: 'second', value: 2 },
-    ]);
-    await expect(configured.getItems(['first', 'second'])).resolves.toEqual([
-      { key: 'first', value: 1 },
-      { key: 'second', value: 2 },
-    ]);
-    await configured.dropInstance();
+    expect(snapshot.driver).toEqual(['memoryStorageWrapper']);
+    expect(snapshot.bucket?.name).toBe('app-bucket');
+    expect(adapterSnapshot.getItem).not.toBe(adapter.getItem);
+    expect(adapterSnapshot.getItem).not.toBe(originalGetItem);
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(Object.isFrozen(snapshot.driver)).toBe(true);
+    expect(Object.isFrozen(snapshot.bucket)).toBe(true);
+    expect(Object.isFrozen(adapterSnapshot)).toBe(true);
+    expect(() => {
+      (snapshot as { name?: string }).name = 'mutated';
+    }).toThrow(TypeError);
+    expect(instance.config('name')).toBe('localforage');
   });
 
-  it('clones driver arrays in both configuration paths', async () => {
-    const constructorDrivers = ['memoryStorageWrapper'];
-    const setterDrivers = ['memoryStorageWrapper'];
-    const constructed = new LocalSpace({ driver: constructorDrivers });
-    const configured = new LocalSpace();
+  it('throws when JavaScript callers use the removed config setter', () => {
+    const instance = new LocalSpace({ name: 'original' });
 
-    const setterResult = configured.config({ driver: setterDrivers });
-    constructorDrivers.push('changed');
-    setterDrivers.push('changed');
+    expect(() =>
+      (instance.config as unknown as (options: object) => unknown)({
+        name: 'changed',
+      })
+    ).toThrowError(
+      expect.objectContaining<Partial<LocalSpaceError>>({
+        code: 'INVALID_ARGUMENT',
+        details: expect.objectContaining({
+          operation: 'config',
+          reason: 'setter-removed',
+        }),
+      })
+    );
+    expect(instance.config('name')).toBe('original');
+  });
+});
 
-    expect(constructed.config('driver')).toEqual(['memoryStorageWrapper']);
-    expect(configured.config('driver')).toEqual(['memoryStorageWrapper']);
-    expect(setterResult).toBeInstanceOf(Promise);
-    await setterResult;
+describe('pre-ready plugin registration', () => {
+  const observer = (name: string, beforeSet = vi.fn()): LocalSpacePlugin => ({
+    name,
+    beforeSet: (_key, value) => {
+      beforeSet();
+      return value;
+    },
+  });
+
+  it('allows use() before readiness and locks it synchronously on ready()', async () => {
+    const instance = new LocalSpace({ driver: 'memoryStorageWrapper' });
+    instance.use(observer('early'));
+
+    const readiness = instance.ready();
+    expect(() => instance.use(observer('late'))).toThrowError(
+      expect.objectContaining<Partial<LocalSpaceError>>({
+        code: 'CONFIG_LOCKED',
+        details: expect.objectContaining({
+          operation: 'use',
+          reason: 'instance-started',
+        }),
+      })
+    );
+
+    await readiness;
+    await instance.close();
+  });
+
+  it('locks use() synchronously when a storage operation starts', async () => {
+    const instance = new LocalSpace({ driver: 'memoryStorageWrapper' });
+    const write = instance.setItem('key', 'value');
+
+    expect(() => instance.use(observer('late'))).toThrowError(
+      expect.objectContaining<Partial<LocalSpaceError>>({
+        code: 'CONFIG_LOCKED',
+        details: expect.objectContaining({ operation: 'use' }),
+      })
+    );
+
+    await write;
+    await instance.close();
+  });
+
+  it('rejects duplicate plugin names atomically', async () => {
+    const duplicate = observer('duplicate');
+    expect(
+      () => new LocalSpace({ plugins: [duplicate, observer('duplicate')] })
+    ).toThrowError(
+      expect.objectContaining<Partial<LocalSpaceError>>({
+        code: 'INVALID_CONFIG',
+        details: expect.objectContaining({
+          configKey: 'plugins',
+          reason: 'duplicate-plugin',
+        }),
+      })
+    );
+
+    const afterSet = vi.fn();
+    const instance = new LocalSpace({
+      driver: 'memoryStorageWrapper',
+      plugins: [duplicate],
+    });
+    expect(() =>
+      instance.use([
+        { name: 'would-be-partial', afterSet },
+        observer('duplicate'),
+      ])
+    ).toThrowError(
+      expect.objectContaining<Partial<LocalSpaceError>>({
+        code: 'INVALID_CONFIG',
+      })
+    );
+
+    await instance.setItem('key', 'value');
+    expect(afterSet).not.toHaveBeenCalled();
+    await instance.close();
   });
 });

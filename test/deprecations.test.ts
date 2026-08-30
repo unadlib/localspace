@@ -2,9 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   encryptionPlugin,
   LocalSpace,
-  memoryDriver,
   setDeprecationWarnings,
-  type Driver,
   type LocalSpacePlugin,
   type ReactNativeAsyncStorage,
 } from '../src';
@@ -28,63 +26,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('2.1 deprecation warnings', () => {
-  it('warns once for explicit legacy size configuration', () => {
-    const first = new LocalSpace({ size: 4_980_736 });
-    const second = new LocalSpace();
-    expect(second.config({ size: 1_000_000 })).toBe(true);
-    expect(first.config('size')).toBe(4_980_736);
-
-    expect(warnings()).toEqual([
-      '[localspace] Deprecation: the `size` option is ignored by built-in drivers and will be removed in 3.0.',
-      '[localspace] Deprecation: `config(options)` is deprecated and will be removed in 3.0; pass options to the constructor or `createInstance()`.',
-    ]);
-  });
-
-  it('warns once for IndexedDB performance options', () => {
-    const first = new LocalSpace({ prewarmTransactions: false });
-    const second = new LocalSpace();
-    expect(second.config({ connectionIdleMs: 10 })).toBe(true);
-    expect(first.config('prewarmTransactions')).toBe(false);
-
-    expect(warnings()).toContain(
-      '[localspace] Deprecation: `prewarmTransactions`, `connectionIdleMs`, and `maxConcurrentTransactions` are deprecated and will be removed from the 3.0 public configuration.'
-    );
-    expect(
-      warnings().filter((message) =>
-        message.includes('`prewarmTransactions`, `connectionIdleMs`')
-      )
-    ).toHaveLength(1);
-  });
-
-  it('warns for public instance-level custom driver registration', async () => {
-    const instance = new LocalSpace();
-    const driver: Driver = {
-      ...memoryDriver,
-      _driver: `deprecated-registration-${Math.random().toString(36).slice(2)}`,
-    };
-
-    await instance.defineDriver(driver);
-    expect(warnings()).toContain(
-      '[localspace] Deprecation: instance-level `defineDriver()` is deprecated and will be replaced by explicit global or construction-scoped driver registration in 3.0.'
-    );
-  });
-
-  it('does not warn for LocalSpace-owned internal registration', async () => {
-    const instance = new LocalSpace();
-    const driver: Driver = {
-      ...memoryDriver,
-      _driver: `internal-registration-${Math.random().toString(36).slice(2)}`,
-    };
-    await instance._defineDriver(driver);
-
-    expect(
-      warnings().some((message) =>
-        message.includes('instance-level `defineDriver()`')
-      )
-    ).toBe(false);
-  });
-
+describe('migration deprecation warnings', () => {
   it('warns when using the weak 2.1 Memory transaction contract', async () => {
     const instance = new LocalSpace({
       name: `weak-memory-${Math.random().toString(36).slice(2)}`,
@@ -135,35 +77,6 @@ describe('2.1 deprecation warnings', () => {
     expect(warnings()).toContain(
       '[localspace] Deprecation: a requested Storage Bucket could not be opened and fell back to the default backend; 3.0 rejects instead of falling back.'
     );
-  });
-
-  it('preserves the mutable config reference while warning once', () => {
-    const instance = new LocalSpace({ name: 'mutable-config-reference' });
-    const config = instance.config();
-    config.name = 'mutated-for-compatibility';
-
-    expect(instance.config('name')).toBe('mutated-for-compatibility');
-    instance.config();
-    expect(warnings()).toEqual([
-      '[localspace] Deprecation: mutating the object returned by `config()` is deprecated; pass options to createInstance() instead.',
-    ]);
-  });
-
-  it('preserves destroy lifecycle behavior while warning once', async () => {
-    const onInit = vi.fn();
-    const onDestroy = vi.fn();
-    const instance = new LocalSpace({
-      plugins: [{ name: 'legacy-destroy', onInit, onDestroy }],
-    });
-
-    await instance.destroy();
-    await instance.destroy();
-
-    expect(onInit).toHaveBeenCalledTimes(1);
-    expect(onDestroy).toHaveBeenCalledTimes(1);
-    expect(warnings()).toEqual([
-      '[localspace] Deprecation: `destroy()` is deprecated; use `close()` to release plugins and the active driver.',
-    ]);
   });
 
   it('warns once for matching batch and single hooks on custom plugins', () => {
@@ -241,16 +154,22 @@ describe('2.1 deprecation warnings', () => {
 
   it('can disable all deprecation warnings', async () => {
     setDeprecationWarnings(false);
-    const instance = new LocalSpace({ size: 1 });
-    instance.config();
-    await instance.destroy();
+    new LocalSpace({
+      plugins: [
+        {
+          name: 'silent-combined-hooks',
+          beforeSet: (_key, value) => value,
+          beforeSetItems: (entries) => entries,
+        },
+      ],
+    });
 
     expect(warnings()).toEqual([]);
   });
 
   it('does not emit deprecation warnings in production', () => {
     vi.stubEnv('NODE_ENV', 'production');
-    warnDeprecation('legacy-size-option', 'must stay silent');
+    warnDeprecation('combined-plugin-hooks', 'must stay silent');
 
     expect(warnings()).toEqual([]);
   });
@@ -260,7 +179,7 @@ describe('2.1 deprecation warnings', () => {
     delete process.env.NODE_ENV;
 
     try {
-      warnDeprecation('legacy-size-option', 'must remain visible');
+      warnDeprecation('combined-plugin-hooks', 'must remain visible');
     } finally {
       if (originalNodeEnv === undefined) {
         delete process.env.NODE_ENV;

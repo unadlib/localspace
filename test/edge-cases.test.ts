@@ -89,10 +89,7 @@ describe('Edge cases and concurrency tests', () => {
         value: `batch2-value-${i}`,
       }));
 
-      await Promise.all([
-        instance.setItems(batch1),
-        instance.setItems(batch2),
-      ]);
+      await Promise.all([instance.setItems(batch1), instance.setItems(batch2)]);
 
       const keys = await instance.keys();
       expect(keys.length).toBe(40);
@@ -157,17 +154,23 @@ describe('Edge cases and concurrency tests', () => {
     it('should handle concurrent transactions', async () => {
       await instance.setItem('counter', 0);
 
-      const transaction1 = instance.runTransaction('readwrite', async (scope) => {
-        const val = await scope.get<number>('counter');
-        await scope.set('counter', (val ?? 0) + 1);
-        return val;
-      });
+      const transaction1 = instance.runTransaction(
+        'readwrite',
+        async (scope) => {
+          const val = await scope.get<number>('counter');
+          await scope.set('counter', (val ?? 0) + 1);
+          return val;
+        }
+      );
 
-      const transaction2 = instance.runTransaction('readwrite', async (scope) => {
-        const val = await scope.get<number>('counter');
-        await scope.set('counter', (val ?? 0) + 10);
-        return val;
-      });
+      const transaction2 = instance.runTransaction(
+        'readwrite',
+        async (scope) => {
+          const val = await scope.get<number>('counter');
+          await scope.set('counter', (val ?? 0) + 10);
+          return val;
+        }
+      );
 
       await Promise.all([transaction1, transaction2]);
 
@@ -293,7 +296,11 @@ describe('Edge cases and concurrency tests', () => {
     it('should handle getItems with non-existent keys', async () => {
       await instance.setItem('exists', 'value');
 
-      const result = await instance.getItems(['exists', 'not-exists', 'also-not-exists']);
+      const result = await instance.getItems([
+        'exists',
+        'not-exists',
+        'also-not-exists',
+      ]);
       expect(result).toEqual([
         { key: 'exists', value: 'value' },
         { key: 'not-exists', value: null },
@@ -403,7 +410,7 @@ describe('Edge cases and concurrency tests', () => {
       const expired = await instance.getItem('ttl-key');
       expect(expired).toBe(null);
 
-      await instance.destroy();
+      await instance.close();
     });
   });
 
@@ -430,8 +437,14 @@ describe('Edge cases and concurrency tests', () => {
     it('should handle multiple createInstance with same name', async () => {
       const name = `shared-${Math.random().toString(36).slice(2)}`;
 
-      const instance1 = localspace.createInstance({ name, storeName: 'store1' });
-      const instance2 = localspace.createInstance({ name, storeName: 'store2' });
+      const instance1 = localspace.createInstance({
+        name,
+        storeName: 'store1',
+      });
+      const instance2 = localspace.createInstance({
+        name,
+        storeName: 'store2',
+      });
 
       await instance1.setDriver([instance1.INDEXEDDB]);
       await instance2.setDriver([instance2.INDEXEDDB]);

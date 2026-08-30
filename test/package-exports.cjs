@@ -15,7 +15,11 @@ const warnings = [];
 console.warn = (message) => warnings.push(String(message));
 delete process.env.NODE_ENV;
 ${loadLocalSpace}
-new LocalSpace({ size: 1 });
+new LocalSpace({ plugins: [{
+  name: 'combined-probe',
+  beforeSet: (_key, value) => value,
+  beforeSetItems: (entries) => entries,
+}] });
 process.stdout.write(JSON.stringify(warnings));`;
   const env = { ...process.env };
   delete env.NODE_ENV;
@@ -65,7 +69,15 @@ async function main() {
   console.warn = (message) => productionWarnings.push(String(message));
   try {
     process.env.NODE_ENV = 'production';
-    const productionInstance = new cjs.LocalSpace({ size: 1 });
+    const productionInstance = new cjs.LocalSpace({
+      plugins: [
+        {
+          name: 'production-combined',
+          beforeSet: (_key, value) => value,
+          beforeSetItems: (entries) => entries,
+        },
+      ],
+    });
     productionInstance.config();
   } finally {
     if (originalNodeEnv === undefined) {
@@ -81,7 +93,15 @@ async function main() {
   console.warn = (message) => developmentWarnings.push(String(message));
   try {
     process.env.NODE_ENV = 'development';
-    new cjs.LocalSpace({ size: 1 });
+    new cjs.LocalSpace({
+      plugins: [
+        {
+          name: 'development-combined',
+          beforeSet: (_key, value) => value,
+          beforeSetItems: (entries) => entries,
+        },
+      ],
+    });
   } finally {
     if (originalNodeEnv === undefined) {
       delete process.env.NODE_ENV;
@@ -91,11 +111,11 @@ async function main() {
     console.warn = originalWarn;
   }
   assert.deepEqual(developmentWarnings, [
-    '[localspace] Deprecation: the `size` option is ignored by built-in drivers and will be removed in 3.0.',
+    '[localspace] Deprecation: plugin "development-combined" defines matching batch and single hooks; define one form per phase before 3.0.',
   ]);
 
   const unsetNodeEnvWarning =
-    '[localspace] Deprecation: the `size` option is ignored by built-in drivers and will be removed in 3.0.';
+    '[localspace] Deprecation: plugin "combined-probe" defines matching batch and single hooks; define one form per phase before 3.0.';
   assert.deepEqual(probeUnsetNodeEnv('cjs'), [unsetNodeEnvWarning]);
   assert.deepEqual(probeUnsetNodeEnv('esm'), [unsetNodeEnvWarning]);
 
@@ -173,7 +193,15 @@ async function main() {
   console.warn = (message) => duplicateWarnings.push(String(message));
   try {
     process.env.NODE_ENV = 'development';
-    new esm.LocalSpace({ size: 1 });
+    new esm.LocalSpace({
+      plugins: [
+        {
+          name: 'esm-combined',
+          beforeSet: (_key, value) => value,
+          beforeSetItems: (entries) => entries,
+        },
+      ],
+    });
   } finally {
     if (originalNodeEnv === undefined) {
       delete process.env.NODE_ENV;

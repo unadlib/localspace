@@ -69,28 +69,6 @@ export interface LocalSpaceConfig {
   maxBatchSize?: number;
 
   /**
-   * Pre-warm an IndexedDB transaction after initialization to avoid the
-   * first-op latency hit. Enabled by default; set to false to skip.
-   * @deprecated Removed from the 3.0 public configuration.
-   */
-  prewarmTransactions?: boolean;
-
-  /**
-   * Optional idle timeout (ms) for IndexedDB connections. When set,
-   * connections will be closed after a period of inactivity and reopened
-   * automatically on the next operation. Set to 0 to disable idle closing.
-   * @deprecated Removed from the 3.0 public configuration.
-   */
-  connectionIdleMs?: number;
-
-  /**
-   * Optional cap on concurrent transactions. When exceeded, new transactions
-   * are queued until one finishes. Set to 0 for no limit.
-   * @deprecated Removed from the 3.0 public configuration.
-   */
-  maxConcurrentTransactions?: number;
-
-  /**
    * Driver(s) to use (string or array of strings)
    */
   driver?: string | string[];
@@ -109,14 +87,6 @@ export interface LocalSpaceConfig {
    * app-owned namespace.
    */
   name?: string;
-
-  /**
-   * Legacy WebSQL database size hint. Defaults to `4980736` for localForage
-   * and localspace v2 compatibility. Built-in drivers ignore this value;
-   * it does not set or enforce a storage quota.
-   * @deprecated Retained for compatibility only. Do not use for quota enforcement.
-   */
-  size?: number;
 
   /**
    * Store/table name. Defaults to `'keyvaluepairs'` (localForage-compatible).
@@ -148,6 +118,17 @@ export interface LocalSpaceConfig {
    */
   strictValues?: boolean;
 }
+
+export type DeepReadonly<T> = T extends (...args: any[]) => unknown
+  ? T
+  : T extends readonly (infer Item)[]
+    ? readonly DeepReadonly<Item>[]
+    : T extends object
+      ? { readonly [Key in keyof T]: DeepReadonly<T[Key]> }
+      : T;
+
+/** A detached, deeply frozen view of an instance's current configuration. */
+export type LocalSpaceConfigSnapshot = DeepReadonly<LocalSpaceConfig>;
 
 /**
  * Extended configuration that enables instance-scoped plugins.
@@ -339,6 +320,12 @@ export interface DbInfo extends LocalSpaceConfig {
   keyPrefix?: string;
   idbFactory?: IDBFactory | null;
   idbContextId?: string;
+  /** @internal Pending removal with the legacy IndexedDB prewarm mechanism. */
+  prewarmTransactions?: boolean;
+  /** @internal Pending removal with the legacy IndexedDB idle-close mechanism. */
+  connectionIdleMs?: number;
+  /** @internal Pending removal with the legacy IndexedDB transaction queue. */
+  maxConcurrentTransactions?: number;
 }
 
 /**
@@ -353,26 +340,11 @@ export interface LocalSpaceInstance {
   readonly MEMORY: string;
   readonly REACTNATIVEASYNCSTORAGE: string;
 
-  /**
-   * Configure localspace. Must be called before the first storage operation.
-   *
-   * Returns `true` on success for non-driver options. Validation and lock
-   * failures are **returned as an `Error` value, not thrown or rejected**
-   * (a localForage-compatible contract) — so `await config({ version: 'bad' })`
-   * resolves to an `Error` rather than rejecting. Inspect the return value.
-   * Only the `driver` form returns the `setDriver()` promise.
-   * @deprecated Pass options to the constructor or createInstance(). The setter
-   * overload is removed in 3.0.
-   */
-  config(options: LocalSpaceConfig): true | Error | Promise<void>;
   config<K extends keyof LocalSpaceConfig>(
     key: K
-  ): LocalSpaceConfig[K] | undefined;
-  /**
-   * @deprecated The mutable reference returned by this overload is retained
-   * for 2.x compatibility. Do not mutate it; 3.0 returns a readonly snapshot.
-   */
-  config(): LocalSpaceConfig;
+  ): LocalSpaceConfigSnapshot[K] | undefined;
+  /** Return a detached, deeply frozen snapshot of the current configuration. */
+  config(): LocalSpaceConfigSnapshot;
 
   /**
    * Create a new instance
@@ -391,20 +363,6 @@ export interface LocalSpaceInstance {
    * closed and another close() call retries the unfinished cleanup.
    */
   close(): Promise<void>;
-
-  /**
-   * Tear down plugins and release their resources.
-   * @deprecated Use close(), which also releases the active driver without
-   * deleting data.
-   */
-  destroy(): Promise<void>;
-
-  /**
-   * Register a custom driver only for this instance.
-   * @deprecated Pass `drivers` at construction, or use exported
-   * `registerDriver()` for deliberate realm-wide registration.
-   */
-  defineDriver(driver: Driver): Promise<void>;
 
   /**
    * Get current driver name
@@ -514,21 +472,6 @@ export interface LocalSpaceInstance {
    * Drop instance
    */
   dropInstance(options?: LocalSpaceConfig): Promise<void>;
-
-  /**
-   * Internal properties
-   */
-  _initReady?: () => Promise<void>;
-  _ready: boolean | Promise<void> | null;
-  _dbInfo: DbInfo | null;
-  _driver?: string;
-  _driverSet: Promise<void> | null;
-  _initDriver?: (() => Promise<void>) | null;
-  _config: LocalSpaceConfig;
-  _defaultConfig: LocalSpaceConfig;
-  _initStorage?(config: LocalSpaceConfig): Promise<void>;
-  _defineDriver?(driver: Driver): Promise<void>;
-  _getSupportedDrivers?(drivers: string[]): string[];
 }
 
 /**
@@ -587,7 +530,7 @@ export interface PluginContext {
   lifecycleInstance?: LocalSpaceInstance;
   driver: string | null;
   dbInfo: DbInfo | null;
-  config: LocalSpaceConfig;
+  config: LocalSpaceConfigSnapshot;
   metadata: Record<string, unknown>;
   operation: PluginOperation | null;
   operationState: Record<string, unknown>;

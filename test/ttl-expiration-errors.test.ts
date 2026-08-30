@@ -23,8 +23,8 @@ const createRemovalFailingStore = async (
     storeName: 'ttl',
     plugins: [ttlPlugin({ defaultTTL: 10, onExpire })],
     pluginErrorPolicy: 'lenient',
+    drivers: [driver],
   });
-  await store.defineDriver(driver);
   await store.setDriver([driver._driver]);
   return store;
 };

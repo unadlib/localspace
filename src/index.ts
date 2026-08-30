@@ -2,6 +2,7 @@ import { LocalSpace } from './localspace.js';
 import type {
   LocalSpaceInstance,
   LocalSpaceConfig,
+  LocalSpaceConfigSnapshot,
   LocalSpaceOptions,
   LocalSpacePlugin,
   PluginContext,
@@ -36,6 +37,7 @@ export default localspace;
 export type {
   LocalSpaceInstance,
   LocalSpaceConfig,
+  LocalSpaceConfigSnapshot,
   LocalSpaceOptions,
   LocalSpacePlugin,
   PluginContext,

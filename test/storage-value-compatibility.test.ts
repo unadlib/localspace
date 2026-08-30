@@ -252,15 +252,12 @@ describe('2.1 StorageValue migration contract', () => {
     });
   });
 
-  it('validates strictValues configuration before applying it', () => {
-    expect(() => new LocalSpace({ strictValues: 'yes' } as never)).toThrow();
-
-    const instance = localspace.createInstance();
-    const result = instance.config({ strictValues: 1 } as never);
-    expect(result).toMatchObject({
-      code: 'INVALID_CONFIG',
-      details: { configKey: 'strictValues' },
-    });
-    expect(instance.config('strictValues')).toBeUndefined();
+  it('validates strictValues at construction', () => {
+    expect(() => new LocalSpace({ strictValues: 'yes' } as never)).toThrowError(
+      expect.objectContaining({
+        code: 'INVALID_CONFIG',
+        details: { configKey: 'strictValues', providedType: 'string' },
+      })
+    );
   });
 });

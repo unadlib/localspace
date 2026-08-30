@@ -7,6 +7,7 @@ import localspace, {
   type Driver,
   type DriverCapabilities,
   type LocalSpaceConfig,
+  type LocalSpaceConfigSnapshot,
   type LocalSpaceCapabilities,
   type LocalSpaceInstance,
   type LocalSpaceOptions,
@@ -25,8 +26,7 @@ const options = {} as ReactNativeInstanceOptions;
 const localOptions: LocalSpaceOptions = { drivers: [memoryDriver] };
 const declaredCapabilities: DriverCapabilities = { persistent: false };
 const selectedCapabilities: LocalSpaceCapabilities = instance.capabilities();
-const legacySizeResult = instance.config({ size: 4_980_736 });
-const legacySize: number | undefined = instance.config('size');
+const configSnapshot: LocalSpaceConfigSnapshot = instance.config();
 const migrationValue: StorageValue = {
   binary: new Uint8Array([1, 2, 3]),
   nested: [null, true, 1, 'value'],
@@ -51,6 +51,18 @@ const typecheckDirectLifecycleCalls = (
   void driver._initStorage(config);
   void driver._closeStorage?.();
 };
+const typecheckRemovedApis = (): void => {
+  // @ts-expect-error config(options) was removed in 3.0
+  instance.config({ name: 'changed' });
+  // @ts-expect-error instance driver registration was removed in 3.0
+  instance.defineDriver(customDriver);
+  // @ts-expect-error destroy() was removed in 3.0
+  instance.destroy();
+  // @ts-expect-error config snapshots are readonly
+  configSnapshot.name = 'changed';
+  // @ts-expect-error mutable internal config is not public
+  instance._config.name = 'changed';
+};
 setDeprecationWarnings(false);
 void registerDriver(customDriver, { overwrite: true });
 
@@ -63,11 +75,11 @@ void [
   localOptions,
   declaredCapabilities,
   selectedCapabilities,
-  legacySizeResult,
-  legacySize,
+  configSnapshot,
   migrationValue,
   customDriver,
   typecheckDirectLifecycleCalls,
+  typecheckRemovedApis,
   createReactNativeInstance,
   setDeprecationWarnings,
   registerDriver,

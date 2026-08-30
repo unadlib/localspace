@@ -1,14 +1,8 @@
 export type LocalSpaceDeprecation =
   | 'legacy-encryption-algorithm'
-  | 'legacy-size-option'
-  | 'destroy'
-  | 'mutable-config-reference'
   | 'combined-plugin-hooks'
   | 'react-native-auto-detection'
   | 'unsupported-storage-value'
-  | 'config-setter'
-  | 'instance-driver-registration'
-  | 'indexeddb-performance-options'
   | 'storage-bucket-fallback'
   | 'weak-memory-transaction';
 

@@ -2,7 +2,7 @@ import type {
   BatchItems,
   BatchResponse,
   DbInfo,
-  LocalSpaceConfig,
+  LocalSpaceConfigSnapshot,
   LocalSpaceInstance,
   LocalSpacePlugin,
   PluginContext,
@@ -27,10 +27,7 @@ export class PluginAbortError extends Error {
   }
 }
 
-type PluginHost = LocalSpaceInstance & {
-  _config: LocalSpaceConfig;
-  _dbInfo: DbInfo | null;
-};
+type PluginHost = LocalSpaceInstance;
 
 type PluginLifecycleInvocation = {
   instance: LocalSpaceInstance;
@@ -41,6 +38,7 @@ type PluginLifecycleBridge = {
   createInvocation(
     lifecycle: 'plugin-init' | 'plugin-destroy'
   ): PluginLifecycleInvocation;
+  getDbInfo(): DbInfo | null;
 };
 
 type RegisteredPlugin = {
@@ -116,7 +114,7 @@ const PLUGIN_WARNINGS = {
   LENIENT_WITH_COMPRESSION: {
     condition: (
       plugins: LocalSpacePlugin[],
-      config: PluginHost['_config']
+      config: LocalSpaceConfigSnapshot
     ): boolean => {
       const hasCompression = plugins.some(
         (plugin) => getBuiltInStorageTransformKind(plugin) === 'compression'
@@ -200,7 +198,7 @@ export class PluginManager {
    */
   private validatePluginCombinations(): void {
     const plugins = this.pluginRegistry.map((r) => r.plugin);
-    const config = this.host._config;
+    const config = this.host.config();
 
     for (const [key, warning] of Object.entries(PLUGIN_WARNINGS)) {
       if (this.warningsEmitted.has(key)) continue;
@@ -242,6 +240,34 @@ export class PluginManager {
   }
 
   registerPlugins(plugins: LocalSpacePlugin[]): void {
+    const existingNames = new Set(
+      this.pluginRegistry.map(({ plugin }) => plugin.name)
+    );
+    const pendingNames = new Set<string>();
+    for (const plugin of plugins) {
+      if (!plugin) continue;
+      if (
+        typeof plugin.name !== 'string' ||
+        plugin.name.length === 0 ||
+        existingNames.has(plugin.name) ||
+        pendingNames.has(plugin.name)
+      ) {
+        throw createLocalSpaceError(
+          'INVALID_CONFIG',
+          `Plugin name "${String(plugin?.name ?? '')}" must be unique.`,
+          {
+            configKey: 'plugins',
+            plugin: plugin?.name,
+            reason:
+              typeof plugin?.name === 'string' && plugin.name.length > 0
+                ? 'duplicate-plugin'
+                : 'invalid-plugin-name',
+          }
+        );
+      }
+      pendingNames.add(plugin.name);
+    }
+
     for (const plugin of plugins) {
       if (!plugin) continue;
       if (
@@ -343,7 +369,7 @@ export class PluginManager {
             undefined,
             context
           );
-          const policy = this.host._config.pluginInitPolicy ?? 'fail';
+          const policy = this.host.config('pluginInitPolicy') ?? 'fail';
           if (policy === 'disable-and-continue') {
             this.disabled.add(plugin);
             return;
@@ -367,8 +393,8 @@ export class PluginManager {
       instance: this.host,
       ...(lifecycleInstance ? { lifecycleInstance } : {}),
       driver: this.host.driver ? this.host.driver() : null,
-      dbInfo: this.host._dbInfo ?? null,
-      config: this.host._config,
+      dbInfo: this.lifecycleBridge.getDbInfo(),
+      config: this.host.config(),
       metadata: this.sharedMetadata,
       operation,
       operationState: Object.create(null),
@@ -613,10 +639,6 @@ export class PluginManager {
     }
   }
 
-  async destroy(): Promise<void> {
-    await this.destroyPlugins(false);
-  }
-
   async destroyInitialized(): Promise<void> {
     while (this.initializationPasses.size > 0) {
       await Promise.allSettled([...this.initializationPasses]);
@@ -765,7 +787,7 @@ export class PluginManager {
       const result = await executor();
       return (typeof result === 'undefined' ? fallback : result) as T;
     } catch (error) {
-      const policy = this.host._config.pluginErrorPolicy ?? 'lenient';
+      const policy = this.host.config('pluginErrorPolicy') ?? 'lenient';
       if (this.shouldPropagate(error, policy)) {
         throw error;
       }
@@ -792,7 +814,7 @@ export class PluginManager {
     try {
       await executor();
     } catch (error) {
-      const policy = this.host._config.pluginErrorPolicy ?? 'lenient';
+      const policy = this.host.config('pluginErrorPolicy') ?? 'lenient';
       if (this.shouldPropagate(error, policy)) {
         throw error;
       }

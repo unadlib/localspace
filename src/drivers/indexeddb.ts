@@ -27,6 +27,7 @@ import { warnDeprecation } from '../utils/deprecations.js';
 type IndexedDBDriverContext = LocalSpaceInstance &
   Partial<Driver> & {
     _dbInfo: DbInfo;
+    _config: LocalSpaceConfig;
     _defaultConfig: LocalSpaceConfig;
     _initReady?: () => Promise<void>;
     ready(): Promise<void>;

@@ -32,6 +32,7 @@ type MemoryDbInfo = DbInfo & {
 type MemoryDriverContext = LocalSpaceInstance &
   Partial<Driver> & {
     _dbInfo: MemoryDbInfo;
+    _config: LocalSpaceConfig;
     _defaultConfig: LocalSpaceConfig;
     ready(): Promise<void>;
     config(): LocalSpaceConfig;

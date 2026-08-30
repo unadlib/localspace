@@ -4,47 +4,23 @@ import type {
   ReactNativeAsyncStorage,
 } from './types.js';
 import reactNativeAsyncStorageDriver from './drivers/react-native-async-storage.js';
+import { registerDriver } from './core/driver-registry.js';
 export { setDeprecationWarnings } from './utils/deprecations.js';
 
 /**
- * Install the React Native AsyncStorage driver on a localspace instance.
- * Call this before selecting `instance.REACTNATIVEASYNCSTORAGE`.
+ * Register the React Native AsyncStorage driver in the current JavaScript
+ * realm. Prefer `createReactNativeInstance()` or construction-scoped `drivers`
+ * when realm-wide registration is unnecessary.
  */
-export async function installReactNativeAsyncStorageDriver(
-  instance: LocalSpaceInstance
-): Promise<void> {
-  try {
-    await instance.getDriver(instance.REACTNATIVEASYNCSTORAGE);
-    return;
-  } catch (error) {
-    const code =
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      typeof (error as { code?: unknown }).code === 'string'
-        ? (error as { code: string }).code
-        : null;
-
-    if (code && code !== 'DRIVER_NOT_FOUND') {
-      throw error;
-    }
-  }
-
-  if (instance._defineDriver) {
-    await instance._defineDriver(reactNativeAsyncStorageDriver);
-  } else {
-    await instance.defineDriver(reactNativeAsyncStorageDriver);
-  }
+export async function installReactNativeAsyncStorageDriver(): Promise<void> {
+  await registerDriver(reactNativeAsyncStorageDriver, { overwrite: true });
 }
 
 export interface ReactNativeInstanceOptions extends LocalSpaceOptions {
   reactNativeAsyncStorage: ReactNativeAsyncStorage;
 }
 
-function normalizeDriverOrder(
-  instance: LocalSpaceInstance,
-  driver?: string | string[]
-): string[] {
+function normalizeDriverOrder(driver?: string | string[]): string[] {
   const requested = Array.isArray(driver)
     ? driver.slice()
     : driver
@@ -52,8 +28,10 @@ function normalizeDriverOrder(
       : [];
 
   return [
-    instance.REACTNATIVEASYNCSTORAGE,
-    ...requested.filter((item) => item !== instance.REACTNATIVEASYNCSTORAGE),
+    reactNativeAsyncStorageDriver._driver,
+    ...requested.filter(
+      (item) => item !== reactNativeAsyncStorageDriver._driver
+    ),
   ];
 }
 
@@ -65,9 +43,18 @@ export async function createReactNativeInstance(
   baseInstance: LocalSpaceInstance,
   options: ReactNativeInstanceOptions
 ): Promise<LocalSpaceInstance> {
-  const instance = baseInstance.createInstance(options);
-  await installReactNativeAsyncStorageDriver(instance);
-  await instance.setDriver(normalizeDriverOrder(instance, options.driver));
+  const { drivers = [], driver, ...config } = options;
+  const instance = baseInstance.createInstance({
+    ...config,
+    driver: normalizeDriverOrder(driver),
+    drivers: [
+      ...drivers.filter(
+        (definition) =>
+          definition._driver !== reactNativeAsyncStorageDriver._driver
+      ),
+      reactNativeAsyncStorageDriver,
+    ],
+  });
   await instance.ready();
   return instance;
 }

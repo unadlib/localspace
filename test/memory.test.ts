@@ -184,10 +184,6 @@ describe('memory driver', () => {
   });
 
   it('takes over when an earlier supported driver fails during initialization', async () => {
-    const instance = localspace.createInstance({
-      name,
-      storeName: 'init-fallback',
-    });
     const failingDriverName = uniqueName('supported-but-blocked');
     const failingDriver = {
       _driver: failingDriverName,
@@ -202,8 +198,12 @@ describe('memory driver', () => {
       key: vi.fn().mockResolvedValue(null),
       keys: vi.fn().mockResolvedValue([]),
     };
+    const instance = localspace.createInstance({
+      name,
+      storeName: 'init-fallback',
+      drivers: [failingDriver],
+    });
 
-    await instance.defineDriver(failingDriver);
     await instance.setDriver([failingDriverName, instance.MEMORY]);
     await instance.ready();
     await instance.setItem('key', 'value');

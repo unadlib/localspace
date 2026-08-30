@@ -95,16 +95,15 @@ describe('react native runtime detection', () => {
     (globalThis as GlobalRecord).__LOCALSPACE_ASYNC_STORAGE__ = runtimeStorage;
 
     const { LocalSpace } = await import('../src/localspace');
-    const { installReactNativeAsyncStorageDriver } = await import(
-      '../src/react-native'
-    );
+    const { installReactNativeAsyncStorageDriver } =
+      await import('../src/react-native');
 
     const instance = new LocalSpace({
       name: 'rn-runtime-global',
       storeName: 'kv',
     });
 
-    await installReactNativeAsyncStorageDriver(instance);
+    await installReactNativeAsyncStorageDriver();
     await instance.setDriver([instance.REACTNATIVEASYNCSTORAGE]);
     await instance.ready();
 
@@ -124,16 +123,15 @@ describe('react native runtime detection', () => {
     (globalThis as GlobalRecord).require = runtimeRequire;
 
     const { LocalSpace } = await import('../src/localspace');
-    const { installReactNativeAsyncStorageDriver } = await import(
-      '../src/react-native'
-    );
+    const { installReactNativeAsyncStorageDriver } =
+      await import('../src/react-native');
 
     const instance = new LocalSpace({
       name: 'rn-runtime-require',
       storeName: 'kv',
     });
 
-    await installReactNativeAsyncStorageDriver(instance);
+    await installReactNativeAsyncStorageDriver();
     await instance.setDriver([instance.REACTNATIVEASYNCSTORAGE]);
     await instance.ready();
     await instance.setItem('flag', true);
@@ -151,16 +149,15 @@ describe('react native runtime detection', () => {
     });
 
     const { LocalSpace } = await import('../src/localspace');
-    const { installReactNativeAsyncStorageDriver } = await import(
-      '../src/react-native'
-    );
+    const { installReactNativeAsyncStorageDriver } =
+      await import('../src/react-native');
 
     const instance = new LocalSpace({
       name: 'rn-runtime-fallback',
       storeName: 'kv',
     });
 
-    await installReactNativeAsyncStorageDriver(instance);
+    await installReactNativeAsyncStorageDriver();
     await instance.setDriver([
       instance.REACTNATIVEASYNCSTORAGE,
       instance.LOCALSTORAGE,

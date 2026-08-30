@@ -110,25 +110,6 @@ describe('driver registry and sessions', () => {
     await unrelated.close();
   });
 
-  it('keeps deprecated instance registration local instead of mutating the realm', async () => {
-    const driverName = uniqueDriverName('legacy-instance-scope');
-    const first = new LocalSpace();
-    const second = new LocalSpace();
-
-    await first.defineDriver(createSessionDriver(driverName));
-
-    await expect(first.getDriver(driverName)).resolves.toMatchObject({
-      _driver: driverName,
-    });
-    await expect(second.getDriver(driverName)).rejects.toMatchObject({
-      code: 'DRIVER_NOT_FOUND',
-      details: { driver: driverName },
-    });
-
-    await first.close();
-    await second.close();
-  });
-
   it('makes explicit registration realm-wide and protects duplicate names', async () => {
     const driverName = uniqueDriverName('global-scope');
     const existing = new LocalSpace();

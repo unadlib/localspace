@@ -191,7 +191,7 @@ const notifyExpiredInBackground = (
 ): void => {
   // A periodic sweep has no caller to receive notification failures. More
   // importantly, keeping the sweep dependent on user code would deadlock when
-  // onExpire awaits close() or destroy() on this same instance.
+  // onExpire awaits close() on this same instance.
   void notifyExpired(key, value, context, options).catch(() => undefined);
 };
 

@@ -5,38 +5,6 @@ import type { Driver } from '../src/types';
 
 describe('LocalSpace class tests', () => {
   describe('Configuration', () => {
-    it('should return error when trying to configure after use', async () => {
-      const instance = localspace.createInstance({
-        name: 'config-test',
-        storeName: 'test',
-      });
-
-      await instance.setItem('key', 'value');
-
-      const result = instance.config({ name: 'new-name' });
-      expect(result).toBeInstanceOf(Error);
-      expect((result as Error).message).toContain("Can't call config()");
-    });
-
-    it('should return error when version is not a number', () => {
-      const instance = new LocalSpace();
-      const result = instance.config({ version: 'invalid' as any });
-      expect(result).toBeInstanceOf(Error);
-      expect((result as Error).message).toContain(
-        'Database version must be a number'
-      );
-    });
-
-    it('should not apply partial config when validation fails', () => {
-      const instance = new LocalSpace({ storeName: 'original-store' });
-      const result = instance.config({
-        storeName: 'new-store',
-        version: 'invalid' as any,
-      });
-      expect(result).toBeInstanceOf(Error);
-      expect(instance.config('storeName')).toBe('original-store');
-    });
-
     it('should get specific config value', () => {
       const instance = new LocalSpace({
         name: 'test-db',
@@ -53,16 +21,13 @@ describe('LocalSpace class tests', () => {
       expect(config.name).toBe('test-db');
     });
 
-    it('should preserve legacy setter storeName normalization', () => {
+    it('does not expose removed mutable lifecycle and registration methods', () => {
       const instance = new LocalSpace();
-      instance.config({ storeName: 'store&name-v1' });
-      expect(instance.config('storeName')).toBe('store_name_v1');
-    });
 
-    it('should handle driver config update', async () => {
-      const instance = new LocalSpace();
-      const result = instance.config({ driver: [instance.LOCALSTORAGE] });
-      expect(result).toBeInstanceOf(Promise);
+      expect('defineDriver' in instance).toBe(false);
+      expect('destroy' in instance).toBe(false);
+      expect('_config' in instance).toBe(false);
+      expect('_defaultConfig' in instance).toBe(false);
     });
   });
 
@@ -140,17 +105,6 @@ describe('LocalSpace class tests', () => {
     });
 
     it('should allow manual setDriver after pending initialization failure', async () => {
-      const instance = new LocalSpace();
-
-      const simulatedInitFailure = Promise.reject(
-        new Error('simulated driver init failure')
-      );
-      // Prevent unhandled rejection noise in test output.
-      simulatedInitFailure.catch(() => {});
-      (
-        instance as unknown as { _pendingDriverInitialization: Promise<void> }
-      )._pendingDriverInitialization = simulatedInitFailure as Promise<void>;
-
       const customDriver = {
         _driver: 'recoverableDriver',
         _initStorage: vi.fn().mockResolvedValue(undefined),
@@ -164,8 +118,17 @@ describe('LocalSpace class tests', () => {
         key: vi.fn().mockResolvedValue(null),
         keys: vi.fn().mockResolvedValue([]),
       };
+      const instance = new LocalSpace({ drivers: [customDriver] });
 
-      await instance.defineDriver(customDriver);
+      const simulatedInitFailure = Promise.reject(
+        new Error('simulated driver init failure')
+      );
+      // Prevent unhandled rejection noise in test output.
+      simulatedInitFailure.catch(() => {});
+      (
+        instance as unknown as { _pendingDriverInitialization: Promise<void> }
+      )._pendingDriverInitialization = simulatedInitFailure as Promise<void>;
+
       await expect(instance.setDriver('recoverableDriver')).resolves.toBe(
         undefined
       );
@@ -191,7 +154,6 @@ describe('LocalSpace class tests', () => {
       const config = instance.config();
 
       expect(config.name).toBe('localforage');
-      expect(config.size).toBe(4980736);
       expect(config.storeName).toBe('keyvaluepairs');
       expect(config.version).toBe(1.0);
     });
@@ -231,8 +193,7 @@ describe('LocalSpace class tests', () => {
         keys: async () => [...values.keys()],
       };
 
-      const instance = new LocalSpace();
-      await instance.defineDriver(customDriver);
+      const instance = new LocalSpace({ drivers: [customDriver] });
       await instance.setDriver(driverName);
 
       await expect(instance.setItem('key', 'value')).resolves.toBe('value');
@@ -257,8 +218,7 @@ describe('LocalSpace class tests', () => {
         iterate: vi.fn(),
       };
 
-      const instance = new LocalSpace();
-      await instance.defineDriver(customDriver);
+      const instance = new LocalSpace({ drivers: [customDriver] });
 
       expect(instance.supports('customDriver')).toBe(true);
     });
@@ -269,8 +229,7 @@ describe('LocalSpace class tests', () => {
         // Missing required methods
       } as any;
 
-      const instance = new LocalSpace();
-      await expect(instance.defineDriver(invalidDriver)).rejects.toThrow(
+      expect(() => new LocalSpace({ drivers: [invalidDriver] })).toThrow(
         'Custom driver not compliant'
       );
     });
@@ -281,8 +240,7 @@ describe('LocalSpace class tests', () => {
         getItem: vi.fn(),
       } as any;
 
-      const instance = new LocalSpace();
-      await expect(instance.defineDriver(invalidDriver)).rejects.toThrow(
+      expect(() => new LocalSpace({ drivers: [invalidDriver] })).toThrow(
         'Custom driver not compliant'
       );
     });
@@ -302,8 +260,8 @@ describe('LocalSpace class tests', () => {
         iterate: vi.fn(),
       };
 
-      const instance = new LocalSpace();
-      await instance.defineDriver(customDriver);
+      const instance = new LocalSpace({ drivers: [customDriver] });
+      await instance.setDriver(customDriver._driver);
 
       expect(instance.supports('asyncSupportDriver')).toBe(true);
     });
@@ -324,17 +282,12 @@ describe('LocalSpace class tests', () => {
         iterate: vi.fn(),
       };
 
-      const instance = new LocalSpace();
-      await instance.defineDriver(customDriver);
+      const instance = new LocalSpace({ drivers: [customDriver] });
 
       expect(instance.supports(driverName)).toBe(true);
     });
 
-    it('should warn when redefining driver', async () => {
-      const consoleInfoSpy = vi
-        .spyOn(console, 'info')
-        .mockImplementation(() => {});
-
+    it('rejects duplicate construction-scoped drivers', () => {
       const customDriver = {
         _driver: 'redefineDriver',
         _initStorage: vi.fn().mockResolvedValue(undefined),
@@ -349,15 +302,14 @@ describe('LocalSpace class tests', () => {
         iterate: vi.fn(),
       };
 
-      const instance = new LocalSpace();
-      await instance.defineDriver(customDriver);
-      await instance.defineDriver(customDriver);
-
-      expect(consoleInfoSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Redefining LocalSpace driver')
+      expect(
+        () => new LocalSpace({ drivers: [customDriver, customDriver] })
+      ).toThrowError(
+        expect.objectContaining<Partial<LocalSpaceError>>({
+          code: 'DRIVER_COMPLIANCE',
+          details: expect.objectContaining({ reason: 'duplicate-driver' }),
+        })
       );
-
-      consoleInfoSpy.mockRestore();
     });
   });
 
@@ -414,9 +366,6 @@ describe('LocalSpace class tests', () => {
     });
 
     it('does not leak an unhandled rejection when all drivers fail during ready', async () => {
-      const instance = new LocalSpace();
-      await instance.ready();
-
       const createFailingDriver = (driverName: string) => ({
         _driver: driverName,
         _initStorage: vi.fn().mockRejectedValue(new Error('blocked storage')),
@@ -433,8 +382,10 @@ describe('LocalSpace class tests', () => {
 
       const driverA = `failing-a-${Math.random().toString(36).slice(2)}`;
       const driverB = `failing-b-${Math.random().toString(36).slice(2)}`;
-      await instance.defineDriver(createFailingDriver(driverA));
-      await instance.defineDriver(createFailingDriver(driverB));
+      const instance = new LocalSpace({
+        drivers: [createFailingDriver(driverA), createFailingDriver(driverB)],
+      });
+      await instance.ready();
       await instance.setDriver([driverA, driverB]);
 
       const unhandled: unknown[] = [];

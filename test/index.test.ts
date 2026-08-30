@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import localspace, { LocalSpace } from '../src/index';
+import localspace from '../src/index';
 import type { LocalSpaceInstance } from '../src/types';
-import { LocalSpaceError } from '../src/errors';
 
 describe('localspace localStorage parity checks', () => {
   let instance: LocalSpaceInstance;
@@ -35,35 +34,15 @@ describe('localspace localStorage parity checks', () => {
     });
 
     expect(seen).toHaveLength(2);
-    expect(seen[0]).toMatchObject({ key: 'officeX', value: 'InitechX', iteration: 1 });
-    expect(seen[1]).toMatchObject({ key: 'officeY', value: 'InitrodeY', iteration: 2 });
-  });
-});
-
-describe('localspace config compatibility snapshots', () => {
-  it('preserves legacy setter storeName normalization', () => {
-    const instance = new LocalSpace();
-    instance.config({
-      name: 'My Cool App',
-      storeName: 'my store&name-v1',
+    expect(seen[0]).toMatchObject({
+      key: 'officeX',
+      value: 'InitechX',
+      iteration: 1,
     });
-
-    expect(instance.config('storeName')).toBe('my_store_name_v1');
-  });
-
-  it('blocks config calls once the instance is in use', async () => {
-    const instance = localspace.createInstance({
-      name: 'config-lock',
-      storeName: 'config_store',
+    expect(seen[1]).toMatchObject({
+      key: 'officeY',
+      value: 'InitrodeY',
+      iteration: 2,
     });
-
-    await instance.setDriver([instance.LOCALSTORAGE]);
-    await instance.setItem('foo', 'bar');
-
-    const result = instance.config({ description: 'should fail' });
-    expect(result).toBeInstanceOf(Error);
-    expect(result).toBeInstanceOf(LocalSpaceError);
-    expect((result as LocalSpaceError).code).toBe('CONFIG_LOCKED');
-    expect((result as LocalSpaceError).details?.operation).toBe('config');
   });
 });

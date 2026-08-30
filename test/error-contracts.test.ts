@@ -39,9 +39,12 @@ describe('stable error contracts', () => {
       'InvalidStateError'
     );
     const secondError = new Error('adapter initialization failed');
-    const instance = new LocalSpace();
-    await instance.defineDriver(createFailingDriver(firstName, firstError));
-    await instance.defineDriver(createFailingDriver(secondName, secondError));
+    const instance = new LocalSpace({
+      drivers: [
+        createFailingDriver(firstName, firstError),
+        createFailingDriver(secondName, secondError),
+      ],
+    });
     await instance.setDriver([firstName, secondName]);
 
     const error = await instance.ready().catch((cause) => cause);
@@ -92,8 +95,7 @@ describe('stable error contracts', () => {
       },
       _closeStorage: closeStorage,
     };
-    const instance = new LocalSpace();
-    await instance.defineDriver(driver);
+    const instance = new LocalSpace({ drivers: [driver] });
     await instance.setDriver([driverName]);
 
     const error = await instance.ready().catch((cause) => cause);
@@ -204,9 +206,8 @@ describe('stable error contracts', () => {
     };
     const instance = new LocalSpace({
       name: `retain-failed-cleanup-${Math.random().toString(36).slice(2)}`,
+      drivers: [failedDriver, fallbackDriver],
     });
-    await instance.defineDriver(failedDriver);
-    await instance.defineDriver(fallbackDriver);
     await instance.setDriver([failedDriverName, fallbackDriverName]);
 
     await instance.ready();
@@ -303,10 +304,8 @@ describe('stable error contracts', () => {
     };
     const instance = new LocalSpace({
       name: `retry-cleanup-switch-${Math.random().toString(36).slice(2)}`,
+      drivers: [failedDriver, fallbackDriver, nextDriver],
     });
-    await instance.defineDriver(failedDriver);
-    await instance.defineDriver(fallbackDriver);
-    await instance.defineDriver(nextDriver);
     await instance.setDriver([failedDriverName, fallbackDriverName]);
     await instance.ready();
 

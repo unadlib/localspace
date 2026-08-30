@@ -13,6 +13,7 @@ import type {
   PluginContext,
   PluginOperation,
   LocalSpaceCapabilities,
+  LocalSpaceConfigSnapshot,
 } from './types.js';
 import { extend, isArray, normalizeBatchEntries } from './utils/helpers.js';
 import {
@@ -26,8 +27,7 @@ import idbDriver from './drivers/indexeddb.js';
 import localstorageDriver from './drivers/localstorage.js';
 import memoryDriver from './drivers/memory.js';
 import { PluginManager } from './core/plugin-manager.js';
-import { normalizeConfigOptions } from './core/config.js';
-import { warnDeprecation } from './utils/deprecations.js';
+import { createConfigSnapshot, normalizeConfigOptions } from './core/config.js';
 import {
   markPluginInternalOperation,
   type PluginBackgroundTaskPause,
@@ -68,27 +68,6 @@ const BuiltInDriverInitialization = Promise.all(
   )
 ).then(() => undefined);
 
-const LegacyIndexedDbPerformanceOptions = [
-  'prewarmTransactions',
-  'connectionIdleMs',
-  'maxConcurrentTransactions',
-] as const satisfies ReadonlyArray<keyof LocalSpaceConfig>;
-
-const warnLegacyIndexedDbPerformanceOptions = (
-  options: Partial<LocalSpaceConfig>
-): void => {
-  if (
-    LegacyIndexedDbPerformanceOptions.some((option) =>
-      Object.prototype.hasOwnProperty.call(options, option)
-    )
-  ) {
-    warnDeprecation(
-      'indexeddb-performance-options',
-      '`prewarmTransactions`, `connectionIdleMs`, and `maxConcurrentTransactions` are deprecated and will be removed from the 3.0 public configuration.'
-    );
-  }
-};
-
 type RawDriverMethod = (...args: any[]) => Promise<unknown>;
 
 type LifecycleCallback =
@@ -122,7 +101,6 @@ const LifecycleReentrantMethods = new Set<string>([
   'ready',
   'setDriver',
   'close',
-  'destroy',
 ]);
 
 type DriverInitializationFailure = {
@@ -180,7 +158,6 @@ const DefaultConfig: LocalSpaceConfig = {
   description: '',
   driver: DefaultDriverOrder.slice(),
   name: 'localforage',
-  size: 4980736,
   storeName: 'keyvaluepairs',
   version: 1.0,
   pluginInitPolicy: 'fail',
@@ -198,17 +175,18 @@ export class LocalSpace implements LocalSpaceInstance {
   readonly MEMORY = 'memoryStorageWrapper';
   readonly REACTNATIVEASYNCSTORAGE = 'reactNativeAsyncStorageWrapper';
 
-  _defaultConfig: LocalSpaceConfig;
-  _config: LocalSpaceConfig;
-  _driverSet: Promise<void> | null = null;
-  _pendingDriverInitialization: Promise<void> | null = null;
-  _isRunningDefaultDriverSelection = false;
-  _manualDriverOverride = false;
-  _initDriver: (() => Promise<void>) | null = null;
-  _ready: Promise<void> | null = null;
-  _dbInfo: DbInfo | null = null;
-  _driver?: string;
+  #defaultConfig: LocalSpaceConfig;
+  #config: LocalSpaceConfig;
+  private _driverSet: Promise<void> | null = null;
+  private _pendingDriverInitialization: Promise<void> | null = null;
+  private _isRunningDefaultDriverSelection = false;
+  private _manualDriverOverride = false;
+  private _initDriver: (() => Promise<void>) | null = null;
+  private _ready: Promise<void> | null = null;
+  private _dbInfo: DbInfo | null = null;
+  private _driver?: string;
   private _closed = false;
+  #configurationLocked = false;
   private _closePromise: Promise<void> | null = null;
   private _driverInitialized = false;
   private _capabilitiesSnapshot: Readonly<LocalSpaceCapabilities> | null = null;
@@ -224,20 +202,14 @@ export class LocalSpace implements LocalSpaceInstance {
 
   constructor(options?: LocalSpaceOptions) {
     const { plugins = [], drivers = [], ...configOverrides } = options ?? {};
-    if (Object.prototype.hasOwnProperty.call(configOverrides, 'size')) {
-      warnDeprecation(
-        'legacy-size-option',
-        'the `size` option is ignored by built-in drivers and will be removed in 3.0.'
-      );
-    }
-    warnLegacyIndexedDbPerformanceOptions(configOverrides);
     const normalizedOverrides = normalizeConfigOptions(configOverrides);
 
-    this._defaultConfig = extend({}, DefaultConfig);
-    this._config = extend({}, this._defaultConfig, normalizedOverrides);
+    this.#defaultConfig = extend({}, DefaultConfig);
+    this.#config = extend({}, this.#defaultConfig, normalizedOverrides);
     this._pluginManager = new PluginManager(this, plugins, {
       createInvocation: (lifecycle) =>
         this._createLifecycleInvocation(lifecycle),
+      getDbInfo: () => this._dbInfo,
     });
 
     const driverInitializationPromises = drivers.map((driver) =>
@@ -312,83 +284,21 @@ export class LocalSpace implements LocalSpaceInstance {
     return this._capabilitiesSnapshot;
   };
 
-  config(options: LocalSpaceConfig): true | Error | Promise<void>;
   config<K extends keyof LocalSpaceConfig>(
     key: K
-  ): LocalSpaceConfig[K] | undefined;
-  config(): LocalSpaceConfig;
-  config(optionsOrKey?: LocalSpaceConfig | keyof LocalSpaceConfig) {
-    if (typeof optionsOrKey === 'object' && optionsOrKey !== null) {
-      warnDeprecation(
-        'config-setter',
-        '`config(options)` is deprecated and will be removed in 3.0; pass options to the constructor or `createInstance()`.'
+  ): LocalSpaceConfigSnapshot[K] | undefined;
+  config(): LocalSpaceConfigSnapshot;
+  config(key?: keyof LocalSpaceConfig) {
+    if (key !== undefined && typeof key !== 'string') {
+      throw createLocalSpaceError(
+        'INVALID_ARGUMENT',
+        '`config(options)` was removed in LocalSpace 3.0; pass options at construction.',
+        { operation: 'config', reason: 'setter-removed' }
       );
-      if (Object.prototype.hasOwnProperty.call(optionsOrKey, 'size')) {
-        warnDeprecation(
-          'legacy-size-option',
-          'the `size` option is ignored by built-in drivers and will be removed in 3.0.'
-        );
-      }
-      warnLegacyIndexedDbPerformanceOptions(optionsOrKey);
-      if (this._ready) {
-        return createLocalSpaceError(
-          'CONFIG_LOCKED',
-          "Can't call config() after LocalSpace has been used.",
-          { operation: 'config' }
-        );
-      }
-
-      const suppliedOptions = optionsOrKey as Partial<LocalSpaceConfig>;
-      let normalizedOptions: Partial<LocalSpaceConfig>;
-      try {
-        normalizedOptions = normalizeConfigOptions(suppliedOptions);
-      } catch (error) {
-        return error instanceof Error
-          ? error
-          : createLocalSpaceError(
-              'INVALID_CONFIG',
-              'Invalid LocalSpace configuration.'
-            );
-      }
-      if (typeof normalizedOptions.storeName === 'string') {
-        // Preserve the 2.x setter namespace so an unchanged application keeps
-        // opening data written before 2.1. Constructor behavior stays as-is;
-        // the two entry points are unified only in 3.0 with migration tooling.
-        normalizedOptions.storeName = normalizedOptions.storeName.replace(
-          /\W/g,
-          '_'
-        );
-      }
-
-      // All validations passed, now apply changes
-      const configRecord = this._config as LocalSpaceConfig &
-        Record<string, unknown>;
-
-      for (const key of Object.keys(normalizedOptions) as Array<
-        keyof LocalSpaceConfig
-      >) {
-        const value = normalizedOptions[key];
-
-        configRecord[key as string] = value as unknown;
-      }
-
-      if (normalizedOptions.driver) {
-        return this.setDriver(this._config.driver!);
-      }
-
-      return true;
     }
 
-    if (typeof optionsOrKey === 'string') {
-      const key = optionsOrKey as keyof LocalSpaceConfig;
-      return this._config[key];
-    }
-
-    warnDeprecation(
-      'mutable-config-reference',
-      'mutating the object returned by `config()` is deprecated; pass options to createInstance() instead.'
-    );
-    return this._config;
+    const snapshot = createConfigSnapshot(this.#config);
+    return key === undefined ? snapshot : snapshot[key];
   }
 
   createInstance(options?: LocalSpaceOptions): LocalSpaceInstance {
@@ -396,6 +306,14 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   use(plugin: LocalSpacePlugin | LocalSpacePlugin[]): LocalSpaceInstance {
+    this._assertOpen('use');
+    if (this.#configurationLocked) {
+      throw createLocalSpaceError(
+        'CONFIG_LOCKED',
+        'Plugins must be registered before the first ready() or storage operation.',
+        { operation: 'use', reason: 'instance-started' }
+      );
+    }
     const plugins = Array.isArray(plugin) ? plugin : [plugin];
     this._pluginManager.registerPlugins(plugins);
     return this;
@@ -511,37 +429,6 @@ export class LocalSpace implements LocalSpaceInstance {
     }
   }
 
-  async destroy(): Promise<void> {
-    this._assertNotLifecycleReentrant('destroy');
-    warnDeprecation(
-      'destroy',
-      '`destroy()` is deprecated; use `close()` to release plugins and the active driver.'
-    );
-    if (this._closed) {
-      return this._closePromise ?? this.close();
-    }
-    await this._pluginManager.ensureInitialized();
-    await this._pluginManager.destroy();
-  }
-
-  async defineDriver(driverObject: Driver): Promise<void> {
-    warnDeprecation(
-      'instance-driver-registration',
-      'instance-level `defineDriver()` is deprecated and will be replaced by explicit global or construction-scoped driver registration in 3.0.'
-    );
-    return this._defineDriver(driverObject);
-  }
-
-  async _defineDriver(driverObject: Driver): Promise<void> {
-    const driverName = driverObject?._driver;
-    if (driverName && this._driverRegistry.hasOwn(driverName)) {
-      console.info(
-        `Redefining LocalSpace driver in instance scope: ${driverName}`
-      );
-    }
-    return this._driverRegistry.register(driverObject, { overwrite: true });
-  }
-
   driver(): string | null {
     return this._driver || null;
   }
@@ -559,6 +446,7 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   async ready(): Promise<void> {
+    this.#configurationLocked = true;
     this._assertNotLifecycleReentrant('ready');
     this._assertOpen('ready');
     const driverInitialization =
@@ -629,7 +517,7 @@ export class LocalSpace implements LocalSpaceInstance {
     const previousDriverSet = this._driverSet;
 
     const setDriverToConfig = () => {
-      this._config.driver = this.driver() ?? undefined;
+      this.#config.driver = this.driver() ?? undefined;
     };
 
     const extendSelfWithDriver = async (driver: Driver) => {
@@ -798,29 +686,30 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   private _createDriverSession(definition: Readonly<Driver>): DriverSession {
-    const sessionConfig = extend({}, this._config, {
+    const sessionConfig = extend({}, this.#config, {
       driver: definition._driver,
     }) as LocalSpaceConfig;
     const receiverContext: LifecycleReceiverContext = new Map([
       ['_dbInfo', null],
       ['_driver', definition._driver],
       ['_config', sessionConfig],
-      ['_defaultConfig', extend({}, this._defaultConfig)],
+      ['_defaultConfig', extend({}, this.#defaultConfig)],
       ['driver', () => definition._driver],
       [
         'config',
         (key?: keyof LocalSpaceConfig | LocalSpaceConfig) => {
+          const snapshot = createConfigSnapshot(sessionConfig);
           if (typeof key === 'string') {
-            return sessionConfig[key];
+            return snapshot[key];
           }
           if (key && typeof key === 'object') {
-            return createLocalSpaceError(
-              'CONFIG_LOCKED',
-              "Can't call config() after LocalSpace has been used.",
-              { operation: 'config' }
+            throw createLocalSpaceError(
+              'INVALID_ARGUMENT',
+              '`config(options)` was removed in LocalSpace 3.0; pass options at construction.',
+              { operation: 'config', reason: 'setter-removed' }
             );
           }
-          return sessionConfig;
+          return snapshot;
         },
       ],
     ]);
@@ -835,7 +724,8 @@ export class LocalSpace implements LocalSpaceInstance {
           null) as DbInfo | null;
       }
     };
-    const receiver = lifecycleScope.instance as DriverAugmentedInstance;
+    const receiver =
+      lifecycleScope.instance as unknown as DriverAugmentedInstance;
     const operations = {} as Record<DriverOperation, RawDriverMethod>;
     const supportedOperations = new Set<DriverOperation>();
 
@@ -903,6 +793,7 @@ export class LocalSpace implements LocalSpaceInstance {
     operation: DriverOperation,
     args: unknown[]
   ): Promise<T> {
+    this.#configurationLocked = true;
     return this._runTrackedOperation(operation, args, async () => {
       await this.ready();
       this._assertOpen(operation);
@@ -1037,7 +928,7 @@ export class LocalSpace implements LocalSpaceInstance {
   private _createSetItemWrapper(original: RawDriverMethod) {
     return (async (key: string, value: unknown) => {
       validateStorageValueWrite(value, {
-        strict: this._config.strictValues === true,
+        strict: this.#config.strictValues === true,
         operation: 'setItem',
         key,
       });
@@ -1064,7 +955,7 @@ export class LocalSpace implements LocalSpaceInstance {
   ): RawDriverMethod {
     return (key: string, value: unknown) => {
       validateStorageValueWrite(value, {
-        strict: this._config.strictValues === true,
+        strict: this.#config.strictValues === true,
         operation: 'setItem',
         key,
       });
@@ -1112,7 +1003,7 @@ export class LocalSpace implements LocalSpaceInstance {
     return (async (entries: BatchItems<unknown>) => {
       for (const entry of normalizeBatchEntries(entries)) {
         validateStorageValueWrite(entry.value, {
-          strict: this._config.strictValues === true,
+          strict: this.#config.strictValues === true,
           operation: 'setItems',
           key: entry.key,
         });
@@ -1233,7 +1124,7 @@ export class LocalSpace implements LocalSpaceInstance {
     return (entries: BatchItems<unknown>) => {
       for (const entry of normalizeBatchEntries(entries)) {
         validateStorageValueWrite(entry.value, {
-          strict: this._config.strictValues === true,
+          strict: this.#config.strictValues === true,
           operation: 'setItems',
           key: entry.key,
         });
@@ -1404,7 +1295,7 @@ export class LocalSpace implements LocalSpaceInstance {
             decodeStoredRecordValue(await scope.get<T>(key)) as T | null,
           set: <T>(key: string, value: T) => {
             validateStorageValueWrite(value, {
-              strict: this._config.strictValues === true,
+              strict: this.#config.strictValues === true,
               operation: 'runTransaction',
               key,
             });
@@ -1450,7 +1341,7 @@ export class LocalSpace implements LocalSpaceInstance {
   private _isDriverForcedByInstanceConfig(driverName: string): boolean {
     return (
       driverName === this.REACTNATIVEASYNCSTORAGE &&
-      !!this._config.reactNativeAsyncStorage
+      !!this.#config.reactNativeAsyncStorage
     );
   }
 
@@ -1630,7 +1521,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
     this._isRunningDefaultDriverSelection = true;
     try {
-      return this.setDriver(this._config.driver!);
+      return this.setDriver(this.#config.driver!);
     } finally {
       this._isRunningDefaultDriverSelection = false;
     }

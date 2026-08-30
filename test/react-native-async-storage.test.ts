@@ -59,7 +59,7 @@ describe('react native async storage driver', () => {
   let asyncStorage: MemoryAsyncStorage;
 
   const withReactNativeDriver = async (instance: LocalSpace): Promise<void> => {
-    await installReactNativeAsyncStorageDriver(instance);
+    await installReactNativeAsyncStorageDriver();
     await instance.setDriver([instance.REACTNATIVEASYNCSTORAGE]);
   };
 
@@ -90,19 +90,21 @@ describe('react native async storage driver', () => {
     expect(instance.driver()).toBe(instance.REACTNATIVEASYNCSTORAGE);
   });
 
-  it('does not redefine driver on repeated install calls', async () => {
+  it('allows idempotent explicit realm registration', async () => {
     const instance = new LocalSpace({
       name: 'rn-idempotent-install',
       storeName: 'rn_idempotent_install',
       reactNativeAsyncStorage: asyncStorage,
     });
-    const defineDriverSpy = vi.spyOn(instance, 'defineDriver');
 
-    await installReactNativeAsyncStorageDriver(instance);
-    const firstInstallCalls = defineDriverSpy.mock.calls.length;
-    await installReactNativeAsyncStorageDriver(instance);
+    await installReactNativeAsyncStorageDriver();
+    await installReactNativeAsyncStorageDriver();
 
-    expect(defineDriverSpy).toHaveBeenCalledTimes(firstInstallCalls);
+    await expect(
+      instance.getDriver(instance.REACTNATIVEASYNCSTORAGE)
+    ).resolves.toMatchObject({
+      _driver: instance.REACTNATIVEASYNCSTORAGE,
+    });
   });
 
   it('selects React Native AsyncStorage when config injects the adapter', async () => {
@@ -129,6 +131,9 @@ describe('react native async storage driver', () => {
   });
 
   it('uses multi* methods for batch APIs when available', async () => {
+    const multiSetSpy = vi.spyOn(asyncStorage, 'multiSet');
+    const multiGetSpy = vi.spyOn(asyncStorage, 'multiGet');
+    const multiRemoveSpy = vi.spyOn(asyncStorage, 'multiRemove');
     const instance = new LocalSpace({
       name: 'rn-batch',
       storeName: 'batch_store',
@@ -136,10 +141,6 @@ describe('react native async storage driver', () => {
     });
     await withReactNativeDriver(instance);
     await instance.ready();
-
-    const multiSetSpy = vi.spyOn(asyncStorage, 'multiSet');
-    const multiGetSpy = vi.spyOn(asyncStorage, 'multiGet');
-    const multiRemoveSpy = vi.spyOn(asyncStorage, 'multiRemove');
 
     await instance.setItems({
       first: { id: 1 },
@@ -221,9 +222,9 @@ describe('react native async storage driver', () => {
       name: 'rn-invalid',
       storeName: 'rn_invalid',
       reactNativeAsyncStorage: {} as ReactNativeAsyncStorage,
+      drivers: [reactNativeAsyncStorageDriver],
     });
 
-    await instance.defineDriver(reactNativeAsyncStorageDriver);
     await instance.setDriver([
       instance.REACTNATIVEASYNCSTORAGE,
       instance.LOCALSTORAGE,

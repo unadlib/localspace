@@ -12,8 +12,6 @@ const PUBLIC_METHODS = [
   'close',
   'config',
   'createInstance',
-  'defineDriver',
-  'destroy',
   'driver',
   'dropInstance',
   'getDriver',
@@ -83,17 +81,19 @@ describe('stable public facade dispatch', () => {
     const methods = captureMethods(instance);
     const capturedSetItem = instance.setItem;
     const capturedGetItem = instance.getItem;
-
-    await instance.ready();
-    expectMethodsUnchanged(instance, methods);
-    await capturedSetItem('first-key', 'one');
-    await expect(capturedGetItem('first-key')).resolves.toBe('first:one');
-
     instance.use({
       name: 'current-plugin-dispatch',
       beforeSet: async (_key, value) => `plugin:${String(value)}`,
     });
     expectMethodsUnchanged(instance, methods);
+
+    await instance.ready();
+    expectMethodsUnchanged(instance, methods);
+    await capturedSetItem('first-key', 'one');
+    await expect(capturedGetItem('first-key')).resolves.toBe(
+      'first:plugin:one'
+    );
+
     await capturedSetItem('plugin-key', 'two');
     await expect(capturedGetItem('plugin-key')).resolves.toBe(
       'first:plugin:two'
@@ -137,6 +137,8 @@ describe('stable public facade dispatch', () => {
     const methods = captureMethods(instance);
     const setItemSpy = vi.spyOn(instance, 'setItem');
     const spyReference = instance.setItem;
+    const afterSet = vi.fn();
+    instance.use({ name: 'spy-observer', afterSet });
 
     await instance.ready();
     expect(instance.driver()).toBe(workingDriver._driver);
@@ -144,8 +146,6 @@ describe('stable public facade dispatch', () => {
       ...methods,
       setItem: spyReference,
     });
-    const afterSet = vi.fn();
-    instance.use({ name: 'spy-observer', afterSet });
     expect(instance.setItem).toBe(spyReference);
     await instance.setDriver(workingDriver._driver);
     expect(instance.setItem).toBe(spyReference);

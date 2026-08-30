@@ -217,7 +217,7 @@ describe('Plugin system', () => {
     ]);
   });
 
-  it('runs onDestroy hooks via instance.destroy()', async () => {
+  it('runs onDestroy hooks once via instance.close()', async () => {
     const onDestroy = vi.fn();
     const plugin: LocalSpacePlugin = {
       name: 'cleanup',
@@ -230,8 +230,8 @@ describe('Plugin system', () => {
     instance.use(plugin);
 
     await instance.setItem('foo', 'bar');
-    await instance.destroy();
-    await instance.destroy();
+    await instance.close();
+    await instance.close();
 
     expect(onDestroy).toHaveBeenCalledTimes(1);
   });

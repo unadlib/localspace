@@ -24,6 +24,7 @@ type LocalStorageDbInfo = DbInfo & {
 type LocalStorageDriverContext = LocalSpaceInstance &
   Partial<Driver> & {
     _dbInfo: LocalStorageDbInfo;
+    _config: LocalSpaceConfig;
     _defaultConfig: LocalSpaceConfig;
     ready(): Promise<void>;
     config(): LocalSpaceConfig;

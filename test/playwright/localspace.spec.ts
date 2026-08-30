@@ -10,9 +10,12 @@ const randomStoreName = (label: string) =>
 async function ensureFixtureReady(page: Page) {
   await page.goto(fixtureUrl);
   await page.waitForFunction(
-    () => (window as any).__localspaceLoaded || (window as any).__localspaceError,
+    () =>
+      (window as any).__localspaceLoaded || (window as any).__localspaceError
   );
-  const importError = await page.evaluate(() => (window as any).__localspaceError);
+  const importError = await page.evaluate(
+    () => (window as any).__localspaceError
+  );
   if (importError) {
     throw new Error(`localspace fixture failed to load: ${importError}`);
   }
@@ -76,7 +79,13 @@ test.describe('localspace browser interoperability', () => {
         const localspaceModule = await import(moduleUrl);
         const instance = localspaceModule.default.createInstance({
           name: 'empty-process-env-warning-check',
-          size: 1,
+          plugins: [
+            {
+              name: 'empty-process-env-combined-hooks',
+              beforeSet: (_key: string, value: unknown) => value,
+              beforeSetItems: (entries: unknown) => entries,
+            },
+          ],
         });
         instance.config();
         await instance.close();
@@ -108,7 +117,13 @@ test.describe('localspace browser interoperability', () => {
       try {
         const instance = localspace.createInstance({
           name: 'production-warning-check',
-          size: 1,
+          plugins: [
+            {
+              name: 'production-combined-hooks',
+              beforeSet: (_key: string, value: unknown) => value,
+              beforeSetItems: (entries: unknown) => entries,
+            },
+          ],
         });
         instance.config();
         await instance.close();
@@ -121,7 +136,9 @@ test.describe('localspace browser interoperability', () => {
     expect(warnings).toEqual([]);
   });
 
-  test('setItem/getItem/iterate mirror localForage behaviour', async ({ page }) => {
+  test('setItem/getItem/iterate mirror localForage behaviour', async ({
+    page,
+  }) => {
     await ensureFixtureReady(page);
 
     const result = await page.evaluate(async (storeName) => {
@@ -142,7 +159,8 @@ test.describe('localspace browser interoperability', () => {
       const length = await instance.length();
       const keys = await instance.keys();
 
-      const iterated: Array<{ key: string; value: any; iteration: number }> = [];
+      const iterated: Array<{ key: string; value: any; iteration: number }> =
+        [];
       await instance.iterate((value, key, iterationNumber) => {
         iterated.push({ key, value, iteration: iterationNumber });
       });
@@ -154,8 +172,14 @@ test.describe('localspace browser interoperability', () => {
     expect(result.length).toBe(2);
     expect(new Set(result.keys)).toEqual(new Set(['officeX', 'officeY']));
     expect(result.iterated.length).toBe(2);
-    expect(result.iterated.map((entry) => entry.key)).toEqual(['officeX', 'officeY']);
-    expect(result.iterated.map((entry) => entry.value)).toEqual(['InitechX', 'InitrodeY']);
+    expect(result.iterated.map((entry) => entry.key)).toEqual([
+      'officeX',
+      'officeY',
+    ]);
+    expect(result.iterated.map((entry) => entry.value)).toEqual([
+      'InitechX',
+      'InitrodeY',
+    ]);
     expect(result.iterated[0]?.iteration).toBe(1);
     expect(result.iterated[1]?.iteration).toBe(2);
   });
@@ -307,7 +331,9 @@ test.describe('localspace browser interoperability', () => {
     }, randomStoreName('clear'));
 
     expect(result.before.length).toBe(2);
-    expect(new Set(result.before.keys)).toEqual(new Set(['taskOne', 'taskTwo']));
+    expect(new Set(result.before.keys)).toEqual(
+      new Set(['taskOne', 'taskTwo'])
+    );
     expect(result.after.length).toBe(0);
     expect(result.after.keys).toEqual([]);
   });
@@ -360,14 +386,18 @@ test.describe('localspace browser interoperability', () => {
     }, randomStoreName('keys'));
 
     // localStorage key enumeration is not strictly specified across engines; just assert consistency.
-    expect(new Set([keys.first, keys.second])).toEqual(new Set(['alpha', 'beta']));
+    expect(new Set([keys.first, keys.second])).toEqual(
+      new Set(['alpha', 'beta'])
+    );
     expect(keys.all).toEqual(expect.arrayContaining(['alpha', 'beta']));
     expect(keys.all).toHaveLength(2);
     expect(keys.all[0]).toBe(keys.first);
     expect(keys.all[1]).toBe(keys.second);
   });
 
-  test('dropInstance removes persisted entries for localStorage', async ({ page }) => {
+  test('dropInstance removes persisted entries for localStorage', async ({
+    page,
+  }) => {
     await ensureFixtureReady(page);
 
     const result = await page.evaluate(async (storeName) => {
@@ -396,7 +426,9 @@ test.describe('localspace browser interoperability', () => {
     expect(result.value).toBe(null);
   });
 
-  test('removeItem deletes single item without affecting others', async ({ page }) => {
+  test('removeItem deletes single item without affecting others', async ({
+    page,
+  }) => {
     await ensureFixtureReady(page);
 
     const result = await page.evaluate(async (storeName) => {
@@ -693,7 +725,9 @@ test.describe('localspace data type handling', () => {
 });
 
 test.describe('localspace multiple instances', () => {
-  test('different instances cannot access each other\'s data', async ({ page }) => {
+  test("different instances cannot access each other's data", async ({
+    page,
+  }) => {
     await ensureFixtureReady(page);
 
     const result = await page.evaluate(async () => {
@@ -736,7 +770,9 @@ test.describe('localspace multiple instances', () => {
     expect(result.instance2Value).toBe('value2');
   });
 
-  test('multiple instances can use same key with different values', async ({ page }) => {
+  test('multiple instances can use same key with different values', async ({
+    page,
+  }) => {
     await ensureFixtureReady(page);
 
     const result = await page.evaluate(async () => {
@@ -757,8 +793,16 @@ test.describe('localspace multiple instances', () => {
       await instance1.setDriver([instance1.LOCALSTORAGE]);
       await instance2.setDriver([instance2.LOCALSTORAGE]);
       await instance3.setDriver([instance3.LOCALSTORAGE]);
-      await Promise.all([instance1.ready(), instance2.ready(), instance3.ready()]);
-      await Promise.all([instance1.clear(), instance2.clear(), instance3.clear()]);
+      await Promise.all([
+        instance1.ready(),
+        instance2.ready(),
+        instance3.ready(),
+      ]);
+      await Promise.all([
+        instance1.clear(),
+        instance2.clear(),
+        instance3.clear(),
+      ]);
 
       await instance1.setItem('key', 'value1');
       await instance2.setItem('key', 'value2');
@@ -841,7 +885,9 @@ test.describe('localspace error handling', () => {
 });
 
 test.describe('localspace dropInstance for IndexedDB', () => {
-  test('dropInstance removes entire database when no storeName provided', async ({ page }) => {
+  test('dropInstance removes entire database when no storeName provided', async ({
+    page,
+  }) => {
     await ensureFixtureReady(page);
 
     const result = await page.evaluate(async () => {
@@ -897,7 +943,9 @@ test.describe('localspace dropInstance for IndexedDB', () => {
     expect(result.afterValue).toBe(null);
   });
 
-  test('dropInstance removes specific object store for IndexedDB', async ({ page }) => {
+  test('dropInstance removes specific object store for IndexedDB', async ({
+    page,
+  }) => {
     await ensureFixtureReady(page);
 
     const result = await page.evaluate(async () => {
@@ -981,7 +1029,9 @@ test.describe('localspace dropInstance for IndexedDB', () => {
     expect(result.store2AfterValue).toBe('store2-valueA');
   });
 
-  test('dropInstance preserves explicit storeName when name omitted', async ({ page }) => {
+  test('dropInstance preserves explicit storeName when name omitted', async ({
+    page,
+  }) => {
     await ensureFixtureReady(page);
 
     const result = await page.evaluate(async () => {

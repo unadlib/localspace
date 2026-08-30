@@ -27,6 +27,7 @@ type ReactNativeAsyncStorageDbInfo = DbInfo & {
 type ReactNativeAsyncStorageDriverContext = LocalSpaceInstance &
   Partial<Driver> & {
     _dbInfo: ReactNativeAsyncStorageDbInfo;
+    _config: LocalSpaceConfig;
     _defaultConfig: LocalSpaceConfig;
     ready(): Promise<void>;
     config(): LocalSpaceConfig;

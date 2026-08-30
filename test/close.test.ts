@@ -39,8 +39,8 @@ describe('LocalSpace.close', () => {
     const initStorage = vi.spyOn(driver, '_initStorage');
     const instance = new LocalSpace({
       plugins: [{ name: 'unused-lifecycle', onInit, onDestroy }],
+      drivers: [driver],
     });
-    await instance.defineDriver(driver);
     await instance.setDriver([driver._driver]);
 
     const firstClose = instance.close();
@@ -82,8 +82,12 @@ describe('LocalSpace.close', () => {
       onInit,
       onDestroy,
     };
-    const instance = new LocalSpace({ name, storeName, plugins: [plugin] });
-    await instance.defineDriver(driver);
+    const instance = new LocalSpace({
+      name,
+      storeName,
+      plugins: [plugin],
+      drivers: [driver],
+    });
     await instance.setDriver([driver._driver]);
     await instance.setItem('persisted', { value: true });
 
@@ -115,8 +119,8 @@ describe('LocalSpace.close', () => {
     const instance = new LocalSpace({
       name: uniqueName('retry-close'),
       storeName: 'store',
+      drivers: [driver],
     });
-    await instance.defineDriver(driver);
     await instance.setDriver([driver._driver]);
     await instance.setItem('key', 'value');
 
@@ -236,6 +240,7 @@ describe('LocalSpace.close', () => {
     };
     const instance = localspace.createInstance({
       name: uniqueName('close-active-ttl-sweep'),
+      drivers: [driver],
       plugins: [
         ttlPlugin({
           defaultTTL: 1,
@@ -243,7 +248,6 @@ describe('LocalSpace.close', () => {
         }),
       ],
     });
-    await instance.defineDriver(driver);
     await instance.setDriver([driver._driver]);
     await instance.setItem('ephemeral', 'value');
     await sweepStarted;
@@ -259,36 +263,29 @@ describe('LocalSpace.close', () => {
     await closing;
   });
 
-  it.each(['close', 'destroy'] as const)(
-    'allows a TTL background onExpire callback to await %s()',
-    async (lifecycleMethod) => {
-      let instance!: LocalSpaceInstance;
-      let callbackFinished = false;
-      const onExpire = vi.fn(async () => {
-        await instance[lifecycleMethod]();
-        callbackFinished = true;
-      });
-      instance = localspace.createInstance({
-        name: uniqueName(`ttl-on-expire-${lifecycleMethod}`),
-        plugins: [
-          ttlPlugin({
-            defaultTTL: 1,
-            cleanupInterval: 5,
-            onExpire,
-          }),
-        ],
-      });
-      await instance.setDriver([instance.MEMORY]);
-      await instance.setItem('ephemeral', 'value');
+  it('allows a TTL background onExpire callback to await close()', async () => {
+    let instance!: LocalSpaceInstance;
+    let callbackFinished = false;
+    const onExpire = vi.fn(async () => {
+      await instance.close();
+      callbackFinished = true;
+    });
+    instance = localspace.createInstance({
+      name: uniqueName('ttl-on-expire-close'),
+      plugins: [
+        ttlPlugin({
+          defaultTTL: 1,
+          cleanupInterval: 5,
+          onExpire,
+        }),
+      ],
+    });
+    await instance.setDriver([instance.MEMORY]);
+    await instance.setItem('ephemeral', 'value');
 
-      await vi.waitFor(() => expect(callbackFinished).toBe(true));
-      expect(onExpire).toHaveBeenCalledTimes(1);
-
-      if (lifecycleMethod === 'destroy') {
-        await instance.close();
-      }
-    }
-  );
+    await vi.waitFor(() => expect(callbackFinished).toBe(true));
+    expect(onExpire).toHaveBeenCalledTimes(1);
+  });
 
   it('resumes TTL cleanup when close rejects for a foreground operation', async () => {
     let releaseWrite!: () => void;
@@ -334,7 +331,7 @@ describe('LocalSpace.close', () => {
     await instance.close();
   });
 
-  it('shares plugin teardown between concurrent destroy and close calls', async () => {
+  it('shares plugin teardown between concurrent close calls', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     let releaseDestroy!: () => void;
     let markDestroyStarted!: () => void;
@@ -355,7 +352,7 @@ describe('LocalSpace.close', () => {
     await instance.setDriver([instance.MEMORY]);
     await instance.setItem('key', 'value');
 
-    const destroying = instance.destroy();
+    const firstClose = instance.close();
     await destroyStarted;
     let closeSettled = false;
     const closing = instance.close().then(() => {
@@ -367,91 +364,8 @@ describe('LocalSpace.close', () => {
     expect(closeSettled).toBe(false);
     releaseDestroy();
 
-    await Promise.all([destroying, closing]);
+    await Promise.all([firstClose, closing]);
     expect(onDestroy).toHaveBeenCalledTimes(1);
-  });
-
-  it('waits for the complete plugin initialization pass before closing', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    let releaseFirstInit!: () => void;
-    let markFirstInitStarted!: () => void;
-    let releaseSecondInit!: () => void;
-    let markSecondInitStarted!: () => void;
-    const firstInitGate = new Promise<void>((resolve) => {
-      releaseFirstInit = resolve;
-    });
-    const firstInitStarted = new Promise<void>((resolve) => {
-      markFirstInitStarted = resolve;
-    });
-    const secondInitGate = new Promise<void>((resolve) => {
-      releaseSecondInit = resolve;
-    });
-    const secondInitStarted = new Promise<void>((resolve) => {
-      markSecondInitStarted = resolve;
-    });
-    const events: string[] = [];
-    const instance = localspace.createInstance({
-      name: uniqueName('close-complete-plugin-init'),
-      plugins: [
-        {
-          name: 'first-init',
-          onInit: async () => {
-            events.push('init:first:start');
-            markFirstInitStarted();
-            await firstInitGate;
-            events.push('init:first:end');
-          },
-          onDestroy: () => {
-            events.push('destroy:first');
-          },
-        },
-        {
-          name: 'second-init',
-          onInit: async () => {
-            events.push('init:second:start');
-            markSecondInitStarted();
-            await secondInitGate;
-            events.push('init:second:end');
-          },
-          onDestroy: () => {
-            events.push('destroy:second');
-          },
-        },
-      ],
-    });
-    await instance.setDriver([instance.MEMORY]);
-
-    const destroying = instance.destroy();
-    await firstInitStarted;
-    let closeSettled = false;
-    const closing = instance.close().then(() => {
-      closeSettled = true;
-      events.push('close:end');
-    });
-
-    releaseFirstInit();
-    await secondInitStarted;
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-
-    expect(closeSettled).toBe(false);
-    expect(events).toEqual([
-      'init:first:start',
-      'init:first:end',
-      'init:second:start',
-    ]);
-
-    releaseSecondInit();
-    await Promise.all([destroying, closing]);
-
-    expect(events).toEqual([
-      'init:first:start',
-      'init:first:end',
-      'init:second:start',
-      'init:second:end',
-      'destroy:second',
-      'destroy:first',
-      'close:end',
-    ]);
   });
 
   it('fails fast when plugin teardown tries to close the same instance', async () => {
@@ -640,8 +554,8 @@ describe('LocalSpace.close', () => {
     };
     const instance = new LocalSpace({
       name: uniqueName('driver-init-reentrant-close'),
+      drivers: [driver],
     });
-    await instance.defineDriver(driver);
     await instance.setDriver([driver._driver]);
 
     await instance.ready();
@@ -682,8 +596,8 @@ describe('LocalSpace.close', () => {
     };
     const instance = new LocalSpace({
       name: uniqueName('concurrent-driver-init'),
+      drivers: [driver],
     });
-    await instance.defineDriver(driver);
     await instance.setDriver([driver._driver]);
 
     const firstReady = instance.ready();
@@ -713,8 +627,8 @@ describe('LocalSpace.close', () => {
     };
     const instance = new LocalSpace({
       name: uniqueName('released-driver-init-guard'),
+      drivers: [driver],
     });
-    await instance.defineDriver(driver);
     await instance.setDriver([driver._driver]);
     await instance.ready();
     await instance.setItem('key', 'value');
@@ -753,8 +667,8 @@ describe('LocalSpace.close', () => {
     };
     const instance = new LocalSpace({
       name: uniqueName('stable-driver-receiver'),
+      drivers: [driver],
     });
-    await instance.defineDriver(driver);
     await instance.setDriver([driver._driver]);
     await instance.setItem('key', 'value');
 
@@ -780,8 +694,8 @@ describe('LocalSpace.close', () => {
     };
     const instance = new LocalSpace({
       name: uniqueName('driver-close-reentrant-read'),
+      drivers: [oldDriver],
     });
-    await instance.defineDriver(oldDriver);
     await instance.setDriver([oldDriver._driver]);
     await instance.ready();
 
@@ -903,9 +817,8 @@ describe('LocalSpace.close', () => {
     const instance = new LocalSpace({
       name: uniqueName('close-during-driver-switch'),
       storeName: 'store',
+      drivers: [oldDriver, newDriver],
     });
-    await instance.defineDriver(oldDriver);
-    await instance.defineDriver(newDriver);
     await instance.setDriver([oldDriver._driver]);
     await instance.ready();
 
@@ -975,17 +888,18 @@ describe('LocalSpace.close', () => {
     const instance = new LocalSpace({
       name: uniqueName('retry-driver-switch'),
       storeName: 'store',
+      drivers: [oldDriver, newDriver],
     });
-    await instance.defineDriver(oldDriver);
-    await instance.defineDriver(newDriver);
     await instance.setDriver([oldDriver._driver]);
     await instance.setItem('before-switch', 'value');
 
-    await expect(instance.setDriver([newDriver._driver])).rejects.toMatchObject({
-      code: 'OPERATION_FAILED',
-      cause: cleanupError,
-      details: { operation: 'setDriver' },
-    });
+    await expect(instance.setDriver([newDriver._driver])).rejects.toMatchObject(
+      {
+        code: 'OPERATION_FAILED',
+        cause: cleanupError,
+        details: { operation: 'setDriver' },
+      }
+    );
     expect(instance.driver()).toBe(oldDriver._driver);
     expect(oldDriverClose).toHaveBeenCalledTimes(1);
 
@@ -1028,8 +942,8 @@ describe('LocalSpace.close', () => {
     };
     const instance = new LocalSpace({
       name: uniqueName('close-in-flight-operation'),
+      drivers: [driver],
     });
-    await instance.defineDriver(driver);
     await instance.setDriver([driver._driver]);
     await instance.ready();
 
@@ -1091,9 +1005,8 @@ describe('LocalSpace.close', () => {
     };
     const instance = new LocalSpace({
       name: uniqueName('switch-in-flight-operation'),
+      drivers: [oldDriver, newDriver],
     });
-    await instance.defineDriver(oldDriver);
-    await instance.defineDriver(newDriver);
     await instance.setDriver([oldDriver._driver]);
     await instance.ready();
 
@@ -1176,8 +1089,8 @@ describe('LocalSpace.close', () => {
     };
     const instance = new LocalSpace({
       name: uniqueName('driver-reentrant-close-operation'),
+      drivers: [driver],
     });
-    await instance.defineDriver(driver);
     await instance.setDriver([driver._driver]);
     await instance.ready();
 
