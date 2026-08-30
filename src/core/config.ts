@@ -94,5 +94,19 @@ export function normalizeConfigOptions(
     );
   }
 
+  if (
+    options.strictTransactions !== undefined &&
+    typeof options.strictTransactions !== 'boolean'
+  ) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Configuration option "strictTransactions" must be a boolean.',
+      {
+        configKey: 'strictTransactions',
+        providedType: typeof options.strictTransactions,
+      }
+    );
+  }
+
   return normalized;
 }

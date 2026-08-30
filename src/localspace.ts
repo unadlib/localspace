@@ -294,6 +294,7 @@ export class LocalSpace implements LocalSpaceInstance {
   private _operationPause: Promise<void> | null = null;
   private _operationsStarting = 0;
   private readonly _activeOperations = new Set<Promise<unknown>>();
+  private _activeTransactionRunners = 0;
   private _invokingLifecycleCallback: LifecycleCallback | null = null;
   private _pluginManager: PluginManager;
   private _rawDriverMethods: Partial<
@@ -1070,6 +1071,7 @@ export class LocalSpace implements LocalSpaceInstance {
     try {
       this._assertNotLifecycleReentrant(operation);
       this._assertOpen(operation);
+      this._checkTransactionRunnerOperation(operation);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -1104,6 +1106,28 @@ export class LocalSpace implements LocalSpaceInstance {
     };
     void operationPromise.then(stopTracking, stopTracking);
     return operationPromise;
+  }
+
+  private _checkTransactionRunnerOperation(operation: string): void {
+    if (this._activeTransactionRunners === 0) {
+      return;
+    }
+
+    warnDeprecation(
+      'transaction-runner-instance-operation',
+      'calling ordinary instance storage APIs from an active `runTransaction()` runner is deprecated; use only the supplied transaction scope. Enable `strictTransactions: true` to reject this 2.1 behavior before upgrading to 3.0.'
+    );
+
+    if (this._config.strictTransactions === true) {
+      throw createLocalSpaceError(
+        'TRANSACTION_SCOPE_REQUIRED',
+        `Cannot call ${operation} on the LocalSpace instance while its transaction runner is active; use the supplied transaction scope.`,
+        {
+          operation,
+          reason: 'transaction-scope-required',
+        }
+      );
+    }
   }
 
   private _createSetItemWrapper(original: RawDriverMethod) {
@@ -1474,7 +1498,7 @@ export class LocalSpace implements LocalSpaceInstance {
       this._assertOpen('runTransaction');
       this._pluginManager.assertNoStorageTransformBypass('runTransaction');
 
-      return original(mode, (scope: TransactionScope) => {
+      return original(mode, async (scope: TransactionScope) => {
         const validatingScope: TransactionScope = {
           ...scope,
           get: async <T>(key: string) =>
@@ -1498,7 +1522,12 @@ export class LocalSpace implements LocalSpaceInstance {
               )
             ),
         };
-        return runner(validatingScope);
+        this._activeTransactionRunners++;
+        try {
+          return await runner(validatingScope);
+        } finally {
+          this._activeTransactionRunners--;
+        }
       });
     };
   }

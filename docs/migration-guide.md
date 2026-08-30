@@ -57,6 +57,7 @@ setDeprecationWarnings(false);
 | `prewarmTransactions`, `connectionIdleMs`, or `maxConcurrentTransactions` | Remove reliance on these public tuning options; 3.0 keeps only benchmark-backed internals |
 | Storage Bucket fallback to default IndexedDB                              | Feature-detect before 3.0 and handle initialization failure explicitly                    |
 | Memory snapshot-only transactions                                         | Do not rely on concurrent isolation until the 3.0 store-scoped contract                   |
+| Calling ordinary instance APIs inside a transaction runner                | Use only the runner's supplied transaction scope; audit with `strictTransactions: true`   |
 | Assuming `iterate()` always returns `U`                                   | Handle `undefined` when no callback invocation terminates iteration early                 |
 | Matching batch and single hooks in one custom plugin                      | Define one hook form per phase; retain the 2.x `isBatch` guard until migrated             |
 | React Native adapter auto-detection                                       | Import `localspace/react-native` and inject `reactNativeAsyncStorage` explicitly          |
@@ -86,6 +87,32 @@ BigInt, cyclic values, accessors, and class instances to explicit plain data.
 The accepted contract consists of `null`, booleans, finite numbers, strings,
 dense arrays, plain objects, `ArrayBuffer`, and typed arrays. This option is a
 2.1 migration aid; 3.0 validates unconditionally.
+
+### Audit Transaction Runners Against The 3.0 Scope Contract
+
+LocalSpace 2.1 warns in development when a `runTransaction()` runner calls an
+ordinary storage method on the same instance. That permissive path remains the
+2.1 default, but 3.0 rejects it because only the supplied transaction scope can
+participate in the driver's atomic operation. Enable strict migration mode to
+turn the warning into the same pre-side-effect failure before upgrading:
+
+```ts
+const store = localspace.createInstance({
+  strictTransactions: true,
+});
+
+await store.runTransaction('readwrite', async (tx) => {
+  await tx.set('inside', 'use the scope');
+
+  // Rejects with TRANSACTION_SCOPE_REQUIRED in strict migration mode.
+  await store.setItem('outside', 'not part of the transaction');
+});
+```
+
+The diagnostic also applies to concurrent ordinary storage calls made through
+that same instance while its runner is active. Use another instance only when
+the operation is intentionally outside the transaction and its ordering is
+handled explicitly.
 
 ### Close Instances Without Deleting Data
 

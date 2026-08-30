@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import localspace from '../src';
-import type { LocalSpaceInstance } from '../src/types';
+import type { LocalSpaceInstance, LocalSpaceOptions } from '../src/types';
+import { resetDeprecationWarningsForTests } from '../src/utils/deprecations';
 
 const timeoutAfter = (ms: number) =>
   new Promise<never>((_, reject) => {
@@ -8,12 +9,14 @@ const timeoutAfter = (ms: number) =>
   });
 
 const createStore = async (
-  driver: 'memory' | 'indexeddb'
+  driver: 'memory' | 'indexeddb',
+  options: LocalSpaceOptions = {}
 ): Promise<LocalSpaceInstance> => {
   const store = localspace.createInstance({
     name: `transaction-runner-${driver}-${Math.random().toString(36).slice(2)}`,
     storeName: 'store',
     prewarmTransactions: false,
+    ...options,
   });
   await store.setDriver([
     driver === 'memory' ? store.MEMORY : store.INDEXEDDB,
@@ -22,9 +25,21 @@ const createStore = async (
   return store;
 };
 
+beforeEach(() => {
+  resetDeprecationWarningsForTests();
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+});
+
 afterEach(() => {
+  resetDeprecationWarningsForTests();
   vi.restoreAllMocks();
 });
+
+const transactionScopeWarnings = () =>
+  vi
+    .mocked(console.warn)
+    .mock.calls.map(([message]) => String(message))
+    .filter((message) => message.includes('strictTransactions'));
 
 describe.each(['memory', 'indexeddb'] as const)(
   '%s transaction runner compatibility',
@@ -36,6 +51,9 @@ describe.each(['memory', 'indexeddb'] as const)(
         const result = await Promise.race([
           store.runTransaction('readwrite', async () => {
             await store.setItem('ordinary-operation', 'completed');
+            await expect(
+              store.getItem('ordinary-operation')
+            ).resolves.toBe('completed');
             return 'runner-completed';
           }),
           timeoutAfter(500),
@@ -45,6 +63,41 @@ describe.each(['memory', 'indexeddb'] as const)(
         await expect(store.getItem('ordinary-operation')).resolves.toBe(
           'completed'
         );
+        expect(transactionScopeWarnings()).toEqual([
+          '[localspace] Deprecation: calling ordinary instance storage APIs from an active `runTransaction()` runner is deprecated; use only the supplied transaction scope. Enable `strictTransactions: true` to reject this 2.1 behavior before upgrading to 3.0.',
+        ]);
+      } finally {
+        await store.dropInstance().catch(() => undefined);
+      }
+    });
+
+    it('can opt into the 3.0 transaction-scope requirement before side effects', async () => {
+      const store = await createStore(driver, { strictTransactions: true });
+
+      try {
+        const result = await store.runTransaction(
+          'readwrite',
+          async (scope) => {
+            await expect(
+              store.setItem('ordinary-operation', 'blocked')
+            ).rejects.toMatchObject({
+              code: 'TRANSACTION_SCOPE_REQUIRED',
+              details: {
+                operation: 'setItem',
+                reason: 'transaction-scope-required',
+              },
+            });
+            await scope.set('scoped-operation', 'committed');
+            return 'runner-completed';
+          }
+        );
+
+        expect(result).toBe('runner-completed');
+        await expect(store.getItem('ordinary-operation')).resolves.toBeNull();
+        await expect(store.getItem('scoped-operation')).resolves.toBe(
+          'committed'
+        );
+        expect(transactionScopeWarnings()).toHaveLength(1);
       } finally {
         await store.dropInstance().catch(() => undefined);
       }

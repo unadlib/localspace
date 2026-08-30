@@ -147,6 +147,13 @@ export interface LocalSpaceConfig {
    * contract. Defaults to false in 2.1 for compatibility; 3.0 is always strict.
    */
   strictValues?: boolean;
+
+  /**
+   * Reject ordinary instance storage operations while a transaction runner is
+   * active, matching the LocalSpace 3.0 transaction-scope contract. Defaults
+   * to false in 2.1 so applications can audit before upgrading.
+   */
+  strictTransactions?: boolean;
 }
 
 /**

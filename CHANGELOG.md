@@ -8,6 +8,9 @@
   for values that cannot round-trip consistently across 3.0 drivers.
 - Added the opt-in `strictValues` migration mode, which validates item, batch,
   and transaction-scope writes before storage side effects.
+- Added development diagnostics and the opt-in `strictTransactions` migration
+  mode for ordinary instance storage calls made while a transaction runner is
+  active.
 - Added 3.0 migration warnings and type/documentation previews for the config
   setter, instance driver registration, IndexedDB tuning options, Storage Bucket
   fallback, weak Memory transactions, and the `iterate()` undefined result.

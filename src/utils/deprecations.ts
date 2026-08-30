@@ -10,7 +10,8 @@ export type LocalSpaceDeprecation =
   | 'instance-driver-registration'
   | 'indexeddb-performance-options'
   | 'storage-bucket-fallback'
-  | 'weak-memory-transaction';
+  | 'weak-memory-transaction'
+  | 'transaction-runner-instance-operation';
 
 type DeprecationState = {
   emitted: Set<LocalSpaceDeprecation>;

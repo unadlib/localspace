@@ -642,6 +642,7 @@ interface LocalSpaceConfig {
   pluginInitPolicy?: 'fail' | 'disable-and-continue';
   pluginErrorPolicy?: 'strict' | 'lenient';
   strictValues?: boolean; // Opt in to the 3.0 StorageValue validator
+  strictTransactions?: boolean; // Require runner operations to use its scope
 }
 ```
 
@@ -653,6 +654,11 @@ booleans, finite numbers, strings, dense arrays, plain objects, `ArrayBuffer`,
 and typed arrays. Date, Map, Set, RegExp, `undefined`, scalar BigInt, cyclic
 values, accessors, and class instances are rejected. 3.0 makes this validation
 unconditional.
+
+`strictTransactions` also defaults to `false` in 2.1. When enabled, ordinary
+instance storage calls made while a `runTransaction()` runner is active reject
+with `TRANSACTION_SCOPE_REQUIRED` before side effects. This previews the 3.0
+rule that runner storage work must use only its supplied transaction scope.
 
 The 2.1 read path recognizes the frozen 3.0 `StoredRecord` v1 representation
 after configured storage transforms have been removed. This applies to item,

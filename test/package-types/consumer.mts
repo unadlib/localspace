@@ -24,6 +24,9 @@ const migrationValue: StorageValue = {
   binary: new Uint8Array([1, 2, 3]),
   nested: [null, true, 1, 'value'],
 };
+const transactionMigrationConfig: LocalSpaceConfig = {
+  strictTransactions: true,
+};
 const customDriver: Driver = {
   ...memoryDriver,
   _driver: 'package-types-esm',
@@ -54,6 +57,7 @@ void [
   legacySizeResult,
   legacySize,
   migrationValue,
+  transactionMigrationConfig,
   customDriver,
   typecheckDirectLifecycleCalls,
   createReactNativeInstance,

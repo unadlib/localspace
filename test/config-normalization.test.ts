@@ -39,6 +39,7 @@ describe('configuration normalization', () => {
     ['connectionIdleMs', -1],
     ['maxConcurrentTransactions', -1],
     ['strictValues', 'yes'],
+    ['strictTransactions', 'yes'],
   ])('rejects invalid constructor option %s=%s', (key, value) => {
     let error: unknown;
     try {
