@@ -410,6 +410,30 @@ describe('encryption plugin fail-closed behavior', () => {
     );
   });
 
+  it('owns the IV while accepting IV-free AES-GCM parameters', async () => {
+    const { secure, raw } = await createMemoryStores(
+      'encryption-writer-owned-iv',
+      encryptionPlugin({
+        key: VALID_KEY,
+        algorithm: { name: 'AES-GCM', tagLength: 96 },
+        ivGenerator: () => new Uint8Array(12).fill(7),
+      })
+    );
+
+    await secure.setItem('secret', { value: 'plaintext' });
+    await expect(secure.getItem('secret')).resolves.toEqual({
+      value: 'plaintext',
+    });
+    const parsed = readPluginEnvelope<Record<string, unknown>>(
+      await raw.getItem('secret'),
+      'encryption'
+    );
+    expect(parsed).toMatchObject({
+      matched: true,
+      payload: { iv: 'BwcHBwcHBwcHBwcH' },
+    });
+  });
+
   it('rejects a CryptoKey whose algorithm does not match the plugin', async () => {
     const cbcKey = await crypto.subtle.generateKey(
       { name: 'AES-CBC', length: 256 },

@@ -456,13 +456,16 @@ import { encryptionPlugin } from 'localspace';
 
 const plugin = encryptionPlugin({
   key: '0123456789abcdef0123456789abcdef',
+  algorithm: { name: 'AES-GCM', tagLength: 128 },
 });
 ```
 
 Raw key material must be 16, 24, or 32 bytes. A supplied `CryptoKey` must be a
 secret AES-GCM key with the usages needed by the operation. A fresh secure IV
-is generated for every write. Custom `subtle`, `ivGenerator`, and
-`randomSource` implementations are available for controlled runtimes.
+is generated for every write; `algorithm` configures the remaining AES-GCM
+parameters and does not accept a caller-owned `iv`. Custom `subtle`,
+`ivGenerator`, and `randomSource` implementations are available for controlled
+runtimes.
 
 PBKDF2 derivation:
 

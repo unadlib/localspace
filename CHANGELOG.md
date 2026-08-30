@@ -49,7 +49,8 @@
   compression envelope only when its complete serialized representation is
   smaller than the raw representation.
 - Restricted normal encryption to AES-GCM. AES-CBC/AES-CTR remain available only
-  through a read-only legacy migration plugin.
+  through a read-only legacy migration plugin. The AES-GCM writer owns its
+  per-write IV; the public algorithm type exposes only the remaining parameters.
 - Made Storage Bucket configuration an explicit placement requirement. Bucket
   unavailability/open failure no longer falls back to default IndexedDB or the
   next driver. Invalid bucket shapes reject before selection, and IndexedDB

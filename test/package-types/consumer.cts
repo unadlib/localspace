@@ -51,7 +51,7 @@ const compression = compressionPlugin({
 });
 const encryptionAlgorithm: EncryptionAlgorithm = {
   name: 'AES-GCM',
-  iv: new Uint8Array(12),
+  tagLength: 128,
 };
 const encryptionOptions: EncryptionPluginOptions = {
   key: '0123456789abcdef0123456789abcdef',
@@ -153,12 +153,21 @@ const typecheckRemovedApis = (): void => {
     // @ts-expect-error AES-CBC was removed from normal encryption configuration
     algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
   };
+  const callerOwnedIv: EncryptionPluginOptions = {
+    key: '0123456789abcdef0123456789abcdef',
+    algorithm: {
+      name: 'AES-GCM',
+      // @ts-expect-error encryptionPlugin generates a fresh IV for every write
+      iv: new Uint8Array(12),
+    },
+  };
   void instance.runTransaction('readwrite', (transaction) => {
     // @ts-expect-error transaction writes use the same StorageValue contract
     return transaction.set('date', new Date());
   });
   void strictOptions;
   void legacyAlgorithm;
+  void callerOwnedIv;
 };
 setDeprecationWarnings(false);
 void registerDriver(customDriver, { overwrite: true });

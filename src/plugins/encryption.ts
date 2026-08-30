@@ -32,7 +32,7 @@ interface EncryptionKeyOptions {
   subtle?: SubtleCrypto;
 }
 
-export type EncryptionAlgorithm = Omit<AesGcmParams, 'name'> & {
+export type EncryptionAlgorithm = Omit<AesGcmParams, 'name' | 'iv'> & {
   name: 'AES-GCM';
 };
 
