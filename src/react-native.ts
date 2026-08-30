@@ -30,7 +30,11 @@ export async function installReactNativeAsyncStorageDriver(
     }
   }
 
-  await instance.defineDriver(reactNativeAsyncStorageDriver);
+  if (instance._defineDriver) {
+    await instance._defineDriver(reactNativeAsyncStorageDriver);
+  } else {
+    await instance.defineDriver(reactNativeAsyncStorageDriver);
+  }
 }
 
 export interface ReactNativeInstanceOptions extends LocalSpaceOptions {

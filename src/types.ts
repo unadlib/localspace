@@ -71,6 +71,7 @@ export interface LocalSpaceConfig {
   /**
    * Pre-warm an IndexedDB transaction after initialization to avoid the
    * first-op latency hit. Enabled by default; set to false to skip.
+   * @deprecated Removed from the 3.0 public configuration.
    */
   prewarmTransactions?: boolean;
 
@@ -78,12 +79,14 @@ export interface LocalSpaceConfig {
    * Optional idle timeout (ms) for IndexedDB connections. When set,
    * connections will be closed after a period of inactivity and reopened
    * automatically on the next operation. Set to 0 to disable idle closing.
+   * @deprecated Removed from the 3.0 public configuration.
    */
   connectionIdleMs?: number;
 
   /**
    * Optional cap on concurrent transactions. When exceeded, new transactions
    * are queued until one finishes. Set to 0 for no limit.
+   * @deprecated Removed from the 3.0 public configuration.
    */
   maxConcurrentTransactions?: number;
 
@@ -321,6 +324,8 @@ export interface LocalSpaceInstance {
    * (a localForage-compatible contract) — so `await config({ version: 'bad' })`
    * resolves to an `Error` rather than rejecting. Inspect the return value.
    * Only the `driver` form returns the `setDriver()` promise.
+   * @deprecated Pass options to the constructor or createInstance(). The setter
+   * overload is removed in 3.0.
    */
   config(options: LocalSpaceConfig): true | Error | Promise<void>;
   config<K extends keyof LocalSpaceConfig>(
@@ -359,6 +364,8 @@ export interface LocalSpaceInstance {
 
   /**
    * Define a custom driver
+   * @deprecated 3.0 separates explicit global registration from
+   * construction-scoped drivers.
    */
   defineDriver(driver: Driver): Promise<void>;
 
@@ -478,6 +485,7 @@ export interface LocalSpaceInstance {
   _defaultConfig: LocalSpaceConfig;
   _initStorage?(config: LocalSpaceConfig): Promise<void>;
   _extend?(methods: Partial<Driver>): void;
+  _defineDriver?(driver: Driver): Promise<void>;
   _getSupportedDrivers?(drivers: string[]): string[];
   _wrapLibraryMethodsWithReady?(): void;
 }

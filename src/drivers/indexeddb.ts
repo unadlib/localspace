@@ -22,6 +22,7 @@ import {
   chunkArray,
 } from '../utils/helpers.js';
 import serializer from '../utils/serializer.js';
+import { warnDeprecation } from '../utils/deprecations.js';
 
 type IndexedDBDriverContext = LocalSpaceInstance &
   Partial<Driver> & {
@@ -242,12 +243,25 @@ async function resolveIdbBackend(
             contextId: `bucket:${config.bucket.name}`,
           };
         }
+        warnDeprecation(
+          'storage-bucket-fallback',
+          'a requested Storage Bucket did not expose IndexedDB and fell back to the default backend; 3.0 rejects instead of falling back.'
+        );
       } catch (error) {
         console.warn(
           `Failed to open storage bucket "${config.bucket.name}", falling back to default bucket.`,
           error
         );
+        warnDeprecation(
+          'storage-bucket-fallback',
+          'a requested Storage Bucket could not be opened and fell back to the default backend; 3.0 rejects instead of falling back.'
+        );
       }
+    } else {
+      warnDeprecation(
+        'storage-bucket-fallback',
+        'Storage Buckets are unavailable, so the requested bucket fell back to the default backend; 3.0 rejects instead of falling back.'
+      );
     }
   }
 

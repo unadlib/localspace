@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   encryptionPlugin,
   LocalSpace,
+  memoryDriver,
   setDeprecationWarnings,
+  type Driver,
   type LocalSpacePlugin,
   type ReactNativeAsyncStorage,
 } from '../src';
@@ -35,7 +37,104 @@ describe('2.1 deprecation warnings', () => {
 
     expect(warnings()).toEqual([
       '[localspace] Deprecation: the `size` option is ignored by built-in drivers and will be removed in 3.0.',
+      '[localspace] Deprecation: `config(options)` is deprecated and will be removed in 3.0; pass options to the constructor or `createInstance()`.',
     ]);
+  });
+
+  it('warns once for IndexedDB performance options', () => {
+    const first = new LocalSpace({ prewarmTransactions: false });
+    const second = new LocalSpace();
+    expect(second.config({ connectionIdleMs: 10 })).toBe(true);
+    expect(first.config('prewarmTransactions')).toBe(false);
+
+    expect(warnings()).toContain(
+      '[localspace] Deprecation: `prewarmTransactions`, `connectionIdleMs`, and `maxConcurrentTransactions` are deprecated and will be removed from the 3.0 public configuration.'
+    );
+    expect(
+      warnings().filter((message) =>
+        message.includes('`prewarmTransactions`, `connectionIdleMs`')
+      )
+    ).toHaveLength(1);
+  });
+
+  it('warns for public instance-level custom driver registration', async () => {
+    const instance = new LocalSpace();
+    const driver: Driver = {
+      ...memoryDriver,
+      _driver: `deprecated-registration-${Math.random().toString(36).slice(2)}`,
+    };
+
+    await instance.defineDriver(driver);
+    expect(warnings()).toContain(
+      '[localspace] Deprecation: instance-level `defineDriver()` is deprecated and will be replaced by explicit global or construction-scoped driver registration in 3.0.'
+    );
+  });
+
+  it('does not warn for LocalSpace-owned internal registration', async () => {
+    const instance = new LocalSpace();
+    const driver: Driver = {
+      ...memoryDriver,
+      _driver: `internal-registration-${Math.random().toString(36).slice(2)}`,
+    };
+    await instance._defineDriver(driver);
+
+    expect(
+      warnings().some((message) =>
+        message.includes('instance-level `defineDriver()`')
+      )
+    ).toBe(false);
+  });
+
+  it('warns when using the weak 2.1 Memory transaction contract', async () => {
+    const instance = new LocalSpace({
+      name: `weak-memory-${Math.random().toString(36).slice(2)}`,
+      storeName: 'store',
+    });
+    await instance.setDriver([instance.MEMORY]);
+    await instance.runTransaction('readonly', async (tx) => tx.keys());
+
+    expect(warnings()).toContain(
+      '[localspace] Deprecation: Memory `runTransaction()` in 2.1 provides snapshot rollback without isolation; 3.0 requires store-scoped serializable isolation.'
+    );
+  });
+
+  it('warns when a requested Storage Bucket falls back', async () => {
+    const target = navigator as Navigator & {
+      storageBuckets?: { open: () => Promise<never> };
+    };
+    const descriptor = Object.getOwnPropertyDescriptor(
+      target,
+      'storageBuckets'
+    );
+    Object.defineProperty(target, 'storageBuckets', {
+      configurable: true,
+      value: {
+        open: async () => {
+          throw new Error('bucket unavailable');
+        },
+      },
+    });
+    const instance = new LocalSpace({
+      name: `bucket-deprecation-${Math.random().toString(36).slice(2)}`,
+      storeName: 'store',
+      bucket: { name: 'requested-bucket' },
+    });
+
+    try {
+      await instance.setDriver([instance.INDEXEDDB]);
+      await instance.ready();
+    } finally {
+      await instance.close();
+      if (descriptor) {
+        Object.defineProperty(target, 'storageBuckets', descriptor);
+      } else {
+        delete target.storageBuckets;
+      }
+    }
+
+    expect(warnings()).toContain(
+      '[localspace] Deprecation: a requested Storage Bucket could not be opened and fell back to the default backend; 3.0 rejects instead of falling back.'
+    );
   });
 
   it('preserves the mutable config reference while warning once', () => {

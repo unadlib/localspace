@@ -58,6 +58,27 @@ const DefaultDriverOrder = [
 ];
 const PendingDefaultDriverDefinitions: Record<string, Promise<void>> = {};
 
+const LegacyIndexedDbPerformanceOptions = [
+  'prewarmTransactions',
+  'connectionIdleMs',
+  'maxConcurrentTransactions',
+] as const satisfies ReadonlyArray<keyof LocalSpaceConfig>;
+
+const warnLegacyIndexedDbPerformanceOptions = (
+  options: Partial<LocalSpaceConfig>
+): void => {
+  if (
+    LegacyIndexedDbPerformanceOptions.some((option) =>
+      Object.prototype.hasOwnProperty.call(options, option)
+    )
+  ) {
+    warnDeprecation(
+      'indexeddb-performance-options',
+      '`prewarmTransactions`, `connectionIdleMs`, and `maxConcurrentTransactions` are deprecated and will be removed from the 3.0 public configuration.'
+    );
+  }
+};
+
 const OptionalDriverMethods = [
   'dropInstance',
   'setItems',
@@ -224,7 +245,7 @@ function callWhenReady(
 }
 
 function defineDefaultDriverOnce(
-  definer: { defineDriver: (driver: Driver) => Promise<void> },
+  definer: { _defineDriver: (driver: Driver) => Promise<void> },
   driver: Driver
 ): Promise<void> {
   const driverName = driver._driver;
@@ -238,7 +259,7 @@ function defineDefaultDriverOnce(
     return pendingDefinition;
   }
 
-  const definitionPromise = definer.defineDriver(driver).finally(() => {
+  const definitionPromise = definer._defineDriver(driver).finally(() => {
     if (PendingDefaultDriverDefinitions[driverName] === definitionPromise) {
       delete PendingDefaultDriverDefinitions[driverName];
     }
@@ -287,6 +308,7 @@ export class LocalSpace implements LocalSpaceInstance {
         'the `size` option is ignored by built-in drivers and will be removed in 3.0.'
       );
     }
+    warnLegacyIndexedDbPerformanceOptions(configOverrides);
     const normalizedOverrides = normalizeConfigOptions(configOverrides);
 
     // Define default drivers
@@ -343,12 +365,17 @@ export class LocalSpace implements LocalSpaceInstance {
   config(): LocalSpaceConfig;
   config(optionsOrKey?: LocalSpaceConfig | keyof LocalSpaceConfig) {
     if (typeof optionsOrKey === 'object' && optionsOrKey !== null) {
+      warnDeprecation(
+        'config-setter',
+        '`config(options)` is deprecated and will be removed in 3.0; pass options to the constructor or `createInstance()`.'
+      );
       if (Object.prototype.hasOwnProperty.call(optionsOrKey, 'size')) {
         warnDeprecation(
           'legacy-size-option',
           'the `size` option is ignored by built-in drivers and will be removed in 3.0.'
         );
       }
+      warnLegacyIndexedDbPerformanceOptions(optionsOrKey);
       if (this._ready) {
         return createLocalSpaceError(
           'CONFIG_LOCKED',
@@ -545,6 +572,14 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   async defineDriver(driverObject: Driver): Promise<void> {
+    warnDeprecation(
+      'instance-driver-registration',
+      'instance-level `defineDriver()` is deprecated and will be replaced by explicit global or construction-scoped driver registration in 3.0.'
+    );
+    return this._defineDriver(driverObject);
+  }
+
+  async _defineDriver(driverObject: Driver): Promise<void> {
     const promise = new Promise<void>(async (resolve, reject) => {
       try {
         const driverName = driverObject._driver;

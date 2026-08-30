@@ -18,6 +18,7 @@ import {
   normalizeKey,
 } from '../utils/helpers.js';
 import serializer from '../utils/serializer.js';
+import { warnDeprecation } from '../utils/deprecations.js';
 
 type MemoryStore = Map<string, unknown>;
 
@@ -376,6 +377,10 @@ function runTransaction<T>(
   mode: TransactionMode,
   runner: (scope: TransactionScope) => Promise<T> | T
 ): Promise<T> {
+  warnDeprecation(
+    'weak-memory-transaction',
+    'Memory `runTransaction()` in 2.1 provides snapshot rollback without isolation; 3.0 requires store-scoped serializable isolation.'
+  );
   const promise = withMemoryErrorContext(
     this.ready().then(async () => {
       if (mode !== 'readonly' && mode !== 'readwrite') {

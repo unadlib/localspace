@@ -81,6 +81,10 @@ console.log('Keys:', allKeys);
 
 Iterates over all items. Return a non-undefined value to stop early.
 
+The 2.1 declaration says `Promise<U>`, but a complete iteration without early
+termination returns `undefined` at runtime. Handle that value now. The 3.0
+declaration is corrected to `Promise<U | undefined>`.
+
 When the built-in encryption, compression, or TTL plugin is active, LocalSpace
 2.1 rejects `iterate()` with `UNSUPPORTED_OPERATION` before invoking the
 iterator. Use `keys()` plus `getItems()` when logical, plugin-processed values
@@ -222,6 +226,11 @@ The permissive 2.x runner may await ordinary instance operations, but those
 operations are not part of the transaction. A stricter transaction-bound
 runner and cross-driver isolation contract are planned for 3.0.
 
+The Memory implementation additionally provides snapshot rollback without
+isolating concurrent callers. 3.0 retains Memory transactions only with
+store-scoped serializable isolation; do not use the 2.1 behavior as a concurrency
+primitive.
+
 When the built-in encryption, compression, or TTL plugin is active, LocalSpace
 2.1 rejects `runTransaction()` with `UNSUPPORTED_OPERATION` before creating a
 driver transaction or invoking the runner. This prevents transaction writes
@@ -284,6 +293,9 @@ Updates configuration. Must be called before the first storage operation.
 Configuration without `driver` returns synchronously. Supplying `driver`
 returns the `setDriver()` promise, while invalid or locked configuration is
 returned as an `Error` value.
+
+This setter overload is deprecated in 2.1 and removed in 3.0. Move all options
+to `new LocalSpace(options)` or `createInstance(options)` before upgrading.
 
 The constructor and `config(options)` use the same validation rules.
 Database/store names must be non-empty strings. `version` must be a positive
@@ -433,6 +445,11 @@ Real device-runtime template (Detox on simulator/emulator) lives in `integration
 ### `defineDriver(driver: Driver): Promise<void>`
 
 Registers a custom driver.
+
+Instance-level registration is deprecated because it mutates the realm-wide
+2.x registry. 3.0 separates explicit global registration from custom drivers
+supplied at instance construction. Keep driver definitions immutable and do not
+rely on another instance observing this call.
 
 ```ts
 import localspace, { type Driver } from 'localspace';
@@ -614,9 +631,9 @@ interface LocalSpaceConfig {
     durability?: 'relaxed' | 'strict';
     persisted?: boolean;
   };
-  prewarmTransactions?: boolean; // Pre-warm connection (default: true)
-  connectionIdleMs?: number; // Auto-close idle connections
-  maxConcurrentTransactions?: number; // Throttle concurrent transactions
+  prewarmTransactions?: boolean; // Deprecated; removed from 3.0 public config
+  connectionIdleMs?: number; // Deprecated; removed from 3.0 public config
+  maxConcurrentTransactions?: number; // Deprecated; removed from 3.0 public config
 
   // Batch operations
   maxBatchSize?: number; // Split large batches into chunks
@@ -640,6 +657,8 @@ unconditional.
 When the requested Storage Bucket cannot be opened, IndexedDB falls back to
 the default storage backend. Instances that resolve to that same backend share
 one connection context even if one of them originally requested a bucket.
+This fallback is deprecated: 3.0 rejects initialization when an explicitly
+requested bucket is unavailable or cannot provide IndexedDB.
 
 > **Default database name.** When `name`/`storeName` are omitted, localspace
 > uses `'localforage'` / `'keyvaluepairs'`. This lets an app migrating from
