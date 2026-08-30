@@ -5,8 +5,6 @@ import type {
   LocalSpacePlugin,
   Driver,
   DbInfo,
-  DefinedDriversMap,
-  DriverSupportMap,
   Serializer,
   BatchItems,
   BatchResponse,
@@ -15,12 +13,7 @@ import type {
   PluginContext,
   PluginOperation,
 } from './types.js';
-import {
-  extend,
-  isArray,
-  includes,
-  normalizeBatchEntries,
-} from './utils/helpers.js';
+import { extend, isArray, normalizeBatchEntries } from './utils/helpers.js';
 import {
   createLocalSpaceError,
   describeError,
@@ -41,10 +34,11 @@ import {
 } from './core/plugin-capabilities.js';
 import { validateStorageValueWrite } from './core/storage-value.js';
 import { decodeStoredRecordValue } from './core/stored-record.js';
-
-// Shared drivers across all instances
-const DefinedDrivers: DefinedDriversMap = {};
-const DriverSupport: DriverSupportMap = {};
+import {
+  DriverRegistry,
+  globalDriverRegistry,
+  registerBuiltInDriver,
+} from './core/driver-registry.js';
 
 const DefaultDrivers: Record<'INDEXEDDB' | 'LOCALSTORAGE' | 'MEMORY', Driver> =
   {
@@ -57,7 +51,16 @@ const DefaultDriverOrder = [
   DefaultDrivers.INDEXEDDB._driver,
   DefaultDrivers.LOCALSTORAGE._driver,
 ];
-const PendingDefaultDriverDefinitions: Record<string, Promise<void>> = {};
+const BuiltInDriverInitialization = Promise.all(
+  Object.values(DefaultDrivers).map((driver) =>
+    registerBuiltInDriver(driver).catch((error) => {
+      console.warn(
+        `Failed to register LocalSpace driver "${driver._driver}"`,
+        error
+      );
+    })
+  )
+).then(() => undefined);
 
 const LegacyIndexedDbPerformanceOptions = [
   'prewarmTransactions',
@@ -133,8 +136,7 @@ type LifecycleScope<TInstance> = {
   instance: TInstance;
   invoke<T>(
     lifecycle: LifecycleCallback,
-    callback: () => T,
-    receiverContext?: LifecycleReceiverContext
+    callback: () => T
   ): Promise<Awaited<T>>;
 };
 
@@ -143,7 +145,6 @@ type LifecycleReceiverContext = Map<PropertyKey, unknown>;
 type ActiveLifecycleInvocation = {
   token: object;
   lifecycle: LifecycleCallback;
-  receiverContext?: LifecycleReceiverContext;
 };
 
 const LifecycleReentrantMethods = new Set<string>([
@@ -154,23 +155,26 @@ const LifecycleReentrantMethods = new Set<string>([
   'destroy',
 ]);
 
-const DefaultDriverSet = new Set<Driver>(Object.values(DefaultDrivers));
-
 type DriverInitializationFailure = {
   driver: string;
   error: unknown;
 };
 
-type DriverClose = (
-  receiverContext?: LifecycleReceiverContext
-) => Promise<void>;
+type DriverClose = () => Promise<void>;
+
+type DriverSession = {
+  driver: string;
+  definition: Readonly<Driver>;
+  receiver: DriverAugmentedInstance;
+  receiverContext: LifecycleReceiverContext;
+  initialize(): Promise<void>;
+  close: DriverClose | null;
+  syncFacade(): void;
+};
 
 type DriverCleanup = {
   driver: string;
   close: DriverClose;
-  dbInfo: DbInfo | null;
-  config: LocalSpaceConfig;
-  scopedReceiver: boolean;
 };
 
 type DriverCleanupFailure = DriverCleanup & {
@@ -225,7 +229,8 @@ type ReadyAwareInstance = {
 
 type ReadyWrappedMethod = (...args: unknown[]) => unknown;
 
-type DriverAugmentedInstance = ReadyAwareInstance &
+type DriverAugmentedInstance = LocalSpaceInstance &
+  ReadyAwareInstance &
   Partial<Driver> & {
     _initStorage?: (config: LocalSpaceConfig) => Promise<void>;
   };
@@ -243,30 +248,6 @@ function callWhenReady(
     });
   } as ReadyWrappedMethod;
   instance[libraryMethod] = readyWrapper;
-}
-
-function defineDefaultDriverOnce(
-  definer: { _defineDriver: (driver: Driver) => Promise<void> },
-  driver: Driver
-): Promise<void> {
-  const driverName = driver._driver;
-
-  if (DefinedDrivers[driverName]) {
-    return Promise.resolve();
-  }
-
-  const pendingDefinition = PendingDefaultDriverDefinitions[driverName];
-  if (pendingDefinition) {
-    return pendingDefinition;
-  }
-
-  const definitionPromise = definer._defineDriver(driver).finally(() => {
-    if (PendingDefaultDriverDefinitions[driverName] === definitionPromise) {
-      delete PendingDefaultDriverDefinitions[driverName];
-    }
-  });
-  PendingDefaultDriverDefinitions[driverName] = definitionPromise;
-  return definitionPromise;
 }
 
 export class LocalSpace implements LocalSpaceInstance {
@@ -288,7 +269,7 @@ export class LocalSpace implements LocalSpaceInstance {
   private _closed = false;
   private _closePromise: Promise<void> | null = null;
   private _driverInitialized = false;
-  private _activeDriverClose: (() => Promise<void>) | null = null;
+  private _activeDriverSession: DriverSession | null = null;
   private _pendingDriverCleanups: DriverCleanup[] = [];
   private _driverTransition: Promise<void> | null = null;
   private _operationPause: Promise<void> | null = null;
@@ -296,13 +277,13 @@ export class LocalSpace implements LocalSpaceInstance {
   private readonly _activeOperations = new Set<Promise<unknown>>();
   private _invokingLifecycleCallback: LifecycleCallback | null = null;
   private _pluginManager: PluginManager;
+  private readonly _driverRegistry = new DriverRegistry(globalDriverRegistry);
   private _rawDriverMethods: Partial<
     Record<PluginAwareMethod, RawDriverMethod>
   > = {};
 
   constructor(options?: LocalSpaceOptions) {
-    const driverInitializationPromises: Promise<void>[] = [];
-    const { plugins = [], ...configOverrides } = options ?? {};
+    const { plugins = [], drivers = [], ...configOverrides } = options ?? {};
     if (Object.prototype.hasOwnProperty.call(configOverrides, 'size')) {
       warnDeprecation(
         'legacy-size-option',
@@ -311,25 +292,6 @@ export class LocalSpace implements LocalSpaceInstance {
     }
     warnLegacyIndexedDbPerformanceOptions(configOverrides);
     const normalizedOverrides = normalizeConfigOptions(configOverrides);
-
-    // Define default drivers
-    for (const driverTypeKey in DefaultDrivers) {
-      if (Object.prototype.hasOwnProperty.call(DefaultDrivers, driverTypeKey)) {
-        const driver =
-          DefaultDrivers[driverTypeKey as keyof typeof DefaultDrivers];
-        const driverName = driver._driver;
-        (this as unknown as Record<string, string>)[driverTypeKey] = driverName;
-
-        driverInitializationPromises.push(
-          defineDefaultDriverOnce(this, driver).catch((error) => {
-            console.warn(
-              `Failed to define LocalSpace driver "${driverName}"`,
-              error
-            );
-          })
-        );
-      }
-    }
 
     this._defaultConfig = extend({}, DefaultConfig);
     this._config = extend({}, this._defaultConfig, normalizedOverrides);
@@ -340,10 +302,13 @@ export class LocalSpace implements LocalSpaceInstance {
 
     this._wrapLibraryMethodsWithReady();
 
-    const waitForDrivers =
-      driverInitializationPromises.length > 0
-        ? Promise.all(driverInitializationPromises).then(() => undefined)
-        : Promise.resolve();
+    const driverInitializationPromises = drivers.map((driver) =>
+      this._driverRegistry.register(driver)
+    );
+    const waitForDrivers = Promise.all([
+      BuiltInDriverInitialization,
+      ...driverInitializationPromises,
+    ]).then(() => undefined);
 
     this._pendingDriverInitialization = waitForDrivers.then(() =>
       this._runDefaultDriverSelection()
@@ -581,81 +546,13 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   async _defineDriver(driverObject: Driver): Promise<void> {
-    const promise = new Promise<void>(async (resolve, reject) => {
-      try {
-        const driverName = driverObject._driver;
-        const complianceError = createLocalSpaceError(
-          'DRIVER_COMPLIANCE',
-          'Custom driver not compliant',
-          { driver: driverName }
-        );
-
-        if (!driverObject._driver) {
-          reject(complianceError);
-          return;
-        }
-
-        const driverRecord = driverObject as Driver & Record<string, unknown>;
-        const driverMethods = LibraryMethods.concat('_initStorage');
-        for (const driverMethodName of driverMethods) {
-          const isRequired = !includes(OptionalDriverMethods, driverMethodName);
-          const candidate = driverRecord[driverMethodName];
-          if ((isRequired || candidate) && typeof candidate !== 'function') {
-            reject(complianceError);
-            return;
-          }
-        }
-
-        const configureMissingMethods = () => {
-          const methodNotImplementedFactory = (methodName: string) => {
-            return function () {
-              const error = createLocalSpaceError(
-                'UNSUPPORTED_OPERATION',
-                `Method ${methodName} is not implemented by the current driver`,
-                { operation: methodName }
-              );
-              return Promise.reject(error);
-            };
-          };
-
-          for (const optionalDriverMethod of OptionalDriverMethods) {
-            if (!driverRecord[optionalDriverMethod]) {
-              driverRecord[optionalDriverMethod] =
-                methodNotImplementedFactory(optionalDriverMethod);
-            }
-          }
-        };
-
-        configureMissingMethods();
-
-        const setDriverSupport = (support: boolean) => {
-          if (DefinedDrivers[driverName]) {
-            console.info(`Redefining LocalSpace driver: ${driverName}`);
-          }
-          DefinedDrivers[driverName] = driverObject;
-          DriverSupport[driverName] = support;
-          resolve();
-        };
-
-        if ('_support' in driverObject) {
-          if (
-            driverObject._support &&
-            typeof driverObject._support === 'function'
-          ) {
-            const supportResult = await driverObject._support();
-            setDriverSupport(supportResult);
-          } else {
-            setDriverSupport(!!driverObject._support);
-          }
-        } else {
-          setDriverSupport(true);
-        }
-      } catch (e) {
-        reject(e);
-      }
-    });
-
-    return promise;
+    const driverName = driverObject?._driver;
+    if (driverName && this._driverRegistry.hasOwn(driverName)) {
+      console.info(
+        `Redefining LocalSpace driver in instance scope: ${driverName}`
+      );
+    }
+    return this._driverRegistry.register(driverObject, { overwrite: true });
   }
 
   driver(): string | null {
@@ -663,15 +560,11 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   async getDriver(driverName: string): Promise<Driver> {
-    const getDriverPromise = DefinedDrivers[driverName]
-      ? Promise.resolve(DefinedDrivers[driverName])
-      : Promise.reject(
-          createLocalSpaceError('DRIVER_NOT_FOUND', 'Driver not found.', {
-            driver: driverName,
-          })
-        );
-
-    return getDriverPromise;
+    const driver = this._driverRegistry.get(driverName);
+    if (driver) return driver as Driver;
+    throw createLocalSpaceError('DRIVER_NOT_FOUND', 'Driver not found.', {
+      driver: driverName,
+    });
   }
 
   async getSerializer(): Promise<Serializer> {
@@ -753,70 +646,33 @@ export class LocalSpace implements LocalSpaceInstance {
     };
 
     const extendSelfWithDriver = async (driver: Driver) => {
-      const isDefaultDriver = DefaultDriverSet.has(driver);
-      const lifecycleScope = isDefaultDriver
-        ? null
-        : this._createLifecycleScope();
-      const driverReceiver = lifecycleScope?.instance ?? this;
-      const closeStorage: DriverClose | null =
-        typeof driver._closeStorage === 'function'
-          ? (receiverContext) => {
-              if (isDefaultDriver) {
-                return this._invokeLifecycleCallback('driver-close', () =>
-                  driver._closeStorage!.call(this)
-                );
-              }
-              return lifecycleScope!.invoke(
-                'driver-close',
-                () => driver._closeStorage!.call(driverReceiver),
-                receiverContext
-              );
-            }
-          : null;
-      this._activeDriverClose = closeStorage;
+      const session = this._createDriverSession(driver);
+      this._activeDriverSession = session;
       this._driverInitialized = false;
-      this._extend(driver, driverReceiver);
+      this._extend(driver, session.receiver, session);
       this._driver = driver._driver;
       setDriverToConfig();
 
-      const driverInstance = this as DriverAugmentedInstance;
-      const initStorage = driverInstance._initStorage;
-      const driverInitialization =
-        typeof initStorage === 'function'
-          ? Promise.resolve().then(() => {
-              if (isDefaultDriver) {
-                return this._invokeLifecycleCallback('driver-init', () =>
-                  initStorage.call(this, this._config)
-                );
-              }
-              return lifecycleScope!.invoke('driver-init', () =>
-                initStorage.call(driverReceiver, this._config)
-              );
-            })
-          : Promise.resolve();
-
       try {
-        await driverInitialization;
+        await session.initialize();
+        session.syncFacade();
         this._driverInitialized = true;
       } catch (error) {
-        if (closeStorage) {
+        if (session.close) {
           const failedInitializationCleanup: DriverCleanup = {
             driver: driver._driver,
-            close: closeStorage,
-            dbInfo: this._dbInfo,
-            config: { ...this._config },
-            scopedReceiver: !isDefaultDriver,
+            close: session.close,
           };
           try {
             await failedInitializationCleanup.close();
           } catch {
             // Preserve the initialization failure that triggered cleanup.
-            failedInitializationCleanup.dbInfo = this._dbInfo;
-            failedInitializationCleanup.config = { ...this._config };
             this._pendingDriverCleanups.push(failedInitializationCleanup);
           }
         }
-        this._activeDriverClose = null;
+        if (this._activeDriverSession === session) {
+          this._activeDriverSession = null;
+        }
         this._driverInitialized = false;
         this._dbInfo = null;
         this._wrapLibraryMethodsWithReady();
@@ -949,29 +805,114 @@ export class LocalSpace implements LocalSpaceInstance {
 
   supports(driverName: string): boolean {
     return (
-      !!DriverSupport[driverName] ||
+      this._driverRegistry.supports(driverName) ||
       this._isDriverForcedByInstanceConfig(driverName)
     );
   }
 
+  private _createDriverSession(definition: Readonly<Driver>): DriverSession {
+    const sessionConfig = extend({}, this._config, {
+      driver: definition._driver,
+    }) as LocalSpaceConfig;
+    const receiverContext: LifecycleReceiverContext = new Map([
+      ['_dbInfo', null],
+      ['_driver', definition._driver],
+      ['_config', sessionConfig],
+      ['_defaultConfig', extend({}, this._defaultConfig)],
+      ['driver', () => definition._driver],
+      [
+        'config',
+        (key?: keyof LocalSpaceConfig | LocalSpaceConfig) => {
+          if (typeof key === 'string') {
+            return sessionConfig[key];
+          }
+          if (key && typeof key === 'object') {
+            return createLocalSpaceError(
+              'CONFIG_LOCKED',
+              "Can't call config() after LocalSpace has been used.",
+              { operation: 'config' }
+            );
+          }
+          return sessionConfig;
+        },
+      ],
+    ]);
+    const lifecycleScope = this._createLifecycleScope(
+      receiverContext,
+      definition
+    );
+    let session!: DriverSession;
+    const syncFacade = () => {
+      if (this._activeDriverSession === session) {
+        this._dbInfo = (receiverContext.get('_dbInfo') ??
+          null) as DbInfo | null;
+      }
+    };
+    const receiver = lifecycleScope.instance as DriverAugmentedInstance;
+    session = {
+      driver: definition._driver,
+      definition,
+      receiver,
+      receiverContext,
+      initialize: () =>
+        lifecycleScope
+          .invoke('driver-init', () =>
+            definition._initStorage.call(
+              receiver,
+              receiverContext.get('_config') as LocalSpaceConfig
+            )
+          )
+          .finally(syncFacade),
+      close:
+        typeof definition._closeStorage === 'function'
+          ? () =>
+              lifecycleScope
+                .invoke('driver-close', () =>
+                  definition._closeStorage!.call(receiver)
+                )
+                .finally(syncFacade)
+          : null,
+      syncFacade,
+    };
+    return session;
+  }
+
   _extend(
     libraryMethodsAndProperties: Partial<Driver>,
-    receiver: this = this
+    receiver: DriverAugmentedInstance = this as DriverAugmentedInstance,
+    session?: DriverSession
   ): void {
     const source = libraryMethodsAndProperties as Partial<
       Record<string, unknown>
     >;
-    const guarded = { ...source };
+    const guarded: Partial<Record<string, unknown>> = {};
+
+    const unsupportedMethod =
+      (method: string): RawDriverMethod =>
+      () =>
+        Promise.reject(
+          createLocalSpaceError(
+            'UNSUPPORTED_OPERATION',
+            `Method ${method} is not implemented by the current driver`,
+            { driver: session?.driver, operation: method }
+          )
+        );
 
     for (const method of new Set(LibraryMethods)) {
-      const candidate = source[method];
-      if (typeof candidate !== 'function') {
-        continue;
-      }
+      const configured = source[method];
+      const candidate =
+        typeof configured === 'function'
+          ? configured
+          : OptionalDriverMethods.includes(method)
+            ? unsupportedMethod(method)
+            : undefined;
+      if (!candidate) continue;
       const guardedMethod: RawDriverMethod = (...args: unknown[]) => {
         try {
           this._assertOpen(method);
-          return Promise.resolve(candidate.apply(receiver, args));
+          return Promise.resolve(candidate.apply(receiver, args)).finally(
+            session?.syncFacade
+          );
         } catch (error) {
           return Promise.reject(error);
         }
@@ -981,7 +922,10 @@ export class LocalSpace implements LocalSpaceInstance {
         : this._createTrackedOperationWrapper(method, guardedMethod);
     }
 
-    extend(this as unknown as Record<string, unknown>, guarded);
+    extend(
+      this as unknown as Record<string, unknown>,
+      guarded as Record<string, unknown>
+    );
     this._capturePluginAwareMethods(guarded as Partial<Driver>);
   }
 
@@ -1454,13 +1398,8 @@ export class LocalSpace implements LocalSpaceInstance {
         iterationNumber: number
       ) => unknown
     ) =>
-      original(
-        (value: unknown, key: string, iterationNumber: number) =>
-          iterator(
-            decodeStoredRecordValue(value),
-            key,
-            iterationNumber
-          )
+      original((value: unknown, key: string, iterationNumber: number) =>
+        iterator(decodeStoredRecordValue(value), key, iterationNumber)
       );
   }
 
@@ -1534,22 +1473,16 @@ export class LocalSpace implements LocalSpaceInstance {
   private async _resolveSupportedDrivers(drivers: string[]): Promise<string[]> {
     const supportedDrivers: string[] = [];
     for (const driverName of drivers) {
-      const driver = DefinedDrivers[driverName];
-      if (!driver) {
+      if (!this._driverRegistry.has(driverName)) {
         continue;
       }
 
-      if (!DriverSupport[driverName] && typeof driver._support === 'function') {
-        try {
-          const supportResult = await driver._support();
-          DriverSupport[driverName] = !!supportResult;
-        } catch {
-          DriverSupport[driverName] = false;
-        }
-      }
+      const supported = await this._driverRegistry
+        .resolveSupport(driverName)
+        .catch(() => false);
 
       if (
-        this.supports(driverName) ||
+        (supported && this.supports(driverName)) ||
         this._isDriverForcedByInstanceConfig(driverName)
       ) {
         supportedDrivers.push(driverName);
@@ -1593,35 +1526,68 @@ export class LocalSpace implements LocalSpaceInstance {
     };
   }
 
-  private _createLifecycleScope(): LifecycleScope<this> {
+  private _createLifecycleScope(
+    receiverContext?: LifecycleReceiverContext,
+    definition?: Readonly<Driver>
+  ): LifecycleScope<this> {
     const activeInvocations: ActiveLifecycleInvocation[] = [];
+    const forwardedMethods = new Map<
+      PropertyKey,
+      (...args: unknown[]) => unknown
+    >();
     const getActiveInvocation = () =>
       activeInvocations[activeInvocations.length - 1];
     const instance = new Proxy(this, {
       get: (target, property, receiver) => {
-        const activeInvocation = getActiveInvocation();
         if (
-          activeInvocation &&
           typeof property === 'string' &&
           LifecycleReentrantMethods.has(property)
         ) {
-          return () =>
-            Promise.reject(
-              target._lifecycleReentryError(
-                property,
-                activeInvocation.lifecycle
-              )
-            );
+          const contextualValue = receiverContext?.has(property)
+            ? receiverContext.get(property)
+            : definition && property in definition
+              ? Reflect.get(definition, property, receiver)
+              : Reflect.get(target, property, target);
+          if (typeof contextualValue === 'function') {
+            const callbackReceiver =
+              receiverContext?.has(property) ||
+              (definition && property in definition)
+                ? receiver
+                : target;
+            return (...args: unknown[]) => {
+              const invocation = getActiveInvocation();
+              if (invocation) {
+                return Promise.reject(
+                  target._lifecycleReentryError(property, invocation.lifecycle)
+                );
+              }
+              return contextualValue.apply(callbackReceiver, args);
+            };
+          }
         }
-        if (activeInvocation?.receiverContext?.has(property)) {
-          return activeInvocation.receiverContext.get(property);
+        if (receiverContext?.has(property)) {
+          return receiverContext.get(property);
         }
-        return Reflect.get(target, property, receiver);
+        if (definition && property in definition) {
+          return Reflect.get(definition, property, receiver);
+        }
+        const value = Reflect.get(
+          target,
+          property,
+          receiverContext ? target : receiver
+        );
+        if (receiverContext && typeof value === 'function') {
+          const existing = forwardedMethods.get(property);
+          if (existing) return existing;
+          const forwarded = (...args: unknown[]) => value.apply(target, args);
+          forwardedMethods.set(property, forwarded);
+          return forwarded;
+        }
+        return value;
       },
       set: (target, property, value, receiver) => {
-        const activeInvocation = getActiveInvocation();
-        if (activeInvocation?.receiverContext?.has(property)) {
-          activeInvocation.receiverContext.set(property, value);
+        if (receiverContext) {
+          receiverContext.set(property, value);
           return true;
         }
         return Reflect.set(target, property, value, receiver);
@@ -1631,11 +1597,10 @@ export class LocalSpace implements LocalSpaceInstance {
       instance,
       invoke: async <T>(
         lifecycle: LifecycleCallback,
-        callback: () => T,
-        receiverContext?: LifecycleReceiverContext
+        callback: () => T
       ): Promise<Awaited<T>> => {
         const token = {};
-        activeInvocations.push({ token, lifecycle, receiverContext });
+        activeInvocations.push({ token, lifecycle });
         try {
           return await this._invokeLifecycleCallback(lifecycle, callback);
         } finally {
@@ -1707,17 +1672,17 @@ export class LocalSpace implements LocalSpaceInstance {
 
   private async _releaseActiveDriver(): Promise<void> {
     if (!this._driverInitialized) {
-      this._activeDriverClose = null;
+      this._activeDriverSession = null;
       this._dbInfo = null;
       return;
     }
 
-    const closeStorage = this._activeDriverClose;
-    if (closeStorage) {
-      await closeStorage();
+    const session = this._activeDriverSession;
+    if (session?.close) {
+      await session.close();
     }
 
-    this._activeDriverClose = null;
+    this._activeDriverSession = null;
     this._driverInitialized = false;
     this._dbInfo = null;
   }
@@ -1742,34 +1707,7 @@ export class LocalSpace implements LocalSpaceInstance {
   private async _invokeRetainedDriverCleanup(
     cleanup: DriverCleanup
   ): Promise<void> {
-    if (cleanup.scopedReceiver) {
-      const receiverContext: LifecycleReceiverContext = new Map<
-        PropertyKey,
-        unknown
-      >([
-        ['_dbInfo', cleanup.dbInfo],
-        ['_driver', cleanup.driver],
-        ['_config', cleanup.config],
-      ]);
-      try {
-        await cleanup.close(receiverContext);
-      } finally {
-        cleanup.dbInfo = (receiverContext.get('_dbInfo') ??
-          null) as DbInfo | null;
-        cleanup.config = receiverContext.get('_config') as LocalSpaceConfig;
-      }
-      return;
-    }
-
-    const activeDbInfo = this._dbInfo;
-    this._dbInfo = cleanup.dbInfo;
-
-    try {
-      await cleanup.close();
-    } finally {
-      cleanup.dbInfo = this._dbInfo;
-      this._dbInfo = activeDbInfo;
-    }
+    await cleanup.close();
   }
 
   private _createPendingDriverCleanupError(

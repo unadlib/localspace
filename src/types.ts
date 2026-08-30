@@ -157,6 +157,21 @@ export interface LocalSpaceOptions extends LocalSpaceConfig {
    * Optional plugins to attach to the instance.
    */
   plugins?: LocalSpacePlugin[];
+
+  /**
+   * Immutable driver definitions available only to this instance. Definitions
+   * are snapshotted at construction and each selection creates a new
+   * instance-owned driver session.
+   */
+  drivers?: readonly Driver[];
+}
+
+export interface DriverRegistrationOptions {
+  /**
+   * Replace a definition already registered in the same explicit global
+   * scope. Built-in and application definitions are protected by default.
+   */
+  overwrite?: boolean;
 }
 
 /**
@@ -169,10 +184,11 @@ export interface Driver {
   _driver: string;
 
   /**
-   * Initialize storage with config. The callback receiver is the
-   * stable, lifecycle-guarded LocalSpace instance used by this driver's
-   * lifecycle and operation methods; same-instance storage and lifecycle calls
-   * reject while this callback is pending.
+   * Initialize storage with config. The callback receiver is a stable,
+   * instance-owned driver session that forwards LocalSpace methods to the
+   * selecting public instance while keeping driver state off that facade.
+   * Same-instance storage and lifecycle calls reject while this callback is
+   * pending.
    */
   _initStorage(config: LocalSpaceConfig): Promise<void>;
   _initStorage(
@@ -181,13 +197,12 @@ export interface Driver {
   ): Promise<void>;
 
   /**
-   * Release resources owned by the current driver instance without deleting
-   * persisted data. The callback receiver is the same stable,
-   * lifecycle-guarded LocalSpace instance used during initialization and
-   * operations; same-instance storage and lifecycle calls reject while this
-   * callback is pending. If cleanup rejects, the same callback may be invoked
-   * again by a later lifecycle attempt, including after a failed
-   * `_initStorage()`, so implementations must make retries safe.
+   * Release resources owned by the current driver session without deleting
+   * persisted data. The callback receiver is the same stable session used
+   * during initialization and operations; same-instance storage and lifecycle
+   * calls reject while this callback is pending. If cleanup rejects, the same
+   * callback may be invoked again by a later lifecycle attempt, including
+   * after a failed `_initStorage()`, so implementations must make retries safe.
    */
   _closeStorage?(): Promise<void>;
   _closeStorage?(this: LocalSpaceInstance): Promise<void>;
@@ -363,9 +378,9 @@ export interface LocalSpaceInstance {
   destroy(): Promise<void>;
 
   /**
-   * Define a custom driver
-   * @deprecated 3.0 separates explicit global registration from
-   * construction-scoped drivers.
+   * Register a custom driver only for this instance.
+   * @deprecated Pass `drivers` at construction, or use exported
+   * `registerDriver()` for deliberate realm-wide registration.
    */
   defineDriver(driver: Driver): Promise<void>;
 

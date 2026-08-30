@@ -21,6 +21,7 @@ import type {
   StoragePrimitive,
   StorageBinary,
   StorageValue,
+  DriverRegistrationOptions,
 } from './types.js';
 
 // Create default instance
@@ -52,10 +53,12 @@ export type {
   StoragePrimitive,
   StorageBinary,
   StorageValue,
+  DriverRegistrationOptions,
 };
 export type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from './errors.js';
 export { LocalSpaceError } from './errors.js';
 export { setDeprecationWarnings } from './utils/deprecations.js';
+export { registerDriver } from './core/driver-registry.js';
 
 // Export class for creating instances
 export { LocalSpace };

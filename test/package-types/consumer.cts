@@ -1,11 +1,13 @@
 import localspace, {
   LocalSpace,
   memoryDriver,
+  registerDriver,
   setDeprecationWarnings,
   type BatchItems,
   type Driver,
   type LocalSpaceConfig,
   type LocalSpaceInstance,
+  type LocalSpaceOptions,
   type StorageValue,
   type TransactionMode,
 } from 'localspace';
@@ -18,6 +20,7 @@ const instance: LocalSpaceInstance = new LocalSpace();
 const items: BatchItems<number> = [{ key: 'count', value: 1 }];
 const mode: TransactionMode = 'readwrite';
 const options = {} as ReactNativeInstanceOptions;
+const localOptions: LocalSpaceOptions = { drivers: [memoryDriver] };
 const legacySizeResult = instance.config({ size: 4_980_736 });
 const legacySize: number | undefined = instance.config('size');
 const migrationValue: StorageValue = {
@@ -44,6 +47,7 @@ const typecheckDirectLifecycleCalls = (
   void driver._closeStorage?.();
 };
 setDeprecationWarnings(false);
+void registerDriver(customDriver, { overwrite: true });
 
 void [
   localspace,
@@ -51,6 +55,7 @@ void [
   items,
   mode,
   options,
+  localOptions,
   legacySizeResult,
   legacySize,
   migrationValue,
@@ -58,4 +63,5 @@ void [
   typecheckDirectLifecycleCalls,
   createReactNativeInstance,
   setDeprecationWarnings,
+  registerDriver,
 ];

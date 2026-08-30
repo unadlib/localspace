@@ -442,62 +442,98 @@ await localspace.setDriver(localspace.REACTNATIVEASYNCSTORAGE);
 Integration smoke test harness (official AsyncStorage Jest mock) lives in `integration/react-native-jest/`.
 Real device-runtime template (Detox on simulator/emulator) lives in `integration/react-native-detox/` with CI workflow `.github/workflows/detox-mobile.yml`.
 
-### `defineDriver(driver: Driver): Promise<void>`
+### Custom driver registration
 
-Registers a custom driver.
-
-Instance-level registration is deprecated because it mutates the realm-wide
-2.x registry. 3.0 separates explicit global registration from custom drivers
-supplied at instance construction. Keep driver definitions immutable and do not
-rely on another instance observing this call.
+Define driver state on the session receiver rather than in the shared
+definition:
 
 ```ts
-import localspace, { type Driver } from 'localspace';
+import { LocalSpace, type Driver, type LocalSpaceInstance } from 'localspace';
 
-const values = new Map<string, unknown>();
-const customDriver: Driver = {
+type CustomSession = LocalSpaceInstance & {
+  values: Map<string, unknown>;
+};
+
+const customDriver = {
   _driver: 'customDriver',
-  async _initStorage() {
-    // `this` is the LocalSpaceInstance selecting this driver.
+  async _initStorage(this: CustomSession) {
+    this.values = new Map();
   },
-  getItem: async <T>(key: string) =>
-    values.has(key) ? (values.get(key) as T) : null,
-  setItem: async <T>(key: string, value: T) => {
-    values.set(key, value);
+  async getItem<T>(this: CustomSession, key: string) {
+    return this.values.has(key) ? (this.values.get(key) as T) : null;
+  },
+  async setItem<T>(this: CustomSession, key: string, value: T) {
+    this.values.set(key, value);
     return value;
   },
-  removeItem: async (key) => {
-    values.delete(key);
+  async removeItem(this: CustomSession, key: string) {
+    this.values.delete(key);
   },
-  clear: async () => {
-    values.clear();
+  async clear(this: CustomSession) {
+    this.values.clear();
   },
-  length: async () => values.size,
-  key: async (index) => [...values.keys()][index] ?? null,
-  keys: async () => [...values.keys()],
-  iterate: async <T, U>(iterator: (value: T, key: string, n: number) => U) => {
+  async length(this: CustomSession) {
+    return this.values.size;
+  },
+  async key(this: CustomSession, index: number) {
+    return [...this.values.keys()][index] ?? null;
+  },
+  async keys(this: CustomSession) {
+    return [...this.values.keys()];
+  },
+  async iterate<T, U>(
+    this: CustomSession,
+    iterator: (value: T, key: string, n: number) => U
+  ) {
     let iteration = 1;
-    for (const [key, value] of values) {
+    for (const [key, value] of this.values) {
       const result = iterator(value as T, key, iteration++);
       if (result !== undefined) return result;
     }
     return undefined as U;
   },
-};
+} as Driver;
 
-await localspace.defineDriver(customDriver);
-await localspace.setDriver('customDriver');
+const store = new LocalSpace({
+  driver: customDriver._driver,
+  drivers: [customDriver],
+});
+await store.ready();
 ```
 
-`_initStorage()` and optional `_closeStorage()` are typed with the selecting
-`LocalSpaceInstance` as their `this` receiver. Use a method or a non-arrow
-function when the callback needs that receiver. It is lifecycle-guarded while
-the callback is pending, so same-instance storage and lifecycle calls reject
-with `details.reason === 'lifecycle-reentrancy'` instead of self-deadlocking.
-The same receiver object is used for initialization, driver operations, and
-cleanup, so identity-keyed driver state remains available throughout its
-lifetime. If `_closeStorage()` rejects, a later `close()` or `setDriver()` can
-invoke it again; custom drivers must make cleanup retries safe.
+Construction-scoped definitions are visible only to the new instance. Use the
+explicit module-level API only when every LocalSpace instance in the current
+JavaScript realm should see the definition:
+
+```ts
+import { registerDriver } from 'localspace';
+
+await registerDriver(customDriver);
+```
+
+`registerDriver()` rejects duplicate names by default. Passing
+`{ overwrite: true }` deliberately replaces a definition in the global scope;
+already initialized sessions keep the snapshot they selected.
+
+`instance.defineDriver(driver)` remains as a deprecated 2.x bridge. It now
+registers only on that instance and never changes what another instance sees.
+
+The driver definition is cloned by property descriptor and frozen; LocalSpace
+does not freeze, add methods to, or otherwise mutate the caller-owned object.
+Changing that object after registration cannot change an existing registry
+snapshot.
+
+`_initStorage()` and optional `_closeStorage()` are structurally typed with
+`LocalSpaceInstance` as their `this` receiver, but the runtime object is a
+private driver session rather than the public facade. Use a method or a
+non-arrow function when the callback needs that receiver. The session is
+lifecycle-guarded while the callback is pending, so same-instance storage and
+lifecycle calls reject with `details.reason === 'lifecycle-reentrancy'` instead
+of self-deadlocking. The same receiver object is used for initialization,
+driver operations, and cleanup; two instances selecting one definition receive
+different sessions and different state. If `_closeStorage()` rejects, a later
+`close()` or `setDriver()` can invoke it again; custom drivers must make cleanup
+retries safe.
 
 `_support`, batch methods, `runTransaction()`, and `dropInstance()` are optional
 driver capabilities. Calling an omitted capability through a selected instance
@@ -505,7 +541,7 @@ rejects with `UNSUPPORTED_OPERATION`.
 
 ### `getDriver(driverName: string): Promise<Driver>`
 
-Returns a registered driver by name.
+Returns the immutable definition snapshot visible to this instance.
 
 ```ts
 const idbDriver = await localspace.getDriver(localspace.INDEXEDDB);
@@ -642,6 +678,11 @@ interface LocalSpaceConfig {
   pluginInitPolicy?: 'fail' | 'disable-and-continue';
   pluginErrorPolicy?: 'strict' | 'lenient';
   strictValues?: boolean; // Opt in to the 3.0 StorageValue validator
+}
+
+interface LocalSpaceOptions extends LocalSpaceConfig {
+  plugins?: LocalSpacePlugin[];
+  drivers?: readonly Driver[]; // Definitions visible only to this instance
 }
 ```
 

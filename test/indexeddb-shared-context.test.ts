@@ -51,7 +51,9 @@ describe('IndexedDB shared context lifecycle', () => {
     await instance.setDriver([instance.INDEXEDDB]);
     await instance.setItem('persisted', 'value');
     const firstDbInfo = instance._dbInfo!;
-    expect(testHooks.getDbContext(firstDbInfo)?.forages).toEqual([instance]);
+    const firstSession = testHooks.getDbContext(firstDbInfo)?.forages[0];
+    expect(firstSession).toBeDefined();
+    expect(firstSession).not.toBe(instance);
 
     await instance.setDriver([instance.MEMORY]);
     await instance.ready();
@@ -63,7 +65,10 @@ describe('IndexedDB shared context lifecycle', () => {
     await instance.ready();
 
     const currentDbInfo = instance._dbInfo!;
-    expect(testHooks.getDbContext(currentDbInfo)?.forages).toEqual([instance]);
+    const currentSessions = testHooks.getDbContext(currentDbInfo)?.forages;
+    expect(currentSessions).toHaveLength(1);
+    expect(currentSessions?.[0]).not.toBe(instance);
+    expect(currentSessions?.[0]).not.toBe(firstSession);
     await expect(instance.getItem('persisted')).resolves.toBe('value');
     await instance.dropInstance();
     await instance.close();
@@ -87,10 +92,14 @@ describe('IndexedDB shared context lifecycle', () => {
     await second.ready();
 
     const dbInfo = first._dbInfo!;
-    expect(testHooks.getDbContext(dbInfo)?.forages).toEqual([first, second]);
+    const sessions = testHooks.getDbContext(dbInfo)?.forages.slice() ?? [];
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0]).not.toBe(first);
+    expect(sessions[1]).not.toBe(second);
+    expect(sessions[0]).not.toBe(sessions[1]);
 
     await first.close();
-    expect(testHooks.getDbContext(dbInfo)?.forages).toEqual([second]);
+    expect(testHooks.getDbContext(dbInfo)?.forages).toEqual([sessions[1]]);
     await second.setItem('key', 'value');
     await expect(second.getItem('key')).resolves.toBe('value');
 
@@ -124,11 +133,14 @@ describe('IndexedDB shared context lifecycle', () => {
 
     const dbInfo = first._dbInfo!;
     const context = testHooks.getDbContext(dbInfo);
-    expect(context?.forages).toEqual([first, second]);
+    const sessions = context?.forages.slice() ?? [];
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0]).not.toBe(first);
+    expect(sessions[1]).not.toBe(second);
 
     await first.dropInstance({ name });
     expect(testHooks.getDbContext(dbInfo)).toBe(context);
-    expect(context?.forages).toEqual([first, second]);
+    expect(context?.forages).toEqual(sessions);
 
     await first.setItem('first', 'one');
     expect(first._dbInfo?.db).toBe(second._dbInfo?.db);
@@ -137,7 +149,7 @@ describe('IndexedDB shared context lifecycle', () => {
     await expect(second.getItem('first')).resolves.toBe('one');
 
     await first.close();
-    expect(testHooks.getDbContext(dbInfo)?.forages).toEqual([second]);
+    expect(testHooks.getDbContext(dbInfo)?.forages).toEqual([sessions[1]]);
 
     const secondDbInfo = second._dbInfo!;
     await second.dropInstance({ name });
@@ -173,10 +185,12 @@ describe('IndexedDB shared context lifecycle', () => {
       expect(testHooks.getDbContext(bucketInstance._dbInfo!)).toBe(
         testHooks.getDbContext(defaultInstance._dbInfo!)
       );
-      expect(testHooks.getDbContext(bucketInstance._dbInfo!)?.forages).toEqual([
-        bucketInstance,
-        defaultInstance,
-      ]);
+      const sessions =
+        testHooks.getDbContext(bucketInstance._dbInfo!)?.forages ?? [];
+      expect(sessions).toHaveLength(2);
+      expect(sessions[0]).not.toBe(bucketInstance);
+      expect(sessions[1]).not.toBe(defaultInstance);
+      expect(sessions[0]).not.toBe(sessions[1]);
     } finally {
       await bucketInstance.close();
       await defaultInstance.close();

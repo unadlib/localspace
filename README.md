@@ -160,6 +160,31 @@ await localspace.setDriver([
 
 The memory driver is runtime-only: data is shared by `name`/`storeName` while the page is alive and is lost on reload. It is not part of the default fallback order so persistent-storage failures remain visible unless you opt in.
 
+### Custom Drivers
+
+Pass immutable custom-driver definitions when constructing the instance that
+uses them:
+
+```ts
+import { LocalSpace } from 'localspace';
+
+const store = new LocalSpace({
+  driver: customDriver._driver,
+  drivers: [customDriver],
+});
+```
+
+This registration is instance-scoped. For deliberate realm-wide registration,
+use `await registerDriver(customDriver)` from the main `localspace` entry.
+Duplicate global names reject unless `{ overwrite: true }` is explicit.
+Deprecated `instance.defineDriver()` is also instance-scoped and does not leak
+definitions to other instances.
+
+LocalSpace snapshots and freezes its definition without mutating the supplied
+object. Each instance selection creates a distinct private session receiver;
+that same receiver is used for driver initialization, operations, and cleanup,
+so session state never has to be attached to the public facade.
+
 ### Instance Lifecycle
 
 Dispose an isolated instance without deleting its data by calling `close()`:

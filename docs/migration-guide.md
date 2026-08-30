@@ -46,21 +46,21 @@ import { setDeprecationWarnings } from 'localspace';
 setDeprecationWarnings(false);
 ```
 
-| Deprecated 2.x behavior                                                   | Conservative migration                                                                    |
-| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| AES-CBC or AES-CTR configuration                                          | Use the matching read-only 2.1 reader to migrate data to AES-GCM; legacy writes reject    |
-| `size` configuration                                                      | Remove it; built-in drivers have always ignored it as a quota control                     |
-| `destroy()`                                                               | Use idempotent, non-destructive `close()`                                                 |
-| Mutating the object returned by `config()`                                | Treat configuration as readonly and pass options to `createInstance()`                    |
-| Calling `config(options)`                                                 | Move every option to the constructor or `createInstance(options)`                         |
-| Calling `instance.defineDriver()`                                         | Prepare for explicit global or construction-scoped driver registration                    |
-| `prewarmTransactions`, `connectionIdleMs`, or `maxConcurrentTransactions` | Remove reliance on these public tuning options; 3.0 keeps only benchmark-backed internals |
-| Storage Bucket fallback to default IndexedDB                              | Feature-detect before 3.0 and handle initialization failure explicitly                    |
-| Memory snapshot-only transactions                                         | Do not rely on concurrent isolation until the 3.0 store-scoped contract                   |
-| Assuming `iterate()` always returns `U`                                   | Handle `undefined` when no callback invocation terminates iteration early                 |
-| Matching batch and single hooks in one custom plugin                      | Define one hook form per phase; retain the 2.x `isBatch` guard until migrated             |
-| React Native adapter auto-detection                                       | Import `localspace/react-native` and inject `reactNativeAsyncStorage` explicitly          |
-| Package deep imports                                                      | Import only `localspace` or `localspace/react-native`                                     |
+| Deprecated 2.x behavior                                                   | Conservative migration                                                                                     |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| AES-CBC or AES-CTR configuration                                          | Use the matching read-only 2.1 reader to migrate data to AES-GCM; legacy writes reject                     |
+| `size` configuration                                                      | Remove it; built-in drivers have always ignored it as a quota control                                      |
+| `destroy()`                                                               | Use idempotent, non-destructive `close()`                                                                  |
+| Mutating the object returned by `config()`                                | Treat configuration as readonly and pass options to `createInstance()`                                     |
+| Calling `config(options)`                                                 | Move every option to the constructor or `createInstance(options)`                                          |
+| Calling `instance.defineDriver()`                                         | Pass `drivers` at construction, or call exported `registerDriver()` for deliberate realm-wide registration |
+| `prewarmTransactions`, `connectionIdleMs`, or `maxConcurrentTransactions` | Remove reliance on these public tuning options; 3.0 keeps only benchmark-backed internals                  |
+| Storage Bucket fallback to default IndexedDB                              | Feature-detect before 3.0 and handle initialization failure explicitly                                     |
+| Memory snapshot-only transactions                                         | Do not rely on concurrent isolation until the 3.0 store-scoped contract                                    |
+| Assuming `iterate()` always returns `U`                                   | Handle `undefined` when no callback invocation terminates iteration early                                  |
+| Matching batch and single hooks in one custom plugin                      | Define one hook form per phase; retain the 2.x `isBatch` guard until migrated                              |
+| React Native adapter auto-detection                                       | Import `localspace/react-native` and inject `reactNativeAsyncStorage` explicitly                           |
+| Package deep imports                                                      | Import only `localspace` or `localspace/react-native`                                                      |
 
 Package deep imports have no executable compatibility entry on which a runtime
 warning could be attached: the `exports` map rejects them immediately. The
