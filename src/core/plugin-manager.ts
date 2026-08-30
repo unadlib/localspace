@@ -7,6 +7,7 @@ import type {
   LocalSpacePlugin,
   PluginContext,
   PluginErrorInfo,
+  PluginIterateSummary,
   PluginOperation,
   PluginStage,
 } from '../types.js';
@@ -194,9 +195,7 @@ export class PluginManager {
     return this.pluginRegistry.length > 0;
   }
 
-  assertNoStorageTransformBypass(
-    operation: 'iterate' | 'runTransaction'
-  ): void {
+  assertNoStorageTransformBypass(operation: 'runTransaction'): void {
     const pluginNames = [
       ...new Set(
         this.getActivePlugins()
@@ -217,6 +216,15 @@ export class PluginManager {
         plugins: pluginNames,
         reason: 'storage-transform-plugin-bypass',
       }
+    );
+  }
+
+  needsLogicalReadScan(): boolean {
+    return this.getActivePlugins().some(
+      (plugin) =>
+        getBuiltInStorageTransformKind(plugin) !== null ||
+        typeof plugin.afterGet === 'function' ||
+        typeof plugin.afterGetItems === 'function'
     );
   }
 
@@ -692,7 +700,7 @@ export class PluginManager {
 
   private createPreparedKeyItem(
     key: string,
-    operation: 'getItem' | 'removeItem'
+    operation: PluginOperation
   ): PreparedKeyItem {
     const context = this.createContext(operation);
     context.operationState.isBatch = true;
@@ -713,7 +721,7 @@ export class PluginManager {
   private reconcilePreparedKeyItems(
     previousItems: PreparedKeyItem[],
     keys: string[],
-    operation: 'getItem' | 'removeItem'
+    operation: PluginOperation
   ): PreparedKeyItem[] {
     const previousByKey = new Map<string, PreparedKeyItem[]>();
     for (const item of previousItems) {
@@ -800,11 +808,19 @@ export class PluginManager {
     return this.beforeKeyItems(keys, context, 'getItems');
   }
 
+  prepareReadItems(keys: string[], context: PluginContext): PreparedKeys {
+    const operation = context.operation ?? 'getItems';
+    const items = keys.map((key) => this.createPreparedKeyItem(key, operation));
+    this.updateBatchContexts(items, context);
+    return { keys: keys.slice(), items };
+  }
+
   async afterGetItems<T>(
     entries: BatchResponse<T>,
     context: PluginContext,
     preparedItems: PreparedKeyItem[],
-    role: PluginHookRole = 'all'
+    role: PluginHookRole = 'all',
+    operation: PluginOperation = 'getItems'
   ): Promise<PreparedBatchResponse<T>> {
     let current = entries;
     let items = preparedItems.slice();
@@ -813,7 +829,7 @@ export class PluginManager {
       items = this.reconcilePreparedKeyItems(
         items,
         current.map(({ key }) => key),
-        'getItem'
+        operation === 'getItems' ? 'getItem' : operation
       );
       this.updateBatchContexts(items, context);
     };
@@ -825,7 +841,7 @@ export class PluginManager {
           plugin,
           () => plugin.afterGetItems!(current, context),
           'after',
-          'getItems',
+          operation,
           undefined,
           context,
           current
@@ -845,7 +861,7 @@ export class PluginManager {
             () =>
               plugin.afterGet!(entry.key, entry.value, items[index].context),
             'after',
-            'getItems',
+            operation,
             entry.key,
             items[index].context,
             entry.value
@@ -904,6 +920,161 @@ export class PluginManager {
         );
       }
     }
+  }
+
+  private async invokeOperationObservers(
+    operation: PluginOperation,
+    stage: 'before' | 'after',
+    context: PluginContext,
+    executorFor: (
+      plugin: LocalSpacePlugin
+    ) => (() => Promise<void> | void) | undefined,
+    key?: string
+  ): Promise<void> {
+    for (const plugin of this.getActivePlugins({
+      reverse: stage === 'after',
+    })) {
+      const executor = executorFor(plugin);
+      if (!executor) continue;
+      await this.invokeVoidHook(
+        plugin,
+        executor,
+        stage,
+        operation,
+        key,
+        context
+      );
+    }
+  }
+
+  beforeIterate(context: PluginContext): Promise<void> {
+    return this.invokeOperationObservers(
+      'iterate',
+      'before',
+      context,
+      (plugin) =>
+        plugin.beforeIterate ? () => plugin.beforeIterate!(context) : undefined
+    );
+  }
+
+  afterIterate(
+    summary: PluginIterateSummary,
+    context: PluginContext
+  ): Promise<void> {
+    const snapshot = Object.freeze({ ...summary });
+    return this.invokeOperationObservers(
+      'iterate',
+      'after',
+      context,
+      (plugin) =>
+        plugin.afterIterate
+          ? () => plugin.afterIterate!(snapshot, context)
+          : undefined
+    );
+  }
+
+  beforeKeys(context: PluginContext): Promise<void> {
+    return this.invokeOperationObservers('keys', 'before', context, (plugin) =>
+      plugin.beforeKeys ? () => plugin.beforeKeys!(context) : undefined
+    );
+  }
+
+  afterKeys(keys: string[], context: PluginContext): Promise<void> {
+    const snapshot = Object.freeze(keys.slice());
+    return this.invokeOperationObservers('keys', 'after', context, (plugin) =>
+      plugin.afterKeys ? () => plugin.afterKeys!(snapshot, context) : undefined
+    );
+  }
+
+  beforeKey(keyIndex: number, context: PluginContext): Promise<void> {
+    return this.invokeOperationObservers('key', 'before', context, (plugin) =>
+      plugin.beforeKey ? () => plugin.beforeKey!(keyIndex, context) : undefined
+    );
+  }
+
+  afterKey(
+    keyIndex: number,
+    key: string | null,
+    context: PluginContext
+  ): Promise<void> {
+    return this.invokeOperationObservers(
+      'key',
+      'after',
+      context,
+      (plugin) =>
+        plugin.afterKey
+          ? () => plugin.afterKey!(keyIndex, key, context)
+          : undefined,
+      key ?? undefined
+    );
+  }
+
+  beforeLength(context: PluginContext): Promise<void> {
+    return this.invokeOperationObservers(
+      'length',
+      'before',
+      context,
+      (plugin) =>
+        plugin.beforeLength ? () => plugin.beforeLength!(context) : undefined
+    );
+  }
+
+  afterLength(length: number, context: PluginContext): Promise<void> {
+    return this.invokeOperationObservers(
+      'length',
+      'after',
+      context,
+      (plugin) =>
+        plugin.afterLength
+          ? () => plugin.afterLength!(length, context)
+          : undefined
+    );
+  }
+
+  beforeClear(context: PluginContext): Promise<void> {
+    return this.invokeOperationObservers(
+      'clear',
+      'before',
+      context,
+      (plugin) =>
+        plugin.beforeClear ? () => plugin.beforeClear!(context) : undefined
+    );
+  }
+
+  afterClear(context: PluginContext): Promise<void> {
+    return this.invokeOperationObservers('clear', 'after', context, (plugin) =>
+      plugin.afterClear ? () => plugin.afterClear!(context) : undefined
+    );
+  }
+
+  beforeDropInstance(
+    options: LocalSpaceConfigSnapshot | undefined,
+    context: PluginContext
+  ): Promise<void> {
+    return this.invokeOperationObservers(
+      'dropInstance',
+      'before',
+      context,
+      (plugin) =>
+        plugin.beforeDropInstance
+          ? () => plugin.beforeDropInstance!(options, context)
+          : undefined
+    );
+  }
+
+  afterDropInstance(
+    options: LocalSpaceConfigSnapshot | undefined,
+    context: PluginContext
+  ): Promise<void> {
+    return this.invokeOperationObservers(
+      'dropInstance',
+      'after',
+      context,
+      (plugin) =>
+        plugin.afterDropInstance
+          ? () => plugin.afterDropInstance!(options, context)
+          : undefined
+    );
   }
 
   async destroyInitialized(): Promise<void> {

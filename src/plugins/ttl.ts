@@ -14,6 +14,7 @@ import {
   hasPluginInternalOperation,
   markBuiltInStorageTransformPlugin,
   markPluginBackgroundTaskController,
+  markPluginValueHidden,
   TTL_BACKGROUND_CLEANUP_OPERATION,
   type PluginBackgroundTaskPause,
 } from '../core/plugin-capabilities.js';
@@ -277,7 +278,11 @@ const cleanupExpired = (
   }
   const cleanupPromise = (async () => {
     const batchSize = options.cleanupBatchSize ?? 100;
-    const keys = await context.instance.keys();
+    const keys = await (
+      context.instance.keys as (
+        internalOperation: typeof TTL_BACKGROUND_CLEANUP_OPERATION
+      ) => Promise<string[]>
+    )(TTL_BACKGROUND_CLEANUP_OPERATION);
     const batches = chunkArray(keys, batchSize);
 
     for (const batch of batches) {
@@ -357,6 +362,7 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
     }
 
     if (payload.expiresAt <= Date.now()) {
+      markPluginValueHidden(context, key);
       const removed = await context.instance.removeItem(key).then(
         () => true,
         () => false
@@ -421,6 +427,7 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
         return { key, value };
       }
       if (payload.expiresAt <= now) {
+        markPluginValueHidden(context, key);
         expiredKeys.push(key);
         expiredEntries.push({
           key,

@@ -2,8 +2,8 @@ import type { LocalSpacePlugin, PluginContext } from '../src';
 
 export interface StorageNotification {
   driver: string | null;
-  key: string;
-  operation: 'set' | 'remove';
+  key: string | null;
+  operation: 'set' | 'remove' | 'clear' | 'dropInstance';
   source: string;
   timestamp: number;
 }
@@ -45,8 +45,11 @@ const isStorageNotification = (
   const candidate = value as Partial<StorageNotification>;
   return (
     (candidate.driver === null || typeof candidate.driver === 'string') &&
-    typeof candidate.key === 'string' &&
-    (candidate.operation === 'set' || candidate.operation === 'remove') &&
+    (candidate.key === null || typeof candidate.key === 'string') &&
+    (candidate.operation === 'set' ||
+      candidate.operation === 'remove' ||
+      candidate.operation === 'clear' ||
+      candidate.operation === 'dropInstance') &&
     typeof candidate.source === 'string' &&
     typeof candidate.timestamp === 'number' &&
     Number.isFinite(candidate.timestamp)
@@ -72,8 +75,8 @@ const getMetadata = (context: PluginContext): NotificationMetadata => {
 };
 
 /**
- * Example only: broadcasts best-effort single-item change notifications.
- * It does not replicate values, guarantee delivery/order, or handle batches.
+ * Example only: broadcasts best-effort item, batch, clear, and drop change
+ * notifications. It does not replicate values or guarantee delivery/order.
  * Default channels are isolated by driver and storage namespace. A custom
  * shared channel can use message.driver to filter notifications by backend.
  */
@@ -116,7 +119,7 @@ export const broadcastNotificationPlugin = (
 
   const send = (
     context: PluginContext,
-    key: string,
+    key: string | null,
     operation: StorageNotification['operation']
   ) => {
     const metadata = getMetadata(context);
@@ -188,6 +191,12 @@ export const broadcastNotificationPlugin = (
     },
     afterRemove: (key, context) => {
       send(context, key, 'remove');
+    },
+    afterClear: (context) => {
+      send(context, null, 'clear');
+    },
+    afterDropInstance: (_options, context) => {
+      send(context, null, 'dropInstance');
     },
   };
 };

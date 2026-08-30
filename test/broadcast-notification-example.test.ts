@@ -51,6 +51,8 @@ describe('broadcast notification plugin example', () => {
     expect(plugin.onDestroy).toBeTypeOf('function');
     expect(plugin.afterSet).toBeTypeOf('function');
     expect(plugin.afterRemove).toBeTypeOf('function');
+    expect(plugin.afterClear).toBeTypeOf('function');
+    expect(plugin.afterDropInstance).toBeTypeOf('function');
   });
 
   it('routes rejected message handlers through onError', async () => {
@@ -164,6 +166,30 @@ describe('broadcast notification plugin example', () => {
       expect.objectContaining({ key: 'b', operation: 'set' }),
       expect.objectContaining({ key: 'a', operation: 'remove' }),
       expect.objectContaining({ key: 'b', operation: 'remove' }),
+    ]);
+    await store.close();
+  });
+
+  it('broadcasts clear and drop notifications once per operation', async () => {
+    vi.stubGlobal('BroadcastChannel', BroadcastChannelMock);
+    const name = `broadcast-destructive-${Math.random().toString(36).slice(2)}`;
+    const store = localspace.createInstance({
+      name,
+      storeName: 'notifications',
+      plugins: [broadcastNotificationPlugin()],
+    });
+    await store.setDriver([store.MEMORY]);
+
+    await store.setItem('a', 1);
+    await store.clear();
+    await store.setItem('b', 2);
+    await store.dropInstance({ name, storeName: 'notifications' });
+
+    expect(BroadcastChannelMock.instances[0].messages).toEqual([
+      expect.objectContaining({ key: 'a', operation: 'set' }),
+      expect.objectContaining({ key: null, operation: 'clear' }),
+      expect.objectContaining({ key: 'b', operation: 'set' }),
+      expect.objectContaining({ key: null, operation: 'dropInstance' }),
     ]);
     await store.close();
   });

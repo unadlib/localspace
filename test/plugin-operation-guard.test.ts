@@ -58,24 +58,16 @@ describe.each(TRANSFORM_PLUGINS)(
       expect(runner).not.toHaveBeenCalled();
     });
 
-    it('rejects iterate before invoking the driver or callback', async () => {
-      const driverSpy = vi.spyOn(memoryDriver, 'iterate');
+    it('decodes logical values before invoking iterate callbacks', async () => {
       const callback = vi.fn();
       const store = await createMemoryStore(`guard-iterate-${name}`, [
         create(),
       ]);
+      await store.setItem('secret', 'plaintext');
 
-      await expect(store.iterate(callback)).rejects.toMatchObject({
-        code: 'UNSUPPORTED_OPERATION',
-        details: {
-          operation: 'iterate',
-          plugins: [name],
-          reason: 'storage-transform-plugin-bypass',
-        },
-      });
+      await expect(store.iterate(callback)).resolves.toBeUndefined();
 
-      expect(driverSpy).not.toHaveBeenCalled();
-      expect(callback).not.toHaveBeenCalled();
+      expect(callback).toHaveBeenCalledWith('plaintext', 'secret', 1);
     });
   }
 );

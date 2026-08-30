@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LocalSpace } from '../src/localspace';
-import localspace from '../src/index';
+import localspace, { ttlPlugin } from '../src/index';
 import type { ReactNativeAsyncStorage } from '../src/types';
 import {
   createReactNativeInstance,
@@ -163,6 +163,28 @@ describe('react native async storage driver', () => {
       { key: 'missing', value: null },
     ]);
     expect(await instance.length()).toBe(0);
+  });
+
+  it('exposes a TTL-filtered logical key view', async () => {
+    const instance = new LocalSpace({
+      name: 'rn-logical-ttl',
+      storeName: 'rn_logical_ttl',
+      reactNativeAsyncStorage: asyncStorage,
+      plugins: [ttlPlugin({ keyTTL: { expired: 5 } })],
+    });
+    await withReactNativeDriver(instance);
+    await instance.ready();
+    await instance.setItems([
+      { key: 'expired', value: 'gone' },
+      { key: 'stored-null', value: null },
+    ]);
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    await expect(instance.keys()).resolves.toEqual(['stored-null']);
+    await expect(instance.key(0)).resolves.toBe('stored-null');
+    await expect(instance.length()).resolves.toBe(1);
+
+    await instance.close();
   });
 
   it('rejects runTransaction without invoking the runner', async () => {

@@ -11,6 +11,8 @@ import localspace, {
   type LocalSpaceCapabilities,
   type LocalSpaceInstance,
   type LocalSpaceOptions,
+  type LocalSpacePlugin,
+  type PluginIterateSummary,
   type StorageValue,
   type TransactionMode,
 } from 'localspace';
@@ -35,7 +37,29 @@ void instance.setItem('migration', migrationValue);
 void instance.setItems([{ key: 'migration', value: migrationValue }]);
 void instance.getItem<StorageValue>('migration');
 void instance.getItems<StorageValue>(['migration']);
-void instance.iterate<StorageValue>(() => undefined);
+const iterateResult: Promise<string | undefined> = instance.iterate<
+  StorageValue,
+  string
+>(async () => 'done');
+const observerPlugin: LocalSpacePlugin = {
+  name: 'package-types-observer',
+  afterIterate(summary: Readonly<PluginIterateSummary>) {
+    void summary.iterations;
+  },
+  afterKeys(keys) {
+    void keys.length;
+  },
+  afterKey(index, key) {
+    void [index, key];
+  },
+  afterLength(length) {
+    void length;
+  },
+  afterClear() {},
+  afterDropInstance(options) {
+    void options?.name;
+  },
+};
 void instance.runTransaction('readwrite', async (transaction) => {
   await transaction.set('migration', migrationValue);
   await transaction.get<StorageValue>('migration');
@@ -102,6 +126,8 @@ void [
   selectedCapabilities,
   configSnapshot,
   migrationValue,
+  iterateResult,
+  observerPlugin,
   customDriver,
   typecheckDirectLifecycleCalls,
   typecheckRemovedApis,

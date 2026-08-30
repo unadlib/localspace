@@ -29,6 +29,7 @@ import memoryDriver from './drivers/memory.js';
 import { PluginManager } from './core/plugin-manager.js';
 import { createConfigSnapshot, normalizeConfigOptions } from './core/config.js';
 import {
+  isPluginValueHidden,
   markPluginInternalOperation,
   type PluginBackgroundTaskPause,
   type PluginInternalOperation,
@@ -312,13 +313,23 @@ export class LocalSpace implements LocalSpaceInstance {
     )) as LocalSpaceInstance['getItems'];
 
   iterate = <T extends StorageValue = StorageValue, U = void>(
-    iteratorCallback: (value: T, key: string, iterationNumber: number) => U
-  ): Promise<U> => this._dispatchOperation<U>('iterate', [iteratorCallback]);
+    iteratorCallback: (
+      value: T,
+      key: string,
+      iterationNumber: number
+    ) => U | Promise<U>
+  ): Promise<U | undefined> =>
+    this._dispatchOperation<U | undefined>('iterate', [iteratorCallback]);
 
   key = (keyIndex: number): Promise<string | null> =>
     this._dispatchOperation<string | null>('key', [keyIndex]);
 
-  keys = (): Promise<string[]> => this._dispatchOperation('keys', []);
+  keys: LocalSpaceInstance['keys'] = ((
+    internalOperation?: PluginInternalOperation
+  ) =>
+    this._dispatchOperation('keys', [
+      internalOperation,
+    ])) as LocalSpaceInstance['keys'];
 
   length = (): Promise<number> => this._dispatchOperation('length', []);
 
@@ -890,6 +901,16 @@ export class LocalSpace implements LocalSpaceInstance {
         case 'runTransaction':
           implementation = this._createRunTransactionWrapper(original);
           break;
+        case 'clear':
+          if (hasPlugins) {
+            implementation = this._createClearWrapper(original);
+          }
+          break;
+        case 'dropInstance':
+          if (hasPlugins) {
+            implementation = this._createDropInstanceWrapper(original);
+          }
+          break;
         case 'getItem':
           implementation = hasPlugins
             ? this._createGetItemWrapper(original)
@@ -911,10 +932,32 @@ export class LocalSpace implements LocalSpaceInstance {
           }
           break;
         case 'iterate': {
-          const recordAware = this._createStoredRecordIterateWrapper(original);
-          implementation = hasPlugins
-            ? this._createStorageTransformGuard(recordAware, operation)
-            : recordAware;
+          implementation = this._createIterateWrapper(original, hasPlugins);
+          break;
+        }
+        case 'keys':
+          if (hasPlugins) {
+            implementation = this._createKeysWrapper(
+              original,
+              session.operations.iterate
+            );
+          }
+          break;
+        case 'key':
+          if (hasPlugins) {
+            implementation = this._createKeyWrapper(
+              original,
+              session.operations.iterate
+            );
+          }
+          break;
+        case 'length': {
+          if (hasPlugins) {
+            implementation = this._createLengthWrapper(
+              original,
+              session.operations.iterate
+            );
+          }
           break;
         }
       }
@@ -1281,30 +1324,190 @@ export class LocalSpace implements LocalSpaceInstance {
     }) as typeof this.removeItems;
   }
 
-  private _createStorageTransformGuard(
-    original: RawDriverMethod,
-    operation: 'iterate' | 'runTransaction'
-  ): RawDriverMethod {
-    return async (...args: unknown[]) => {
-      this._assertOpen(operation);
-      this._pluginManager.assertNoStorageTransformBypass(operation);
-      return original(...args);
+  private _createClearWrapper(original: RawDriverMethod): RawDriverMethod {
+    return async () => {
+      await this._ensurePluginsInitialized('clear');
+      const context = this._pluginManager.createContext('clear');
+      await this._pluginManager.beforeClear(context);
+      await original();
+      await this._pluginManager.afterClear(context);
     };
   }
 
-  private _createStoredRecordIterateWrapper(
+  private _createDropInstanceWrapper(
     original: RawDriverMethod
   ): RawDriverMethod {
-    return (
+    return async (options?: LocalSpaceConfig) => {
+      await this._ensurePluginsInitialized('dropInstance');
+      const context = this._pluginManager.createContext('dropInstance');
+      const optionsSnapshot = options
+        ? createConfigSnapshot({ ...options })
+        : undefined;
+      await this._pluginManager.beforeDropInstance(optionsSnapshot, context);
+      await original(options);
+      await this._pluginManager.afterDropInstance(optionsSnapshot, context);
+    };
+  }
+
+  private async _materializeLogicalEntries(
+    originalIterate: RawDriverMethod,
+    context?: ReturnType<PluginManager['createContext']>,
+    internalOperation?: PluginInternalOperation
+  ): Promise<Array<{ key: string; value: unknown }>> {
+    const storedEntries: BatchResponse<unknown> = [];
+    await originalIterate((value: unknown, key: string) => {
+      storedEntries.push({ key, value });
+      return undefined;
+    });
+
+    if (!context) {
+      return storedEntries.map(({ key, value }) => ({
+        key,
+        value: decodeStoredRecordValue(value),
+      }));
+    }
+
+    const prepared = this._pluginManager.prepareReadItems(
+      storedEntries.map(({ key }) => key),
+      context
+    );
+    for (const item of prepared.items) {
+      markPluginInternalOperation(item.context, internalOperation);
+    }
+    const operation = context.operation ?? 'getItems';
+    const storageResult = await this._pluginManager.afterGetItems(
+      storedEntries,
+      context,
+      prepared.items,
+      'storage-transform',
+      operation
+    );
+    const logicalResult = await this._pluginManager.afterGetItems(
+      storageResult.entries.map(({ key, value }) => ({
+        key,
+        value: decodeStoredRecordValue(value),
+      })),
+      context,
+      storageResult.items,
+      'logical',
+      operation
+    );
+
+    return logicalResult.entries.filter((entry, index) => {
+      const item = logicalResult.items[index];
+      const candidateKeys = [
+        entry.key,
+        item?.targetKey,
+        item?.requestedKey,
+      ].filter((key): key is string => typeof key === 'string');
+      return !candidateKeys.some(
+        (key) =>
+          isPluginValueHidden(context, key) ||
+          (item ? isPluginValueHidden(item.context, key) : false)
+      );
+    });
+  }
+
+  private _createKeysWrapper(
+    original: RawDriverMethod,
+    originalIterate: RawDriverMethod
+  ): RawDriverMethod {
+    return async (internalOperation?: PluginInternalOperation) => {
+      await this._ensurePluginsInitialized('keys');
+      const context = this._pluginManager.createContext('keys');
+      markPluginInternalOperation(context, internalOperation);
+      await this._pluginManager.beforeKeys(context);
+      const result = this._pluginManager.needsLogicalReadScan()
+        ? (
+            await this._materializeLogicalEntries(
+              originalIterate,
+              context,
+              internalOperation
+            )
+          ).map(({ key }) => key)
+        : ((await original()) as string[]);
+      await this._pluginManager.afterKeys(result, context);
+      return result;
+    };
+  }
+
+  private _createKeyWrapper(
+    original: RawDriverMethod,
+    originalIterate: RawDriverMethod
+  ): RawDriverMethod {
+    return async (keyIndex: number) => {
+      await this._ensurePluginsInitialized('key');
+      const context = this._pluginManager.createContext('key');
+      await this._pluginManager.beforeKey(keyIndex, context);
+      const result = this._pluginManager.needsLogicalReadScan()
+        ? ((await this._materializeLogicalEntries(originalIterate, context))[
+            keyIndex
+          ]?.key ?? null)
+        : ((await original(keyIndex)) as string | null);
+      await this._pluginManager.afterKey(keyIndex, result, context);
+      return result;
+    };
+  }
+
+  private _createLengthWrapper(
+    original: RawDriverMethod,
+    originalIterate: RawDriverMethod
+  ): RawDriverMethod {
+    return async () => {
+      await this._ensurePluginsInitialized('length');
+      const context = this._pluginManager.createContext('length');
+      await this._pluginManager.beforeLength(context);
+      const result = this._pluginManager.needsLogicalReadScan()
+        ? (await this._materializeLogicalEntries(originalIterate, context))
+            .length
+        : ((await original()) as number);
+      await this._pluginManager.afterLength(result, context);
+      return result;
+    };
+  }
+
+  private _createIterateWrapper(
+    original: RawDriverMethod,
+    hasPlugins: boolean
+  ): RawDriverMethod {
+    return async <T extends StorageValue, U>(
       iterator: (
-        value: unknown,
+        value: T,
         key: string,
         iterationNumber: number
-      ) => unknown
-    ) =>
-      original((value: unknown, key: string, iterationNumber: number) =>
-        iterator(decodeStoredRecordValue(value), key, iterationNumber)
-      );
+      ) => U | Promise<U>
+    ): Promise<U | undefined> => {
+      const context = hasPlugins
+        ? this._pluginManager.createContext('iterate')
+        : undefined;
+      if (context) {
+        await this._ensurePluginsInitialized('iterate');
+        await this._pluginManager.beforeIterate(context);
+      }
+
+      const entries = await this._materializeLogicalEntries(original, context);
+      let iterations = 0;
+      let stopped = false;
+      let result: U | undefined;
+      for (const entry of entries) {
+        iterations += 1;
+        result = await iterator(entry.value as T, entry.key, iterations);
+        if (result !== undefined) {
+          stopped = true;
+          break;
+        }
+      }
+
+      if (context) {
+        context.operationState.iterations = iterations;
+        context.operationState.stopped = stopped;
+        await this._pluginManager.afterIterate(
+          { iterations, stopped },
+          context
+        );
+      }
+      return result;
+    };
   }
 
   private _createRunTransactionWrapper(

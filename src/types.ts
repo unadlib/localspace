@@ -400,11 +400,16 @@ export interface LocalSpaceInstance {
   capabilities(): LocalSpaceCapabilities;
 
   /**
-   * Iterate through items
+   * Iterate through logical items in driver order. Async callbacks are awaited
+   * sequentially; returning a non-undefined value stops iteration.
    */
   iterate<T extends StorageValue = StorageValue, U = void>(
-    iteratorCallback: (value: T, key: string, iterationNumber: number) => U
-  ): Promise<U>;
+    iteratorCallback: (
+      value: T,
+      key: string,
+      iterationNumber: number
+    ) => U | Promise<U>
+  ): Promise<U | undefined>;
 
   /**
    * Get item
@@ -517,6 +522,13 @@ export type PluginOperation =
   | 'setItems'
   | 'getItems'
   | 'removeItems'
+  | 'iterate'
+  | 'keys'
+  | 'key'
+  | 'length'
+  | 'clear'
+  | 'dropInstance'
+  | 'runTransaction'
   | 'lifecycle';
 
 export type PluginStage = 'init' | 'before' | 'after' | 'destroy';
@@ -545,6 +557,13 @@ export interface PluginErrorInfo {
   key?: string;
   context: PluginContext;
   error: unknown;
+}
+
+export interface PluginIterateSummary {
+  /** Number of logical entries delivered to the iterator. */
+  readonly iterations: number;
+  /** Whether a non-undefined callback result stopped iteration early. */
+  readonly stopped: boolean;
 }
 
 export interface LocalSpacePlugin {
@@ -605,6 +624,46 @@ export interface LocalSpacePlugin {
   ): Promise<string[]> | string[];
   afterRemoveItems?(
     keys: string[],
+    context: PluginContext
+  ): Promise<void> | void;
+
+  /**
+   * Query and destructive-operation hooks are observers. Their return values
+   * are ignored, and result collections are frozen copies, so they cannot
+   * rewrite the public result. Before hooks run by descending priority; after
+   * hooks run in reverse order.
+   */
+  beforeIterate?(context: PluginContext): Promise<void> | void;
+  afterIterate?(
+    summary: Readonly<PluginIterateSummary>,
+    context: PluginContext
+  ): Promise<void> | void;
+
+  beforeKeys?(context: PluginContext): Promise<void> | void;
+  afterKeys?(
+    keys: readonly string[],
+    context: PluginContext
+  ): Promise<void> | void;
+
+  beforeKey?(keyIndex: number, context: PluginContext): Promise<void> | void;
+  afterKey?(
+    keyIndex: number,
+    key: string | null,
+    context: PluginContext
+  ): Promise<void> | void;
+
+  beforeLength?(context: PluginContext): Promise<void> | void;
+  afterLength?(length: number, context: PluginContext): Promise<void> | void;
+
+  beforeClear?(context: PluginContext): Promise<void> | void;
+  afterClear?(context: PluginContext): Promise<void> | void;
+
+  beforeDropInstance?(
+    options: LocalSpaceConfigSnapshot | undefined,
+    context: PluginContext
+  ): Promise<void> | void;
+  afterDropInstance?(
+    options: LocalSpaceConfigSnapshot | undefined,
     context: PluginContext
   ): Promise<void> | void;
 }

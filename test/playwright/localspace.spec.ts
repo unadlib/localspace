@@ -170,6 +170,78 @@ test.describe('localspace browser interoperability', () => {
     expect(result.iterated[1]?.iteration).toBe(2);
   });
 
+  test('plugin queries and async iteration expose one logical view', async ({
+    page,
+  }) => {
+    await ensureFixtureReady(page);
+
+    const result = await page.evaluate(async (storeName) => {
+      const moduleUrl = '/dist/index.esm.js';
+      const localspaceModule = await import(moduleUrl);
+      const summaries: unknown[] = [];
+      const instance = localspaceModule.default.createInstance({
+        name: 'playwright-logical-view',
+        storeName,
+        plugins: [
+          localspaceModule.ttlPlugin({ keyTTL: { expired: 5 } }),
+          {
+            name: 'iterate-observer',
+            afterIterate: (summary: unknown) => summaries.push(summary),
+          },
+        ],
+      });
+      await instance.setDriver([instance.LOCALSTORAGE]);
+      await instance.clear();
+      await instance.setItems([
+        { key: 'expired', value: 'gone' },
+        { key: 'stored-null', value: null },
+        { key: 'live', value: 'present' },
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      const keys = await instance.keys();
+      const length = await instance.length();
+      const indexedKeys = await Promise.all([
+        instance.key(0),
+        instance.key(1),
+        instance.key(2),
+      ]);
+      const iterated: Array<{ key: string; value: unknown }> = [];
+      const iterateResult = await instance.iterate(
+        async (value: unknown, key: string) => {
+          await Promise.resolve();
+          iterated.push({ key, value });
+        }
+      );
+      await instance.dropInstance({
+        name: 'playwright-logical-view',
+        storeName,
+      });
+      await instance.close();
+      return {
+        keys,
+        length,
+        indexedKeys,
+        iterated,
+        iterateResult: iterateResult ?? null,
+        summaries,
+      };
+    }, randomStoreName('plugin-logical-view'));
+
+    expect(new Set(result.keys)).toEqual(new Set(['stored-null', 'live']));
+    expect(result.length).toBe(2);
+    expect(result.indexedKeys.slice(0, 2)).toEqual(result.keys);
+    expect(result.indexedKeys[2]).toBeNull();
+    expect(result.iterated).toEqual(
+      result.keys.map((key) => ({
+        key,
+        value: key === 'stored-null' ? null : 'present',
+      }))
+    );
+    expect(result.iterateResult).toBeNull();
+    expect(result.summaries).toEqual([{ iterations: 2, stopped: false }]);
+  });
+
   test('IndexedDB transaction runner can await an ordinary instance operation', async ({
     page,
   }) => {

@@ -76,10 +76,13 @@ describe('3.0 StorageValue contract', () => {
   it('rejects unsupported values by default before plugin initialization or storage', async () => {
     const onInit = vi.fn();
     const name = uniqueName('invalid-item');
-    const instance = await createMemoryInstance({
-      name,
-      plugins: [{ name: 'observer', onInit }],
-    });
+    const instance = await createMemoryInstance(
+      {
+        name,
+        plugins: [{ name: 'observer', onInit }],
+      },
+      false
+    );
 
     await expect(
       instance.setItem('profile', {
@@ -125,9 +128,12 @@ describe('3.0 StorageValue contract', () => {
 
   it('validates a complete batch before writing or initializing plugins', async () => {
     const onInit = vi.fn();
-    const instance = await createMemoryInstance({
-      plugins: [{ name: 'observer', onInit }],
-    });
+    const instance = await createMemoryInstance(
+      {
+        plugins: [{ name: 'observer', onInit }],
+      },
+      false
+    );
 
     await expect(
       instance.setItems([

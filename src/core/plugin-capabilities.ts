@@ -11,6 +11,9 @@ const BACKGROUND_TASK_CONTROLLER = Symbol.for(
 const INTERNAL_OPERATION_STATE = Symbol.for(
   'localspace.internal.plugin-operation'
 );
+const LOGICALLY_HIDDEN_KEYS = Symbol.for(
+  'localspace.internal.logically-hidden-keys'
+);
 export const TTL_BACKGROUND_CLEANUP_OPERATION = Symbol.for(
   'localspace.internal.ttl-background-cleanup'
 );
@@ -59,6 +62,35 @@ export const hasPluginInternalOperation = (
   (context.operationState as Record<PropertyKey, unknown>)[
     INTERNAL_OPERATION_STATE
   ] === operation;
+
+export const markPluginValueHidden = (
+  context: PluginContext,
+  key: string
+): void => {
+  const state = context.operationState as Record<PropertyKey, unknown>;
+  const existing = state[LOGICALLY_HIDDEN_KEYS];
+  const hiddenKeys =
+    existing instanceof Set ? (existing as Set<string>) : new Set<string>();
+  hiddenKeys.add(key);
+  if (!existing) {
+    Object.defineProperty(state, LOGICALLY_HIDDEN_KEYS, {
+      value: hiddenKeys,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+  }
+};
+
+export const isPluginValueHidden = (
+  context: PluginContext,
+  key: string
+): boolean => {
+  const hiddenKeys = (context.operationState as Record<PropertyKey, unknown>)[
+    LOGICALLY_HIDDEN_KEYS
+  ];
+  return hiddenKeys instanceof Set && hiddenKeys.has(key);
+};
 
 export const markBuiltInStorageTransformPlugin = <T extends LocalSpacePlugin>(
   plugin: T,
