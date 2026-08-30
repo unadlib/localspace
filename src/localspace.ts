@@ -50,6 +50,7 @@ import {
   type DriverOperation,
 } from './core/driver-contract.js';
 import { resolveDriverCapabilities } from './core/driver-capabilities.js';
+import { runDriverTransactionScopeOperation } from './core/transaction-scope.js';
 
 const DefaultDrivers: Record<'INDEXEDDB' | 'LOCALSTORAGE' | 'MEMORY', Driver> =
   {
@@ -1050,14 +1051,21 @@ export class LocalSpace implements LocalSpaceInstance {
     return operationPromise;
   }
 
-  private _createSetItemWrapper(original: RawDriverMethod) {
+  private _createSetItemWrapper(
+    original: RawDriverMethod,
+    transactionScope?: TransactionScope
+  ) {
     return (async (key: string, value: unknown) => {
       const logicalValue = prepareStorageValueWrite(value, {
         operation: 'setItem',
         key,
       });
       await this._ensurePluginsInitialized('setItem');
-      const context = this._pluginManager.createContext('setItem');
+      const context = this._pluginManager.createContext(
+        'setItem',
+        undefined,
+        transactionScope
+      );
       context.operationState.originalValue = logicalValue;
       const processedLogicalValue = await this._pluginManager.beforeSet(
         key,
@@ -1120,13 +1128,20 @@ export class LocalSpace implements LocalSpaceInstance {
     };
   }
 
-  private _createGetItemWrapper(original: RawDriverMethod) {
+  private _createGetItemWrapper(
+    original: RawDriverMethod,
+    transactionScope?: TransactionScope
+  ) {
     return (async (
       key: string,
       internalOperation?: PluginInternalOperation
     ) => {
       await this._ensurePluginsInitialized('getItem');
-      const context = this._pluginManager.createContext('getItem');
+      const context = this._pluginManager.createContext(
+        'getItem',
+        undefined,
+        transactionScope
+      );
       markPluginInternalOperation(context, internalOperation);
       const targetKey = await this._pluginManager.beforeGet(key, context);
       const driverValue = await original(targetKey);
@@ -1153,10 +1168,17 @@ export class LocalSpace implements LocalSpaceInstance {
       decodeStoredRecordValue(await original(...args));
   }
 
-  private _createRemoveItemWrapper(original: RawDriverMethod) {
+  private _createRemoveItemWrapper(
+    original: RawDriverMethod,
+    transactionScope?: TransactionScope
+  ) {
     return (async (key: string) => {
       await this._ensurePluginsInitialized('removeItem');
-      const context = this._pluginManager.createContext('removeItem');
+      const context = this._pluginManager.createContext(
+        'removeItem',
+        undefined,
+        transactionScope
+      );
       const targetKey = await this._pluginManager.beforeRemove(key, context);
       await original(targetKey);
       await this._pluginManager.afterRemove(targetKey, context);
@@ -1338,10 +1360,17 @@ export class LocalSpace implements LocalSpaceInstance {
     }) as typeof this.removeItems;
   }
 
-  private _createClearWrapper(original: RawDriverMethod): RawDriverMethod {
+  private _createClearWrapper(
+    original: RawDriverMethod,
+    transactionScope?: TransactionScope
+  ): RawDriverMethod {
     return async () => {
       await this._ensurePluginsInitialized('clear');
-      const context = this._pluginManager.createContext('clear');
+      const context = this._pluginManager.createContext(
+        'clear',
+        undefined,
+        transactionScope
+      );
       await this._pluginManager.beforeClear(context);
       await original();
       await this._pluginManager.afterClear(context);
@@ -1424,11 +1453,16 @@ export class LocalSpace implements LocalSpaceInstance {
 
   private _createKeysWrapper(
     original: RawDriverMethod,
-    originalIterate: RawDriverMethod
+    originalIterate: RawDriverMethod,
+    transactionScope?: TransactionScope
   ): RawDriverMethod {
     return async (internalOperation?: PluginInternalOperation) => {
       await this._ensurePluginsInitialized('keys');
-      const context = this._pluginManager.createContext('keys');
+      const context = this._pluginManager.createContext(
+        'keys',
+        undefined,
+        transactionScope
+      );
       markPluginInternalOperation(context, internalOperation);
       await this._pluginManager.beforeKeys(context);
       const result = this._pluginManager.needsLogicalReadScan()
@@ -1482,7 +1516,8 @@ export class LocalSpace implements LocalSpaceInstance {
 
   private _createIterateWrapper(
     original: RawDriverMethod,
-    hasPlugins: boolean
+    hasPlugins: boolean,
+    transactionScope?: TransactionScope
   ): RawDriverMethod {
     return async <T extends StorageValue, U>(
       iterator: (
@@ -1492,7 +1527,11 @@ export class LocalSpace implements LocalSpaceInstance {
       ) => U | Promise<U>
     ): Promise<U | undefined> => {
       const context = hasPlugins
-        ? this._pluginManager.createContext('iterate')
+        ? this._pluginManager.createContext(
+            'iterate',
+            undefined,
+            transactionScope
+          )
         : undefined;
       if (context) {
         await this._ensurePluginsInitialized('iterate');
@@ -1532,7 +1571,10 @@ export class LocalSpace implements LocalSpaceInstance {
       runner: (scope: TransactionScope) => unknown
     ) => {
       this._assertOpen('runTransaction');
-      this._pluginManager.assertNoStorageTransformBypass('runTransaction');
+      const hasPlugins = this._pluginManager.hasPlugins();
+      if (hasPlugins) {
+        await this._ensurePluginsInitialized('runTransaction');
+      }
 
       return original(mode, (scope: TransactionScope) => {
         let scopeActive = true;
@@ -1551,45 +1593,95 @@ export class LocalSpace implements LocalSpaceInstance {
             }
           );
         };
-        const validatingScope: TransactionScope = {
+        const validatingScope = {} as TransactionScope;
+        const rawGet = ((key: string) => scope.get(key)) as RawDriverMethod;
+        const rawSet = ((key: string, value: unknown) =>
+          scope.set(key, value as StorageValue)) as RawDriverMethod;
+        const rawRemove = ((key: string) =>
+          scope.remove(key)) as RawDriverMethod;
+        const rawKeys = (() => scope.keys()) as RawDriverMethod;
+        const rawIterate = ((
+          iterator: (
+            value: StorageValue,
+            key: string,
+            iterationNumber: number
+          ) => unknown
+        ) => scope.iterate(iterator)) as RawDriverMethod;
+        const rawClear = (() => scope.clear()) as RawDriverMethod;
+
+        const getOperation = hasPlugins
+          ? this._createGetItemWrapper(rawGet, validatingScope)
+          : this._createStoredRecordGetItemWrapper(rawGet);
+        const setOperation = hasPlugins
+          ? this._createSetItemWrapper(rawSet, validatingScope)
+          : this._createSetItemValueValidationWrapper(rawSet);
+        const removeOperation = hasPlugins
+          ? this._createRemoveItemWrapper(rawRemove, validatingScope)
+          : rawRemove;
+        const keysOperation = hasPlugins
+          ? this._createKeysWrapper(rawKeys, rawIterate, validatingScope)
+          : rawKeys;
+        const iterateOperation = this._createIterateWrapper(
+          rawIterate,
+          hasPlugins,
+          validatingScope
+        );
+        const clearOperation = hasPlugins
+          ? this._createClearWrapper(rawClear, validatingScope)
+          : rawClear;
+
+        Object.assign(validatingScope, {
           get: async <T extends StorageValue>(key: string) => {
             assertScopeActive('get');
-            return decodeStoredRecordValue(await scope.get<T>(key)) as T | null;
+            return runDriverTransactionScopeOperation(
+              scope,
+              'get',
+              () => getOperation(key) as Promise<T | null>
+            );
           },
           set: async <T extends StorageValue>(key: string, value: T) => {
             assertScopeActive('set');
-            const canonicalValue = prepareStorageValueWrite(value, {
-              operation: 'runTransaction',
-              key,
-            });
-            await scope.set(key, encodeStorageValueRecord(canonicalValue));
-            return canonicalValue as T;
+            return runDriverTransactionScopeOperation(
+              scope,
+              'set',
+              () => setOperation(key, value) as Promise<T>
+            );
           },
           remove: async (key: string) => {
             assertScopeActive('remove');
-            await scope.remove(key);
+            await runDriverTransactionScopeOperation(scope, 'remove', () =>
+              removeOperation(key)
+            );
           },
           keys: async () => {
             assertScopeActive('keys');
-            return scope.keys();
+            return runDriverTransactionScopeOperation(
+              scope,
+              'keys',
+              () => keysOperation() as Promise<string[]>
+            );
           },
           iterate: async <T extends StorageValue, U>(
-            iterator: (value: T, key: string, iterationNumber: number) => U
+            iterator: (
+              value: T,
+              key: string,
+              iterationNumber: number
+            ) => U | Promise<U>
           ) => {
             assertScopeActive('iterate');
-            return scope.iterate<T, U>((value, key, iterationNumber) =>
-              iterator(
-                decodeStoredRecordValue(value) as T,
-                key,
-                iterationNumber
-              )
+            return runDriverTransactionScopeOperation(
+              scope,
+              'iterate',
+              () => iterateOperation(iterator) as Promise<U | undefined>
             );
           },
           clear: async () => {
             assertScopeActive('clear');
-            await scope.clear();
+            await runDriverTransactionScopeOperation(scope, 'clear', () =>
+              clearOperation()
+            );
           },
-        };
+        } satisfies TransactionScope);
 
         this._activeTransactionRunners += 1;
         return Promise.resolve()

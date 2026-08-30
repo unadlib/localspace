@@ -157,6 +157,44 @@ test.describe('localspace browser interoperability', () => {
     });
   });
 
+  test('IndexedDB transaction stays active during WebCrypto hooks', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const result = await page.evaluate(async (storeName) => {
+      const localspaceModule = await import('/dist/index.esm.js');
+      const instance = localspaceModule.default.createInstance({
+        name: 'playwright-transaction-webcrypto',
+        storeName,
+        prewarmTransactions: false,
+        plugins: [
+          localspaceModule.encryptionPlugin({
+            key: '0123456789abcdef0123456789abcdef',
+          }),
+        ],
+      });
+      await instance.setDriver([instance.INDEXEDDB]);
+      await instance.ready();
+
+      const transactionResult = await instance.runTransaction(
+        'readwrite',
+        async (scope) => {
+          await scope.set('secret', { message: 'transaction-webcrypto' });
+          return scope.get('secret');
+        }
+      );
+      const restored = await instance.getItem('secret');
+      await instance.dropInstance();
+      return { transactionResult, restored };
+    }, randomStoreName('transaction-webcrypto'));
+
+    expect(result).toEqual({
+      transactionResult: { message: 'transaction-webcrypto' },
+      restored: { message: 'transaction-webcrypto' },
+    });
+  });
+
   test('production browser bundle suppresses deprecation warnings', async ({
     page,
   }) => {

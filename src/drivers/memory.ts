@@ -434,11 +434,15 @@ function runTransaction<T>(
         },
         keys: async () => Array.from(store.keys()),
         iterate: async <V, U>(
-          iterator: (value: V, key: string, iterationNumber: number) => U
+          iterator: (
+            value: V,
+            key: string,
+            iterationNumber: number
+          ) => U | Promise<U>
         ) => {
           let iterationNumber = 1;
           for (const [entryKey, entryValue] of store.entries()) {
-            const result = iterator(
+            const result = await iterator(
               (await cloneValue(entryValue as V)) as V,
               entryKey,
               iterationNumber++

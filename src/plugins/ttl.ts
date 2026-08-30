@@ -197,6 +197,28 @@ const notifyExpiredInBackground = (
   void notifyExpired(key, value, context, options).catch(() => undefined);
 };
 
+const removeExpiredKey = (
+  key: string,
+  context: PluginContext
+): Promise<void> =>
+  context.transactionScope
+    ? context.transactionScope.remove(key)
+    : context.instance.removeItem(key);
+
+const removeExpiredKeys = async (
+  keys: string[],
+  context: PluginContext
+): Promise<void> => {
+  if (!context.transactionScope) {
+    await context.instance.removeItems(keys);
+    return;
+  }
+
+  for (const key of keys) {
+    await context.transactionScope.remove(key);
+  }
+};
+
 const scheduleCleanup = (
   context: PluginContext,
   options: TTLPluginOptions,
@@ -363,7 +385,7 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
 
     if (payload.expiresAt <= Date.now()) {
       markPluginValueHidden(context, key);
-      const removed = await context.instance.removeItem(key).then(
+      const removed = await removeExpiredKey(key, context).then(
         () => true,
         () => false
       );
@@ -440,7 +462,7 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
 
     // Remove expired keys in batch
     if (expiredKeys.length > 0) {
-      const removed = await context.instance.removeItems(expiredKeys).then(
+      const removed = await removeExpiredKeys(expiredKeys, context).then(
         () => true,
         () => false
       );

@@ -23,6 +23,7 @@ import {
 } from '../utils/helpers.js';
 import serializer from '../utils/serializer.js';
 import { warnDeprecation } from '../utils/deprecations.js';
+import { markDriverTransactionScope } from '../core/transaction-scope.js';
 
 type IndexedDBDriverContext = LocalSpaceInstance &
   Partial<Driver> & {
@@ -1543,13 +1544,82 @@ function runTransaction<T>(
             const storeName = requireStoreName(dbInfo);
             const store = transaction.objectStore(storeName);
             let blobSupport: boolean | undefined = precomputedBlobSupport;
+            let transactionFinished = false;
+            let runnerSettled = false;
+            let keepAliveDepth = 0;
+            let keepAliveRequestPending = false;
 
             const isTransactionActive = (): boolean => {
+              if (transactionFinished) {
+                return false;
+              }
               try {
                 transaction.objectStore(storeName);
                 return true;
               } catch {
                 return false;
+              }
+            };
+
+            const transactionInactiveError = (
+              scopeOperation?: keyof TransactionScope | 'runner'
+            ) =>
+              createLocalSpaceError(
+                'TRANSACTION_INACTIVE',
+                'IndexedDB transaction became inactive before the runner settled.',
+                {
+                  driver: DRIVER_NAME,
+                  operation: 'runTransaction',
+                  transactionMode: mode,
+                  reason: 'transaction-inactive',
+                  ...(scopeOperation ? { scopeOperation } : {}),
+                }
+              );
+
+            const assertTransactionActive = (
+              scopeOperation: keyof TransactionScope
+            ): void => {
+              if (!isTransactionActive()) {
+                throw transactionInactiveError(scopeOperation);
+              }
+            };
+
+            const issueKeepAliveRequest = (): void => {
+              if (
+                keepAliveDepth === 0 ||
+                keepAliveRequestPending ||
+                !isTransactionActive()
+              ) {
+                return;
+              }
+
+              try {
+                keepAliveRequestPending = true;
+                const request = store.count();
+                const continueKeepAlive = (): void => {
+                  keepAliveRequestPending = false;
+                  if (keepAliveDepth > 0 && isTransactionActive()) {
+                    issueKeepAliveRequest();
+                  }
+                };
+                request.onsuccess = continueKeepAlive;
+                request.onerror = continueKeepAlive;
+              } catch {
+                keepAliveRequestPending = false;
+              }
+            };
+
+            const runScopeOperation = async <U>(
+              scopeOperation: keyof TransactionScope,
+              operation: () => Promise<U> | U
+            ): Promise<U> => {
+              assertTransactionActive(scopeOperation);
+              keepAliveDepth += 1;
+              issueKeepAliveRequest();
+              try {
+                return await operation();
+              } finally {
+                keepAliveDepth -= 1;
               }
             };
 
@@ -1576,131 +1646,178 @@ function runTransaction<T>(
               }
             };
 
-            const scope: TransactionScope = {
-              get: <V>(key: string) =>
-                new Promise<V | null>((res, rej) => {
-                  const req = store.get(normalizeKey(key));
-                  req.onsuccess = () => {
-                    let value = req.result;
-                    if (value === undefined) value = null;
-                    if (isEncodedBlob(value)) {
-                      value = decodeBlob(value);
-                    }
-                    res(value);
-                  };
-                  req.onerror = () => rej(req.error);
-                }),
-              set: async <V>(key: string, value: V) => {
-                makeReadOnlyGuard();
-                let actual: V | null | undefined = value;
-                if (actual === undefined) actual = null;
-
-                if (toString.call(value) === '[object Blob]') {
-                  const canStoreBlob = await ensureBlobSupport();
-                  if (!canStoreBlob) {
-                    actual = (await encodeBlob(value as unknown as Blob)) as V;
-                  }
-                }
-
-                if (!isTransactionActive()) {
-                  throw new Error(
-                    'Transaction became inactive while preparing data.'
-                  );
-                }
-
-                return new Promise<V>((res, rej) => {
-                  const req = store.put(actual, normalizeKey(key));
-                  req.onsuccess = () => res(actual as V);
-                  req.onerror = () => rej(req.error);
-                });
-              },
-              remove: (key: string) =>
-                new Promise<void>((res, rej) => {
+            const scope = markDriverTransactionScope(
+              {
+                get: <V>(key: string) => {
+                  assertTransactionActive('get');
+                  return new Promise<V | null>((res, rej) => {
+                    const req = store.get(normalizeKey(key));
+                    req.onsuccess = () => {
+                      let value = req.result;
+                      if (value === undefined) value = null;
+                      if (isEncodedBlob(value)) {
+                        value = decodeBlob(value);
+                      }
+                      res(value);
+                    };
+                    req.onerror = () => rej(req.error);
+                  });
+                },
+                set: async <V>(key: string, value: V) => {
                   makeReadOnlyGuard();
-                  const req = store.delete(normalizeKey(key));
-                  req.onsuccess = () => res();
-                  req.onerror = () => rej(req.error);
-                }),
-              keys: () =>
-                new Promise<string[]>((res, rej) => {
-                  const all: string[] = [];
-                  const req = store.openKeyCursor();
-                  req.onsuccess = () => {
-                    const cursor = req.result;
-                    if (!cursor) {
-                      res(all);
-                      return;
+                  assertTransactionActive('set');
+                  let actual: V | null | undefined = value;
+                  if (actual === undefined) actual = null;
+
+                  if (toString.call(value) === '[object Blob]') {
+                    const canStoreBlob = await ensureBlobSupport();
+                    if (!canStoreBlob) {
+                      actual = (await encodeBlob(
+                        value as unknown as Blob
+                      )) as V;
                     }
-                    all.push(cursor.key as string);
-                    cursor.continue();
-                  };
-                  req.onerror = () => rej(req.error);
-                }),
-              iterate: <V, U>(
-                fn: (value: V, key: string, iteration: number) => U
-              ) =>
-                new Promise<U>((res, rej) => {
-                  const req = store.openCursor();
-                  let iteration = 1;
-                  req.onsuccess = () => {
-                    const cursor = req.result;
-                    if (cursor) {
+                  }
+
+                  assertTransactionActive('set');
+                  return new Promise<V>((res, rej) => {
+                    const req = store.put(actual, normalizeKey(key));
+                    req.onsuccess = () => res(actual as V);
+                    req.onerror = () => rej(req.error);
+                  });
+                },
+                remove: (key: string) => {
+                  makeReadOnlyGuard();
+                  assertTransactionActive('remove');
+                  return new Promise<void>((res, rej) => {
+                    const req = store.delete(normalizeKey(key));
+                    req.onsuccess = () => res();
+                    req.onerror = () => rej(req.error);
+                  });
+                },
+                keys: () => {
+                  assertTransactionActive('keys');
+                  return new Promise<string[]>((res, rej) => {
+                    const all: string[] = [];
+                    const req = store.openKeyCursor();
+                    req.onsuccess = () => {
+                      const cursor = req.result;
+                      if (!cursor) {
+                        res(all);
+                        return;
+                      }
+                      all.push(cursor.key as string);
+                      cursor.continue();
+                    };
+                    req.onerror = () => rej(req.error);
+                  });
+                },
+                iterate: async <V, U>(
+                  fn: (
+                    value: V,
+                    key: string,
+                    iteration: number
+                  ) => U | Promise<U>
+                ) => {
+                  assertTransactionActive('iterate');
+                  const entries = await new Promise<
+                    Array<{ key: string; value: V }>
+                  >((res, rej) => {
+                    const all: Array<{ key: string; value: V }> = [];
+                    const req = store.openCursor();
+                    req.onsuccess = () => {
+                      const cursor = req.result;
+                      if (!cursor) {
+                        res(all);
+                        return;
+                      }
                       let value = cursor.value;
                       if (value === undefined) value = null;
                       if (isEncodedBlob(value)) {
                         value = decodeBlob(value);
                       }
-                      const out = fn(value, cursor.key as string, iteration++);
-                      if (out !== undefined) {
-                        res(out);
-                      } else {
-                        cursor.continue();
-                      }
-                    } else {
-                      res(undefined as U);
+                      all.push({ key: cursor.key as string, value });
+                      cursor.continue();
+                    };
+                    req.onerror = () => rej(req.error);
+                  });
+
+                  let iteration = 1;
+                  for (const entry of entries) {
+                    const result = await fn(
+                      entry.value,
+                      entry.key,
+                      iteration++
+                    );
+                    if (result !== undefined) {
+                      return result;
                     }
-                  };
-                  req.onerror = () => rej(req.error);
-                }),
-              clear: () =>
-                new Promise<void>((res, rej) => {
+                  }
+                  return undefined;
+                },
+                clear: () => {
                   makeReadOnlyGuard();
-                  const req = store.clear();
-                  req.onsuccess = () => res();
-                  req.onerror = () => rej(req.error);
-                }),
-            };
+                  assertTransactionActive('clear');
+                  return new Promise<void>((res, rej) => {
+                    const req = store.clear();
+                    req.onsuccess = () => res();
+                    req.onerror = () => rej(req.error);
+                  });
+                },
+              },
+              runScopeOperation
+            );
 
-            const runnerPromise = Promise.resolve().then(() => runner(scope));
             const completion = new Promise<void>((res, rej) => {
-              transaction.oncomplete = () => res();
-              transaction.onabort = () =>
+              transaction.oncomplete = () => {
+                transactionFinished = true;
+                if (!runnerSettled) {
+                  rej(transactionInactiveError('runner'));
+                  return;
+                }
+                res();
+              };
+              transaction.onabort = () => {
+                transactionFinished = true;
                 rej(transaction.error || new Error('Transaction aborted'));
-              transaction.onerror = () =>
+              };
+              transaction.onerror = () => {
+                transactionFinished = true;
                 rej(transaction.error || new Error('Transaction error'));
+              };
             });
 
-            const guardedRunner = runnerPromise.catch((runnerError) => {
-              try {
-                transaction.abort();
-              } catch {
-                // The transaction may have committed while the async runner
-                // was awaiting unrelated work. Preserve the 2.x runner result.
-              }
-              throw runnerError;
-            });
+            const guardedRunner = Promise.resolve()
+              .then(() => runner(scope))
+              .then(
+                (value) => {
+                  runnerSettled = true;
+                  return value;
+                },
+                (runnerError) => {
+                  runnerSettled = true;
+                  if (!transactionFinished) {
+                    try {
+                      transaction.abort();
+                    } catch {
+                      // A concurrently completed transaction is reported by
+                      // the completion promise below.
+                    }
+                  }
+                  throw runnerError;
+                }
+              );
 
-            Promise.allSettled([guardedRunner, completion]).then(
-              ([runnerOutcome, completionOutcome]) => {
-                if (runnerOutcome.status === 'rejected') {
-                  reject(runnerOutcome.reason);
-                  return;
+            Promise.all([guardedRunner, completion]).then(
+              ([runnerResult]) => resolve(runnerResult),
+              (error) => {
+                if (!transactionFinished) {
+                  try {
+                    transaction.abort();
+                  } catch {
+                    // Preserve the first deterministic failure.
+                  }
                 }
-                if (completionOutcome.status === 'rejected') {
-                  reject(completionOutcome.reason);
-                  return;
-                }
-                resolve(runnerOutcome.value);
+                reject(error);
               }
             );
           } catch (error) {

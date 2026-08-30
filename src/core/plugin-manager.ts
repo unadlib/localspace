@@ -16,7 +16,6 @@ import { normalizeBatchEntries } from '../utils/helpers.js';
 import {
   getBuiltInStorageTransformKind,
   getPluginBackgroundTaskController,
-  type BuiltInStorageTransformKind,
   type PluginBackgroundTaskPause,
 } from './plugin-capabilities.js';
 
@@ -195,30 +194,6 @@ export class PluginManager {
     return this.pluginRegistry.length > 0;
   }
 
-  assertNoStorageTransformBypass(operation: 'runTransaction'): void {
-    const pluginNames = [
-      ...new Set(
-        this.getActivePlugins()
-          .map((plugin) => getBuiltInStorageTransformKind(plugin))
-          .filter((kind): kind is BuiltInStorageTransformKind => kind !== null)
-      ),
-    ];
-
-    if (pluginNames.length === 0) {
-      return;
-    }
-
-    throw createLocalSpaceError(
-      'UNSUPPORTED_OPERATION',
-      `${operation} cannot bypass active storage transformation plugins.`,
-      {
-        operation,
-        plugins: pluginNames,
-        reason: 'storage-transform-plugin-bypass',
-      }
-    );
-  }
-
   needsLogicalReadScan(): boolean {
     return this.getActivePlugins().some(
       (plugin) =>
@@ -373,11 +348,13 @@ export class PluginManager {
 
   createContext(
     operation: PluginOperation | null,
-    lifecycleInstance?: LocalSpaceInstance
+    lifecycleInstance?: LocalSpaceInstance,
+    transactionScope?: PluginContext['transactionScope']
   ): PluginContext {
     return {
       instance: this.host,
       ...(lifecycleInstance ? { lifecycleInstance } : {}),
+      ...(transactionScope ? { transactionScope } : {}),
       driver: this.host.driver ? this.host.driver() : null,
       dbInfo: this.lifecycleBridge.getDbInfo(),
       config: this.host.config(),
@@ -700,9 +677,14 @@ export class PluginManager {
 
   private createPreparedKeyItem(
     key: string,
-    operation: PluginOperation
+    operation: PluginOperation,
+    parentContext?: PluginContext
   ): PreparedKeyItem {
-    const context = this.createContext(operation);
+    const context = this.createContext(
+      operation,
+      undefined,
+      parentContext?.transactionScope
+    );
     context.operationState.isBatch = true;
     return { requestedKey: key, targetKey: key, context };
   }
@@ -721,7 +703,8 @@ export class PluginManager {
   private reconcilePreparedKeyItems(
     previousItems: PreparedKeyItem[],
     keys: string[],
-    operation: PluginOperation
+    operation: PluginOperation,
+    parentContext?: PluginContext
   ): PreparedKeyItem[] {
     const previousByKey = new Map<string, PreparedKeyItem[]>();
     for (const item of previousItems) {
@@ -735,7 +718,7 @@ export class PluginManager {
         previous.targetKey = targetKey;
         return previous;
       }
-      return this.createPreparedKeyItem(targetKey, operation);
+      return this.createPreparedKeyItem(targetKey, operation, parentContext);
     });
   }
 
@@ -746,7 +729,7 @@ export class PluginManager {
   ): Promise<PreparedKeys> {
     const itemOperation = operation === 'getItems' ? 'getItem' : 'removeItem';
     let items = keys.map((key) =>
-      this.createPreparedKeyItem(key, itemOperation)
+      this.createPreparedKeyItem(key, itemOperation, context)
     );
     this.updateBatchContexts(items, context);
 
@@ -769,7 +752,12 @@ export class PluginManager {
           context,
           input
         );
-        items = this.reconcilePreparedKeyItems(items, output, itemOperation);
+        items = this.reconcilePreparedKeyItems(
+          items,
+          output,
+          itemOperation,
+          context
+        );
         this.updateBatchContexts(items, context);
         continue;
       }
@@ -810,7 +798,9 @@ export class PluginManager {
 
   prepareReadItems(keys: string[], context: PluginContext): PreparedKeys {
     const operation = context.operation ?? 'getItems';
-    const items = keys.map((key) => this.createPreparedKeyItem(key, operation));
+    const items = keys.map((key) =>
+      this.createPreparedKeyItem(key, operation, context)
+    );
     this.updateBatchContexts(items, context);
     return { keys: keys.slice(), items };
   }
@@ -829,7 +819,8 @@ export class PluginManager {
       items = this.reconcilePreparedKeyItems(
         items,
         current.map(({ key }) => key),
-        operation === 'getItems' ? 'getItem' : operation
+        operation === 'getItems' ? 'getItem' : operation,
+        context
       );
       this.updateBatchContexts(items, context);
     };
@@ -906,7 +897,11 @@ export class PluginManager {
         const item = items[index] ?? {
           requestedKey: key,
           targetKey: key,
-          context: this.createContext('removeItem'),
+          context: this.createContext(
+            'removeItem',
+            undefined,
+            context.transactionScope
+          ),
         };
         item.context.operationState.isBatch = true;
         item.context.operationState.batchSize = keys.length;

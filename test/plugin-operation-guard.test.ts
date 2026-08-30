@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import localspace, {
   compressionPlugin,
   encryptionPlugin,
-  memoryDriver,
   ttlPlugin,
 } from '../src';
 import type { LocalSpacePlugin } from '../src';
@@ -32,30 +31,37 @@ afterEach(() => {
 });
 
 describe.each(TRANSFORM_PLUGINS)(
-  '$name plugin operation bypass guard',
+  '$name transaction pipeline',
   ({ name, create }) => {
-    it('rejects runTransaction before invoking the driver or runner', async () => {
-      const driverSpy = vi.spyOn(memoryDriver, 'runTransaction');
+    it('applies the storage transform inside runTransaction', async () => {
+      const logicalValue = name === 'compression' ? 'x'.repeat(2_000) : 'value';
       const runner = vi.fn(async (scope) => {
-        await scope.set('secret', 'plaintext');
+        await scope.set('secret', logicalValue);
+        await expect(scope.get('secret')).resolves.toBe(logicalValue);
       });
-      const store = await createMemoryStore(`guard-transaction-${name}`, [
-        create(),
-      ]);
+      const storeName = `transaction-pipeline-${name}`;
+      const store = await createMemoryStore(storeName, [create()]);
+      const rawStore = await createMemoryStore(storeName, []);
 
-      await expect(
-        store.runTransaction('readwrite', runner)
-      ).rejects.toMatchObject({
-        code: 'UNSUPPORTED_OPERATION',
-        details: {
-          operation: 'runTransaction',
-          plugins: [name],
-          reason: 'storage-transform-plugin-bypass',
-        },
-      });
+      await expect(store.runTransaction('readwrite', runner)).resolves.toBe(
+        undefined
+      );
 
-      expect(driverSpy).not.toHaveBeenCalled();
-      expect(runner).not.toHaveBeenCalled();
+      expect(runner).toHaveBeenCalledTimes(1);
+      await expect(store.getItem('secret')).resolves.toBe(logicalValue);
+      const rawValue = await rawStore.getItem('secret');
+      expect(rawValue).not.toEqual(logicalValue);
+      if (name === 'ttl') {
+        expect(rawValue).toMatchObject({ __ls_ttl: true });
+      } else {
+        expect(rawValue).toMatchObject({
+          __localspace__: {
+            namespace: 'localspace.plugin',
+            kind: name,
+            version: 1,
+          },
+        });
+      }
     });
 
     it('decodes logical values before invoking iterate callbacks', async () => {
@@ -130,15 +136,15 @@ describe('plugin operation bypass guard scope', () => {
     expect(warning).not.toHaveBeenCalled();
   });
 
-  it('retains the guard when a built-in plugin is shallow-cloned', async () => {
+  it('retains transaction behavior when a built-in plugin is shallow-cloned', async () => {
     const plugin = { ...ttlPlugin({ defaultTTL: 60_000 }) };
     const store = await createMemoryStore('guard-cloned-transform', [plugin]);
 
+    await store.runTransaction('readwrite', (scope) =>
+      scope.set('value', 'logical')
+    );
     await expect(
       store.runTransaction('readonly', (scope) => scope.get('value'))
-    ).rejects.toMatchObject({
-      code: 'UNSUPPORTED_OPERATION',
-      details: { plugins: ['ttl'] },
-    });
+    ).resolves.toBe('logical');
   });
 });

@@ -508,8 +508,8 @@ export interface TransactionScope {
   remove(key: string): Promise<void>;
   keys(): Promise<string[]>;
   iterate<T extends StorageValue = StorageValue, U = void>(
-    iterator: (value: T, key: string, iterationNumber: number) => U
-  ): Promise<U>;
+    iterator: (value: T, key: string, iterationNumber: number) => U | Promise<U>
+  ): Promise<U | undefined>;
   clear(): Promise<void>;
 }
 
@@ -542,6 +542,12 @@ export interface PluginContext {
    * is pending, including across `await`, and is omitted from operation hooks.
    */
   lifecycleInstance?: LocalSpaceInstance;
+  /**
+   * The active logical transaction scope when a hook runs for a
+   * transaction-bound operation. Plugins must use this scope instead of
+   * re-entering the instance facade.
+   */
+  transactionScope?: TransactionScope;
   driver: string | null;
   dbInfo: DbInfo | null;
   config: LocalSpaceConfigSnapshot;
