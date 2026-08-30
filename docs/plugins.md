@@ -54,8 +54,15 @@ interface LocalSpacePlugin {
 ```
 
 `onInit` runs lazily before the first plugin-aware operation. `onDestroy` runs
-once for every initialized plugin during `close()`. Initialization follows
-normal priority order; teardown runs in reverse order.
+for every initialized plugin during `close()` and, once successful or swallowed
+by the lenient policy, is not run again. Initialization follows normal priority
+order; teardown runs in reverse order.
+
+Teardown follows `pluginErrorPolicy`. A strict error, `LocalSpaceError`, or
+`PluginAbortError` makes `close()` reject after the remaining plugins and driver
+have still had a cleanup attempt. A later `close()` retries only failed plugin
+and driver cleanup. Under `lenient`, an ordinary custom-plugin teardown error is
+reported and treated as complete.
 
 `context.instance` is always the public instance and keeps stable identity.
 Lifecycle callbacks also receive `context.lifecycleInstance`, a callback-

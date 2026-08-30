@@ -1102,12 +1102,14 @@ describe('LocalSpace.close', () => {
     await instance.close();
   });
 
-  it('continues initialized plugin cleanup after a hook failure', async () => {
+  it('continues plugin cleanup and retries only the strict failure', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const cleanupError = new Error('cleanup failed');
     const firstCleanup = vi.fn();
-    const failingCleanup = vi.fn(() => {
-      throw new Error('cleanup failed');
-    });
+    const failingCleanup = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(cleanupError)
+      .mockResolvedValue(undefined);
     const instance = localspace.createInstance({
       name: uniqueName('close-cleanup-error'),
       pluginErrorPolicy: 'strict',
@@ -1119,12 +1121,51 @@ describe('LocalSpace.close', () => {
     await instance.setDriver([instance.MEMORY]);
     await instance.setItem('key', 'value');
 
-    await instance.close();
+    await expect(instance.close()).rejects.toMatchObject({
+      code: 'OPERATION_FAILED',
+      cause: cleanupError,
+      details: { operation: 'close' },
+    });
     expect(firstCleanup).toHaveBeenCalledTimes(1);
     expect(failingCleanup).toHaveBeenCalledTimes(1);
     await instance.close();
     expect(firstCleanup).toHaveBeenCalledTimes(1);
+    expect(failingCleanup).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports and completes an ordinary lenient plugin cleanup failure', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const cleanupError = new Error('lenient cleanup failed');
+    const onError = vi.fn();
+    const failingCleanup = vi.fn(() => {
+      throw cleanupError;
+    });
+    const instance = localspace.createInstance({
+      name: uniqueName('lenient-close-cleanup-error'),
+      pluginErrorPolicy: 'lenient',
+      plugins: [
+        {
+          name: 'lenient-failing-cleanup',
+          onDestroy: failingCleanup,
+          onError,
+        },
+      ],
+    });
+    await instance.setDriver([instance.MEMORY]);
+    await instance.setItem('key', 'value');
+
+    await instance.close();
+    await instance.close();
+
     expect(failingCleanup).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(
+      cleanupError,
+      expect.objectContaining({
+        plugin: 'lenient-failing-cleanup',
+        operation: 'lifecycle',
+        stage: 'destroy',
+      })
+    );
   });
 
   it('unregisters and closes the final IndexedDB context without deleting it', async () => {

@@ -265,10 +265,7 @@ export class PluginManager {
           }
         );
       }
-      if (
-        plugin.version !== undefined &&
-        typeof plugin.version !== 'string'
-      ) {
+      if (plugin.version !== undefined && typeof plugin.version !== 'string') {
         throw createLocalSpaceError(
           'INVALID_CONFIG',
           `Plugin "${plugin.name}" version must be a string.`,
@@ -1206,6 +1203,8 @@ export class PluginManager {
       .map((entry) => entry.plugin)
       .slice()
       .reverse();
+    let firstCleanupError: unknown;
+    let hasCleanupError = false;
     for (const plugin of plugins) {
       if (initializedOnly && !this.initialized.has(plugin)) {
         continue;
@@ -1215,7 +1214,14 @@ export class PluginManager {
       }
       const pendingDestroy = this.destroyPromises.get(plugin);
       if (pendingDestroy) {
-        await pendingDestroy;
+        try {
+          await pendingDestroy;
+        } catch (error) {
+          if (!hasCleanupError) {
+            firstCleanupError = error;
+            hasCleanupError = true;
+          }
+        }
         continue;
       }
       if (typeof plugin.onDestroy !== 'function') {
@@ -1224,9 +1230,11 @@ export class PluginManager {
       }
       const lifecycle = this.lifecycleBridge.createInvocation('plugin-destroy');
       const context = this.createContext(null, lifecycle.instance);
-      const destroyPromise = Promise.resolve().then(async () => {
+      let destroyPromise!: Promise<void>;
+      destroyPromise = Promise.resolve().then(async () => {
         try {
           await lifecycle.invoke(() => plugin.onDestroy!(context));
+          this.destroyed.add(plugin);
         } catch (error) {
           await this.dispatchPluginError(
             plugin,
@@ -1236,12 +1244,30 @@ export class PluginManager {
             undefined,
             context
           );
-        } finally {
+          const policy = this.host.config('pluginErrorPolicy') ?? 'lenient';
+          if (this.shouldPropagate(error, policy)) {
+            throw error;
+          }
           this.destroyed.add(plugin);
+        } finally {
+          if (this.destroyPromises.get(plugin) === destroyPromise) {
+            this.destroyPromises.delete(plugin);
+          }
         }
       });
       this.destroyPromises.set(plugin, destroyPromise);
-      await destroyPromise;
+      try {
+        await destroyPromise;
+      } catch (error) {
+        if (!hasCleanupError) {
+          firstCleanupError = error;
+          hasCleanupError = true;
+        }
+      }
+    }
+
+    if (hasCleanupError) {
+      throw firstCleanupError;
     }
   }
 
