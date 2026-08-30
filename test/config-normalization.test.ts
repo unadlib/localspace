@@ -38,6 +38,7 @@ describe('configuration normalization', () => {
     ['maxBatchSize', 1.5],
     ['connectionIdleMs', -1],
     ['maxConcurrentTransactions', -1],
+    ['strictValues', 'yes'],
   ])('rejects invalid constructor option %s=%s', (key, value) => {
     let error: unknown;
     try {

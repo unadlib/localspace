@@ -61,6 +61,26 @@ warning could be attached: the `exports` map rejects them immediately. The
 release tests keep that boundary explicit rather than adding a temporary deep
 entry that would expand the supported package surface.
 
+### Audit Values Against The 3.0 Contract
+
+LocalSpace 2.1 warns in development when a logical write is outside the value
+contract shared by every 3.0 driver. Legacy behavior remains the default so the
+warning does not change a successful 2.x path. Enable strict migration mode to
+turn the same diagnostic into a pre-write `SERIALIZATION_FAILED` error:
+
+```ts
+const store = localspace.createInstance({
+  strictValues: true,
+});
+```
+
+Strict mode covers `setItem()`, every `setItems()` entry, and
+transaction-scope `set()`. Convert Date, Map, Set, RegExp, `undefined`, scalar
+BigInt, cyclic values, accessors, and class instances to explicit plain data.
+The accepted contract consists of `null`, booleans, finite numbers, strings,
+dense arrays, plain objects, `ArrayBuffer`, and typed arrays. This option is a
+2.1 migration aid; 3.0 validates unconditionally.
+
 ### Close Instances Without Deleting Data
 
 Use `await instance.close()` when an instance is no longer needed. The method

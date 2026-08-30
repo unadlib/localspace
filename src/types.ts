@@ -14,6 +14,33 @@ export interface ReactNativeAsyncStorage {
 
 export type TransactionMode = 'readonly' | 'readwrite';
 
+export type StoragePrimitive = null | boolean | number | string;
+
+export type StorageBinary =
+  | ArrayBuffer
+  | Int8Array
+  | Uint8Array
+  | Uint8ClampedArray
+  | Int16Array
+  | Uint16Array
+  | Int32Array
+  | Uint32Array
+  | Float32Array
+  | Float64Array
+  | BigInt64Array
+  | BigUint64Array;
+
+/**
+ * Values that LocalSpace 3.0 will round-trip consistently across every driver.
+ * LocalSpace 2.1 keeps its broad generic APIs for compatibility; enable
+ * `strictValues` to validate writes against this contract before upgrading.
+ */
+export type StorageValue =
+  | StoragePrimitive
+  | StorageBinary
+  | StorageValue[]
+  | { [key: string]: StorageValue };
+
 /**
  * Configuration options for localspace
  */
@@ -111,6 +138,12 @@ export interface LocalSpaceConfig {
    * - 'strict': propagate all plugin errors to the caller
    */
   pluginErrorPolicy?: 'strict' | 'lenient';
+
+  /**
+   * Validate every logical write against the LocalSpace 3.0 StorageValue
+   * contract. Defaults to false in 2.1 for compatibility; 3.0 is always strict.
+   */
+  strictValues?: boolean;
 }
 
 /**

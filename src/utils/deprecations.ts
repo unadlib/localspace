@@ -4,7 +4,8 @@ export type LocalSpaceDeprecation =
   | 'destroy'
   | 'mutable-config-reference'
   | 'combined-plugin-hooks'
-  | 'react-native-auto-detection';
+  | 'react-native-auto-detection'
+  | 'unsupported-storage-value';
 
 type DeprecationState = {
   emitted: Set<LocalSpaceDeprecation>;
@@ -20,7 +21,9 @@ const isDeprecationState = (value: unknown): value is DeprecationState => {
     return false;
   }
   const candidate = value as Partial<DeprecationState>;
-  return candidate.emitted instanceof Set && typeof candidate.enabled === 'boolean';
+  return (
+    candidate.emitted instanceof Set && typeof candidate.enabled === 'boolean'
+  );
 };
 
 const getDeprecationState = (): DeprecationState => {

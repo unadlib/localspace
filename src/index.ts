@@ -18,6 +18,9 @@ import type {
   BatchResponse,
   TransactionMode,
   TransactionScope,
+  StoragePrimitive,
+  StorageBinary,
+  StorageValue,
 } from './types.js';
 
 // Create default instance
@@ -46,6 +49,9 @@ export type {
   BatchResponse,
   TransactionMode,
   TransactionScope,
+  StoragePrimitive,
+  StorageBinary,
+  StorageValue,
 };
 export type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from './errors.js';
 export { LocalSpaceError } from './errors.js';

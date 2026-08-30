@@ -15,7 +15,12 @@ import type {
   PluginContext,
   PluginOperation,
 } from './types.js';
-import { extend, isArray, includes } from './utils/helpers.js';
+import {
+  extend,
+  isArray,
+  includes,
+  normalizeBatchEntries,
+} from './utils/helpers.js';
 import {
   createLocalSpaceError,
   describeError,
@@ -34,6 +39,7 @@ import {
   type PluginBackgroundTaskPause,
   type PluginInternalOperation,
 } from './core/plugin-capabilities.js';
+import { validateStorageValueWrite } from './core/storage-value.js';
 
 // Shared drivers across all instances
 const DefinedDrivers: DefinedDriversMap = {};
@@ -963,36 +969,43 @@ export class LocalSpace implements LocalSpaceInstance {
       }
 
       let implementation: RawDriverMethod = original;
-      if (!this._pluginManager || !this._pluginManager.hasPlugins()) {
-        implementation = original;
-      } else {
-        switch (method) {
-          case 'setItem':
-            implementation = this._createSetItemWrapper(original);
-            break;
-          case 'getItem':
-            implementation = this._createGetItemWrapper(original);
-            break;
-          case 'removeItem':
-            implementation = this._createRemoveItemWrapper(original);
-            break;
-          case 'setItems':
-            implementation = this._createSetItemsWrapper(original);
-            break;
-          case 'getItems':
-            implementation = this._createGetItemsWrapper(original);
-            break;
-          case 'removeItems':
-            implementation = this._createRemoveItemsWrapper(original);
-            break;
-          case 'iterate':
-          case 'runTransaction':
-            implementation = this._createStorageTransformGuard(
-              original,
-              method
-            );
-            break;
-        }
+      const hasPlugins = this._pluginManager?.hasPlugins() ?? false;
+      switch (method) {
+        case 'setItem':
+          implementation = hasPlugins
+            ? this._createSetItemWrapper(original)
+            : this._createSetItemValueValidationWrapper(original);
+          break;
+        case 'setItems':
+          implementation = hasPlugins
+            ? this._createSetItemsWrapper(original)
+            : this._createSetItemsValueValidationWrapper(original);
+          break;
+        case 'runTransaction':
+          implementation = this._createRunTransactionWrapper(original);
+          break;
+        default:
+          if (!hasPlugins) break;
+          switch (method) {
+            case 'getItem':
+              implementation = this._createGetItemWrapper(original);
+              break;
+            case 'removeItem':
+              implementation = this._createRemoveItemWrapper(original);
+              break;
+            case 'getItems':
+              implementation = this._createGetItemsWrapper(original);
+              break;
+            case 'removeItems':
+              implementation = this._createRemoveItemsWrapper(original);
+              break;
+            case 'iterate':
+              implementation = this._createStorageTransformGuard(
+                original,
+                method
+              );
+              break;
+          }
       }
 
       (this as unknown as Record<string, unknown>)[method] =
@@ -1054,6 +1067,11 @@ export class LocalSpace implements LocalSpaceInstance {
 
   private _createSetItemWrapper(original: RawDriverMethod) {
     return (async (key: string, value: unknown) => {
+      validateStorageValueWrite(value, {
+        strict: this._config.strictValues === true,
+        operation: 'setItem',
+        key,
+      });
       await this._ensurePluginsInitialized('setItem');
       const context = this._pluginManager.createContext('setItem');
       context.operationState.originalValue = value;
@@ -1070,6 +1088,19 @@ export class LocalSpace implements LocalSpaceInstance {
         value) as unknown;
       return returnValue;
     }) as typeof this.setItem;
+  }
+
+  private _createSetItemValueValidationWrapper(
+    original: RawDriverMethod
+  ): RawDriverMethod {
+    return (key: string, value: unknown) => {
+      validateStorageValueWrite(value, {
+        strict: this._config.strictValues === true,
+        operation: 'setItem',
+        key,
+      });
+      return original(key, value);
+    };
   }
 
   private _createGetItemWrapper(original: RawDriverMethod) {
@@ -1103,6 +1134,13 @@ export class LocalSpace implements LocalSpaceInstance {
 
   private _createSetItemsWrapper(original: RawDriverMethod) {
     return (async (entries: BatchItems<unknown>) => {
+      for (const entry of normalizeBatchEntries(entries)) {
+        validateStorageValueWrite(entry.value, {
+          strict: this._config.strictValues === true,
+          operation: 'setItems',
+          key: entry.key,
+        });
+      }
       await this._ensurePluginsInitialized('setItems');
       const batchContext = this._pluginManager.createContext('setItems');
       batchContext.operationState.isBatch = true;
@@ -1211,6 +1249,21 @@ export class LocalSpace implements LocalSpaceInstance {
 
       return finalReturn;
     }) as typeof this.setItems;
+  }
+
+  private _createSetItemsValueValidationWrapper(
+    original: RawDriverMethod
+  ): RawDriverMethod {
+    return (entries: BatchItems<unknown>) => {
+      for (const entry of normalizeBatchEntries(entries)) {
+        validateStorageValueWrite(entry.value, {
+          strict: this._config.strictValues === true,
+          operation: 'setItems',
+          key: entry.key,
+        });
+      }
+      return original(entries);
+    };
   }
 
   private _createGetItemsWrapper(original: RawDriverMethod) {
@@ -1325,6 +1378,33 @@ export class LocalSpace implements LocalSpaceInstance {
       this._assertOpen(operation);
       this._pluginManager.assertNoStorageTransformBypass(operation);
       return original(...args);
+    };
+  }
+
+  private _createRunTransactionWrapper(
+    original: RawDriverMethod
+  ): RawDriverMethod {
+    return async (
+      mode: TransactionMode,
+      runner: (scope: TransactionScope) => unknown
+    ) => {
+      this._assertOpen('runTransaction');
+      this._pluginManager.assertNoStorageTransformBypass('runTransaction');
+
+      return original(mode, (scope: TransactionScope) => {
+        const validatingScope: TransactionScope = {
+          ...scope,
+          set: <T>(key: string, value: T) => {
+            validateStorageValueWrite(value, {
+              strict: this._config.strictValues === true,
+              operation: 'runTransaction',
+              key,
+            });
+            return scope.set(key, value);
+          },
+        };
+        return runner(validatingScope);
+      });
     };
   }
 

@@ -624,8 +624,18 @@ interface LocalSpaceConfig {
   // Plugin configuration
   pluginInitPolicy?: 'fail' | 'disable-and-continue';
   pluginErrorPolicy?: 'strict' | 'lenient';
+  strictValues?: boolean; // Opt in to the 3.0 StorageValue validator
 }
 ```
+
+`strictValues` defaults to `false` in 2.1 so existing applications retain their
+current driver-specific behavior. When enabled, item, batch, and transaction
+writes reject with `SERIALIZATION_FAILED` before a storage side effect if the
+value is outside the 3.0 cross-driver contract. Supported values are `null`,
+booleans, finite numbers, strings, dense arrays, plain objects, `ArrayBuffer`,
+and typed arrays. Date, Map, Set, RegExp, `undefined`, scalar BigInt, cyclic
+values, accessors, and class instances are rejected. 3.0 makes this validation
+unconditional.
 
 When the requested Storage Bucket cannot be opened, IndexedDB falls back to
 the default storage backend. Instances that resolve to that same backend share

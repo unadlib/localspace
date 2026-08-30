@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Added the exported recursive `StorageValue` type plus development diagnostics
+  for values that cannot round-trip consistently across 3.0 drivers.
+- Added the opt-in `strictValues` migration mode, which validates item, batch,
+  and transaction-scope writes before storage side effects.
+
 ## [2.1.0] - 2026-07-14
 
 ### Added

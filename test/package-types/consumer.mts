@@ -6,6 +6,7 @@ import localspace, {
   type Driver,
   type LocalSpaceConfig,
   type LocalSpaceInstance,
+  type StorageValue,
   type TransactionMode,
 } from 'localspace';
 import {
@@ -19,6 +20,10 @@ const mode: TransactionMode = 'readwrite';
 const options = {} as ReactNativeInstanceOptions;
 const legacySizeResult = instance.config({ size: 4_980_736 });
 const legacySize: number | undefined = instance.config('size');
+const migrationValue: StorageValue = {
+  binary: new Uint8Array([1, 2, 3]),
+  nested: [null, true, 1, 'value'],
+};
 const customDriver: Driver = {
   ...memoryDriver,
   _driver: 'package-types-esm',
@@ -48,6 +53,7 @@ void [
   options,
   legacySizeResult,
   legacySize,
+  migrationValue,
   customDriver,
   typecheckDirectLifecycleCalls,
   createReactNativeInstance,

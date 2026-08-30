@@ -80,5 +80,19 @@ export function normalizeConfigOptions(
     normalized.driver = [...options.driver];
   }
 
+  if (
+    options.strictValues !== undefined &&
+    typeof options.strictValues !== 'boolean'
+  ) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Configuration option "strictValues" must be a boolean.',
+      {
+        configKey: 'strictValues',
+        providedType: typeof options.strictValues,
+      }
+    );
+  }
+
   return normalized;
 }
