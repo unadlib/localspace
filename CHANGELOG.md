@@ -31,6 +31,8 @@
 - Added Node 22/24 and Chromium/Firefox/WebKit release matrices.
 - Added integrity-pinned 2.1.0 performance/package baselines, same-run relative
   comparison evidence, and exact package allowlist/size budgets.
+- Added executable global coverage floors to the Node 24 coverage job instead
+  of recording a prose-only percentage that drifts as tests change.
 
 ### Changed
 
