@@ -4,7 +4,7 @@
     "namespace": "localspace.plugin",
     "formatVersion": 1,
     "legacyWriter": "2.0.x",
-    "futureWriter": "3.0.0-fixture",
+    "fixtureKind": "hand-authored-parser-corpus",
     "requiredReaders": ["2.1.x", "3.x"]
   },
   "keys": {
@@ -52,7 +52,7 @@
       }
     }
   },
-  "future": {
+  "versioned": {
     "encryption": {
       "expected": {
         "message": "fixture-secret",

@@ -85,6 +85,12 @@ an unknown version or malformed matching payload with
 `DESERIALIZATION_FAILED`; objects that merely resemble a legacy marker are
 left as user values.
 
+The 3.0 storage pipeline places these transform envelopes around one core
+`localspace.record` v1 value. On rollback, 2.1 first removes the configured
+transform envelopes and then decodes that core record. An application object is
+encoded inside the core record rather than inspected as an envelope, including
+when it exactly matches one of the reserved marker shapes.
+
 ### TTL Plugin
 
 Wraps values as `{ data, expiresAt }`, invalidates stale reads, and optionally runs background cleanup.

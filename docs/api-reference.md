@@ -654,6 +654,12 @@ and typed arrays. Date, Map, Set, RegExp, `undefined`, scalar BigInt, cyclic
 values, accessors, and class instances are rejected. 3.0 makes this validation
 unconditional.
 
+The 2.1 read path recognizes the frozen 3.0 `StoredRecord` v1 representation
+after configured storage transforms have been removed. This applies to item,
+batch, iteration, and transaction-scope reads. 2.1 does not switch ordinary
+writes to the new representation; it remains a rollback bridge until the 3.0
+writer is enabled.
+
 When the requested Storage Bucket cannot be opened, IndexedDB falls back to
 the default storage backend. Instances that resolve to that same backend share
 one connection context even if one of them originally requested a bucket.

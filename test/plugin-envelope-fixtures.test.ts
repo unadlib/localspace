@@ -23,7 +23,7 @@ type PluginEnvelopeFixtures = {
     namespace: string;
     formatVersion: number;
     legacyWriter: string;
-    futureWriter: string;
+    fixtureKind: string;
     requiredReaders: string[];
   };
   keys: {
@@ -31,7 +31,7 @@ type PluginEnvelopeFixtures = {
     wrongEncryption: string;
   };
   legacy: Record<PluginEnvelopeKind, StoredFixture>;
-  future: Record<PluginEnvelopeKind, StoredFixture>;
+  versioned: Record<PluginEnvelopeKind, StoredFixture>;
   markerCollisions: Record<string, unknown>;
   failures: {
     unknownVersion: Record<PluginEnvelopeKind, unknown>;
@@ -81,7 +81,7 @@ describe('static cross-version plugin fixtures', () => {
       namespace: PLUGIN_ENVELOPE_NAMESPACE,
       formatVersion: PLUGIN_ENVELOPE_VERSION,
       legacyWriter: '2.0.x',
-      futureWriter: '3.0.0-fixture',
+      fixtureKind: 'hand-authored-parser-corpus',
       requiredReaders: ['2.1.x', '3.x'],
     });
   });
@@ -98,9 +98,9 @@ describe('static cross-version plugin fixtures', () => {
     }
   });
 
-  it('reads static payloads representing the 3.0 writer', async () => {
+  it('reads the static versioned parser corpus', async () => {
     for (const kind of kinds) {
-      const fixture = fixtures.future[kind];
+      const fixture = fixtures.versioned[kind];
       const { store, raw } = await createStorePair('future-fixture', kind);
       await raw.setItem('fixture', fixture.stored);
 

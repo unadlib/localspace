@@ -19,6 +19,18 @@ export type PluginEnvelopeReadResult<T> =
   | { matched: false }
   | { matched: true; payload: T };
 
+export const createPluginEnvelope = <T>(
+  kind: PluginEnvelopeKind,
+  payload: T
+): PluginEnvelopeV1<T> => ({
+  [PLUGIN_ENVELOPE_PROPERTY]: {
+    namespace: PLUGIN_ENVELOPE_NAMESPACE,
+    kind,
+    version: PLUGIN_ENVELOPE_VERSION,
+  },
+  payload,
+});
+
 const hasOwn = (value: object, property: PropertyKey): boolean =>
   Object.prototype.hasOwnProperty.call(value, property);
 
