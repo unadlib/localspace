@@ -9,7 +9,7 @@
 - Added the recursive `StorageValue` contract for values that round-trip across
   IndexedDB, localStorage, memory, and React Native AsyncStorage. Every item,
   batch, plugin-output, and transaction-scope write is validated before storage
-  side effects.
+  side effects, including detached binary buffers/views.
 - Added collision-safe StoredRecord v1 encoding for every new logical value,
   while retaining readers for unwrapped 2.x values and legacy built-in-plugin
   payloads. Unknown versions and non-canonical envelope/payload shapes fail

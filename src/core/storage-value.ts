@@ -72,15 +72,6 @@ const hasPlainObjectPrototype = (value: object): boolean => {
   );
 };
 
-const isArrayBuffer = (value: object): value is ArrayBuffer => {
-  try {
-    arrayBufferByteLength.call(value);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const findStorageValueIssue = (
   value: unknown,
   path: string,
@@ -105,12 +96,14 @@ const findStorageValueIssue = (
   }
 
   const tag = objectToString.call(value);
-  if (isArrayBuffer(value)) {
+  if (tag === '[object ArrayBuffer]') {
     try {
       const byteLength = arrayBufferByteLength.call(value) as number;
-      return typeof byteLength === 'number'
-        ? null
-        : issue(path, 'binary values must expose a byteLength', value);
+      if (typeof byteLength !== 'number') {
+        return issue(path, 'binary values must expose a byteLength', value);
+      }
+      new Uint8Array(value as ArrayBuffer);
+      return null;
     } catch {
       return issue(path, 'detached binary values are not supported', value);
     }
@@ -119,12 +112,19 @@ const findStorageValueIssue = (
     if (!SUPPORTED_BINARY_TAGS.has(tag) || tag === '[object ArrayBuffer]') {
       return issue(path, 'only supported typed-array views are allowed', value);
     }
-    if (objectToString.call(value.buffer) === '[object SharedArrayBuffer]') {
+    const backingBuffer = value.buffer;
+    if (objectToString.call(backingBuffer) === '[object SharedArrayBuffer]') {
       return issue(
         path,
         'binary views backed by shared memory are not supported',
         value
       );
+    }
+    try {
+      arrayBufferByteLength.call(backingBuffer);
+      new Uint8Array(backingBuffer as ArrayBuffer);
+    } catch {
+      return issue(path, 'detached binary values are not supported', value);
     }
     return null;
   }

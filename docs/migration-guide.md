@@ -153,7 +153,7 @@ await store.setItem('account', {
 
 Also remove cycles, accessors, symbol/non-enumerable properties, sparse arrays,
 `Blob`, `DataView`, `SharedArrayBuffer`, shared-memory views, `NaN`, and
-infinities.
+infinities. Detached `ArrayBuffer` values and typed-array views are invalid.
 
 TypeScript read/write generics now extend `StorageValue`. Prefer stored DTO type
 aliases that structurally satisfy the record contract:

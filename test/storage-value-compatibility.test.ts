@@ -302,6 +302,35 @@ describe('3.0 StorageValue contract', () => {
     });
   });
 
+  it('rejects detached buffers and typed arrays with a structured error', async () => {
+    const buffer = new ArrayBuffer(4);
+    const view = new Uint8Array(buffer);
+    structuredClone(buffer, { transfer: [buffer] });
+
+    expect(inspectStorageValue(buffer)).toEqual({
+      path: '$',
+      reason: 'detached binary values are not supported',
+      valueType: 'ArrayBuffer',
+    });
+    expect(inspectStorageValue(view)).toEqual({
+      path: '$',
+      reason: 'detached binary values are not supported',
+      valueType: 'Uint8Array',
+    });
+
+    const instance = await createMemoryInstance();
+    await expect(instance.setItem('detached', view)).rejects.toMatchObject({
+      code: 'SERIALIZATION_FAILED',
+      details: {
+        key: 'detached',
+        valueReason: 'detached binary values are not supported',
+        valueType: 'Uint8Array',
+      },
+    });
+    await expect(instance.keys()).resolves.toEqual([]);
+    await instance.close();
+  });
+
   it('rejects objects that forge a supported binary tag', () => {
     const forged = {
       [Symbol.toStringTag]: 'Uint8Array',
