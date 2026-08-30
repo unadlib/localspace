@@ -46,6 +46,8 @@ type RegisteredPlugin = {
   order: number;
 };
 
+type PluginHookRole = 'all' | 'logical' | 'storage-transform';
+
 type BatchLineageEntry<T> = {
   key: string;
   physicalValue: T;
@@ -302,8 +304,10 @@ export class PluginManager {
 
   private getActivePlugins(options?: {
     reverse?: boolean;
+    role?: PluginHookRole;
   }): LocalSpacePlugin[] {
     const reverse = options?.reverse ?? false;
+    const role = options?.role ?? 'all';
     const plugins = this.pluginRegistry
       .map((entry) => entry.plugin)
       .filter((plugin) => {
@@ -323,6 +327,14 @@ export class PluginManager {
           }
         }
         return enabled !== false;
+      })
+      .filter((plugin) => {
+        if (role === 'all') return true;
+        const isStorageTransform =
+          getBuiltInStorageTransformKind(plugin) !== null;
+        return role === 'storage-transform'
+          ? isStorageTransform
+          : !isStorageTransform;
       });
     return reverse ? plugins.slice().reverse() : plugins;
   }
@@ -405,10 +417,11 @@ export class PluginManager {
     key: string,
     value: T,
     context: PluginContext,
-    prepareOutput?: (value: T, plugin: LocalSpacePlugin) => T
+    prepareOutput?: (value: T, plugin: LocalSpacePlugin) => T,
+    role: PluginHookRole = 'all'
   ): Promise<T> {
     let current = value;
-    for (const plugin of this.getActivePlugins()) {
+    for (const plugin of this.getActivePlugins({ role })) {
       if (!plugin.beforeSet) continue;
       current = await this.invokeValueHook(
         plugin,
@@ -429,9 +442,10 @@ export class PluginManager {
   async afterSet<T>(
     key: string,
     value: T,
-    context: PluginContext
+    context: PluginContext,
+    role: PluginHookRole = 'all'
   ): Promise<void> {
-    for (const plugin of this.getActivePlugins({ reverse: true })) {
+    for (const plugin of this.getActivePlugins({ reverse: true, role })) {
       if (!plugin.afterSet) continue;
       await this.invokeVoidHook(
         plugin,
@@ -464,10 +478,11 @@ export class PluginManager {
   async afterGet<T>(
     key: string,
     value: T | null,
-    context: PluginContext
+    context: PluginContext,
+    role: PluginHookRole = 'all'
   ): Promise<T | null> {
     let currentValue: T | null = value;
-    for (const plugin of this.getActivePlugins({ reverse: true })) {
+    for (const plugin of this.getActivePlugins({ reverse: true, role })) {
       if (!plugin.afterGet) continue;
       currentValue = await this.invokeValueHook(
         plugin,
@@ -519,12 +534,13 @@ export class PluginManager {
     prepareOutput?: (
       entries: BatchItems<T>,
       plugin: LocalSpacePlugin
-    ) => BatchItems<T>
+    ) => BatchItems<T>,
+    role: PluginHookRole = 'all'
   ): Promise<PreparedSetItems<T>> {
     let current = entries;
     let lineage = createBatchLineage(entries);
     let hasStorageTransforms = false;
-    for (const plugin of this.getActivePlugins()) {
+    for (const plugin of this.getActivePlugins({ role })) {
       const isStorageTransform =
         getBuiltInStorageTransformKind(plugin) !== null;
       hasStorageTransforms ||= isStorageTransform;
@@ -555,10 +571,11 @@ export class PluginManager {
 
   async afterSetItems<T>(
     entries: BatchResponse<T>,
-    context: PluginContext
+    context: PluginContext,
+    role: PluginHookRole = 'all'
   ): Promise<BatchResponse<T>> {
     let current = entries;
-    for (const plugin of this.getActivePlugins({ reverse: true })) {
+    for (const plugin of this.getActivePlugins({ reverse: true, role })) {
       if (!plugin.afterSetItems) continue;
       current = await this.invokeValueHook(
         plugin,
@@ -595,10 +612,11 @@ export class PluginManager {
 
   async afterGetItems<T>(
     entries: BatchResponse<T>,
-    context: PluginContext
+    context: PluginContext,
+    role: PluginHookRole = 'all'
   ): Promise<BatchResponse<T>> {
     let current = entries;
-    for (const plugin of this.getActivePlugins({ reverse: true })) {
+    for (const plugin of this.getActivePlugins({ reverse: true, role })) {
       if (!plugin.afterGetItems) continue;
       current = await this.invokeValueHook(
         plugin,

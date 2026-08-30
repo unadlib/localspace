@@ -17,6 +17,7 @@ import {
   TTL_BACKGROUND_CLEANUP_OPERATION,
   type PluginBackgroundTaskPause,
 } from '../core/plugin-capabilities.js';
+import { decodeStoredRecordValue } from '../core/stored-record.js';
 
 export interface TTLPluginOptions {
   /** Default TTL in milliseconds applied when key-specific TTL is not defined */
@@ -376,9 +377,19 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
         if (
           hasPluginInternalOperation(context, TTL_BACKGROUND_CLEANUP_OPERATION)
         ) {
-          notifyExpiredInBackground(key, payload.data, context, options);
+          notifyExpiredInBackground(
+            key,
+            decodeStoredRecordValue(payload.data),
+            context,
+            options
+          );
         } else {
-          await notifyExpired(key, payload.data, context, options);
+          await notifyExpired(
+            key,
+            decodeStoredRecordValue(payload.data),
+            context,
+            options
+          );
         }
       }
       return null;
@@ -423,7 +434,10 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
       }
       if (payload.expiresAt <= now) {
         expiredKeys.push(key);
-        expiredEntries.push({ key, value: payload.data });
+        expiredEntries.push({
+          key,
+          value: decodeStoredRecordValue(payload.data),
+        });
         return { key, value: null };
       }
       return { key, value: unwrapTtlData<T>(payload) };

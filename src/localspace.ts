@@ -37,6 +37,7 @@ import {
 import { validateStorageValueWrite } from './core/storage-value.js';
 import {
   canonicalizeStorageValue,
+  createStoredRecord,
   decodeStoredRecordValue,
 } from './core/stored-record.js';
 import {
@@ -132,6 +133,9 @@ const prepareStorageValueBatch = (
     value: canonicalizeStorageValue(value as StorageValue),
   }));
 };
+
+const encodeStorageValueRecord = (value: StorageValue): StorageValue =>
+  createStoredRecord(value) as unknown as StorageValue;
 
 type LifecycleCallback =
   | 'plugin-init'
@@ -999,7 +1003,7 @@ export class LocalSpace implements LocalSpaceInstance {
       await this._ensurePluginsInitialized('setItem');
       const context = this._pluginManager.createContext('setItem');
       context.operationState.originalValue = logicalValue;
-      const processedValue = await this._pluginManager.beforeSet(
+      const processedLogicalValue = await this._pluginManager.beforeSet(
         key,
         logicalValue,
         context,
@@ -1009,12 +1013,37 @@ export class LocalSpace implements LocalSpaceInstance {
             key,
             valueSource: 'plugin-output',
             plugin: plugin.name,
-          })
+          }),
+        'logical'
+      );
+      const processedValue = await this._pluginManager.beforeSet(
+        key,
+        encodeStorageValueRecord(processedLogicalValue),
+        context,
+        (pluginValue, plugin) =>
+          acceptStorageValueWrite(pluginValue, {
+            operation: 'setItem',
+            key,
+            valueSource: 'plugin-output',
+            plugin: plugin.name,
+          }),
+        'storage-transform'
       );
       const storedValue = canonicalizeStorageValue(processedValue);
       const driverResult = await original(key, storedValue);
       context.operationState.driverResult = driverResult;
-      await this._pluginManager.afterSet(key, storedValue, context);
+      await this._pluginManager.afterSet(
+        key,
+        storedValue,
+        context,
+        'storage-transform'
+      );
+      await this._pluginManager.afterSet(
+        key,
+        processedLogicalValue,
+        context,
+        'logical'
+      );
       const returnValue = (context.operationState.returnValue ??
         context.operationState.originalValue ??
         logicalValue) as unknown;
@@ -1025,12 +1054,13 @@ export class LocalSpace implements LocalSpaceInstance {
   private _createSetItemValueValidationWrapper(
     original: RawDriverMethod
   ): RawDriverMethod {
-    return (key: string, value: unknown) => {
+    return async (key: string, value: unknown) => {
       const canonicalValue = prepareStorageValueWrite(value, {
         operation: 'setItem',
         key,
       });
-      return original(key, canonicalValue);
+      await original(key, encodeStorageValueRecord(canonicalValue));
+      return canonicalValue;
     };
   }
 
@@ -1044,12 +1074,19 @@ export class LocalSpace implements LocalSpaceInstance {
       markPluginInternalOperation(context, internalOperation);
       const targetKey = await this._pluginManager.beforeGet(key, context);
       const driverValue = await original(targetKey);
-      const finalValue = await this._pluginManager.afterGet(
+      const storedRecord = await this._pluginManager.afterGet(
         targetKey,
         driverValue as unknown,
-        context
+        context,
+        'storage-transform'
       );
-      return decodeStoredRecordValue(finalValue);
+      const logicalValue = decodeStoredRecordValue(storedRecord);
+      return this._pluginManager.afterGet(
+        targetKey,
+        logicalValue,
+        context,
+        'logical'
+      );
     }) as typeof this.getItem;
   }
 
@@ -1076,133 +1113,188 @@ export class LocalSpace implements LocalSpaceInstance {
       await this._ensurePluginsInitialized('setItems');
       const batchContext = this._pluginManager.createContext('setItems');
       batchContext.operationState.isBatch = true;
-      const {
-        entries: prepared,
-        logicalEntries,
-        hasStorageTransforms: preserveLogicalValues,
-      } = await this._pluginManager.beforeSetItems(
-        canonicalEntries,
-        batchContext,
-        (pluginEntries, plugin) =>
-          validatePluginStorageValueBatch(pluginEntries, {
-            plugin: plugin.name,
-          })
-      );
-      const normalized = this._pluginManager.normalizeBatch(prepared);
-      batchContext.operationState.batchSize = normalized.length;
-      const processedEntries: Array<{
+      const { entries: logicalBatch } =
+        await this._pluginManager.beforeSetItems(
+          canonicalEntries,
+          batchContext,
+          (pluginEntries, plugin) =>
+            validatePluginStorageValueBatch(pluginEntries, {
+              plugin: plugin.name,
+            }),
+          'logical'
+        );
+      const normalizedLogical = this._pluginManager.normalizeBatch(logicalBatch);
+      batchContext.operationState.batchSize = normalizedLogical.length;
+      const logicalEntries: Array<{
         key: string;
-        value: unknown;
+        value: StorageValue;
+        originalValue: StorageValue;
         context: PluginContext;
       }> = [];
 
-      for (let index = 0; index < normalized.length; index++) {
-        const entry = normalized[index];
-        const logicalEntry = logicalEntries[index];
-        const logicalValue =
-          preserveLogicalValues && logicalEntry?.key === entry.key
-            ? logicalEntry.value
-            : entry.value;
+      for (const entry of normalizedLogical) {
         const entryContext = this._pluginManager.createContext('setItem');
-        entryContext.operationState.originalValue = logicalValue;
+        entryContext.operationState.originalValue = entry.value;
         entryContext.operationState.isBatch = true;
-        entryContext.operationState.batchSize = normalized.length;
+        entryContext.operationState.batchSize = normalizedLogical.length;
         const pluginValue = await this._pluginManager.beforeSet(
           entry.key,
           entry.value,
           entryContext,
-          (pluginValue, plugin) =>
-            acceptStorageValueWrite(pluginValue, {
+          (value, plugin) =>
+            acceptStorageValueWrite(value, {
               operation: 'setItems',
               key: entry.key,
               valueSource: 'plugin-output',
               plugin: plugin.name,
-            })
+            }),
+          'logical'
         );
-        const processedValue = canonicalizeStorageValue(pluginValue);
-        const entryRecord = {
+        logicalEntries.push({
           key: entry.key,
-          value: processedValue,
+          value: canonicalizeStorageValue(pluginValue),
+          originalValue: entry.value,
           context: entryContext,
-        };
-        processedEntries.push(entryRecord);
+        });
       }
 
-      const indexProcessedEntries = () => {
-        const entriesByKey = new Map<
-          string,
-          Array<(typeof processedEntries)[number]>
-        >();
-        for (const entry of processedEntries) {
-          const matchingEntries = entriesByKey.get(entry.key) ?? [];
-          matchingEntries.push(entry);
-          entriesByKey.set(entry.key, matchingEntries);
+      const recordEntries = logicalEntries.map(({ key, value }) => ({
+        key,
+        value: encodeStorageValueRecord(value),
+      }));
+      const { entries: storageBatch } =
+        await this._pluginManager.beforeSetItems(
+          recordEntries,
+          batchContext,
+          (pluginEntries, plugin) =>
+            validatePluginStorageValueBatch(pluginEntries, {
+              plugin: plugin.name,
+            }),
+          'storage-transform'
+        );
+      const normalizedStorage = this._pluginManager.normalizeBatch(storageBatch);
+      const logicalEntriesByKey = new Map<
+        string,
+        Array<(typeof logicalEntries)[number]>
+      >();
+      for (const entry of logicalEntries) {
+        const matchingEntries = logicalEntriesByKey.get(entry.key) ?? [];
+        matchingEntries.push(entry);
+        logicalEntriesByKey.set(entry.key, matchingEntries);
+      }
+
+      const processedEntries: Array<{
+        key: string;
+        value: StorageValue;
+        logical: (typeof logicalEntries)[number];
+      }> = [];
+      for (const entry of normalizedStorage) {
+        const logical = logicalEntriesByKey.get(entry.key)?.shift();
+        if (!logical) {
+          throw createLocalSpaceError(
+            'OPERATION_FAILED',
+            'A storage transform changed the batch key set.',
+            {
+              operation: 'setItems',
+              key: entry.key,
+              reason: 'storage-transform-key-mismatch',
+            }
+          );
         }
-        return entriesByKey;
-      };
+        const pluginValue = await this._pluginManager.beforeSet(
+          entry.key,
+          entry.value,
+          logical.context,
+          (value, plugin) =>
+            acceptStorageValueWrite(value, {
+              operation: 'setItems',
+              key: entry.key,
+              valueSource: 'plugin-output',
+              plugin: plugin.name,
+            }),
+          'storage-transform'
+        );
+        processedEntries.push({
+          key: entry.key,
+          value: canonicalizeStorageValue(pluginValue),
+          logical,
+        });
+      }
+      if ([...logicalEntriesByKey.values()].some((values) => values.length)) {
+        throw createLocalSpaceError(
+          'OPERATION_FAILED',
+          'A storage transform removed entries from the batch.',
+          {
+            operation: 'setItems',
+            reason: 'storage-transform-key-mismatch',
+          }
+        );
+      }
 
       const driverResponse = (await original(
-        processedEntries as unknown as BatchItems<unknown>
-      )) as BatchResponse<unknown>;
-      const responseEntriesByKey = indexProcessedEntries();
-      const afterSetItemsInput = preserveLogicalValues
-        ? driverResponse.map((entry) => {
-            const matchingEntries = responseEntriesByKey.get(entry.key);
-            const processedEntry =
-              matchingEntries && matchingEntries.length > 0
-                ? matchingEntries.shift()
-                : undefined;
-            return {
-              key: entry.key,
-              value: processedEntry
-                ? processedEntry.context.operationState.originalValue
-                : entry.value,
-            };
-          })
-        : driverResponse;
-      const finalized = await this._pluginManager.afterSetItems(
-        afterSetItemsInput,
-        batchContext
+        processedEntries.map(({ key, value }) => ({ key, value }))
+      )) as BatchResponse<StorageValue>;
+      await this._pluginManager.afterSetItems(
+        driverResponse,
+        batchContext,
+        'storage-transform'
       );
 
       for (const entry of processedEntries) {
         await this._pluginManager.afterSet(
           entry.key,
           entry.value,
-          entry.context
+          entry.logical.context,
+          'storage-transform'
+        );
+        await this._pluginManager.afterSet(
+          entry.key,
+          entry.logical.value,
+          entry.logical.context,
+          'logical'
         );
       }
 
-      const finalizedEntriesByKey = indexProcessedEntries();
-      const finalReturn = finalized.map((entry) => {
-        const matchingEntries = finalizedEntriesByKey.get(entry.key);
-        const processedEntry =
-          matchingEntries && matchingEntries.length > 0
-            ? matchingEntries.shift()
-            : undefined;
-        const contextualValue =
-          processedEntry?.context.operationState.returnValue;
-        const value =
-          typeof contextualValue !== 'undefined'
-            ? contextualValue
-            : preserveLogicalValues
-              ? entry.value
-              : typeof entry.value !== 'undefined'
-                ? entry.value
-                : (processedEntry?.context.operationState.originalValue ??
-                  processedEntry?.value);
-        return { key: entry.key, value };
+      const logicalResponse: BatchResponse<StorageValue> = logicalEntries.map(
+        (entry) => ({ key: entry.key, value: entry.originalValue })
+      );
+      const finalized = await this._pluginManager.afterSetItems(
+        logicalResponse,
+        batchContext,
+        'logical'
+      );
+      const contextsByKey = new Map<
+        string,
+        Array<(typeof logicalEntries)[number]>
+      >();
+      for (const entry of logicalEntries) {
+        const matchingEntries = contextsByKey.get(entry.key) ?? [];
+        matchingEntries.push(entry);
+        contextsByKey.set(entry.key, matchingEntries);
+      }
+      return finalized.map((entry) => {
+        const logical = contextsByKey.get(entry.key)?.shift();
+        return {
+          key: entry.key,
+          value:
+            logical?.context.operationState.returnValue ?? entry.value ?? null,
+        };
       });
-
-      return finalReturn;
     }) as typeof this.setItems;
   }
 
   private _createSetItemsValueValidationWrapper(
     original: RawDriverMethod
   ): RawDriverMethod {
-    return (entries: BatchItems<unknown>) => {
-      return original(prepareStorageValueBatch(entries));
+    return async (entries: BatchItems<unknown>) => {
+      const logicalEntries = prepareStorageValueBatch(entries);
+      await original(
+        logicalEntries.map(({ key, value }) => ({
+          key,
+          value: encodeStorageValueRecord(value),
+        }))
+      );
+      return logicalEntries;
     };
   }
 
@@ -1247,7 +1339,7 @@ export class LocalSpace implements LocalSpaceInstance {
       const driverResponse = (await original(
         targetKeys
       )) as BatchResponse<unknown>;
-      const processedEntries: BatchResponse<unknown> = [];
+      const storageEntries: BatchResponse<unknown> = [];
 
       for (let i = 0; i < driverResponse.length; i++) {
         const entry = driverResponse[i];
@@ -1261,20 +1353,42 @@ export class LocalSpace implements LocalSpaceInstance {
         const processedValue = await this._pluginManager.afterGet(
           entry.key,
           entry.value,
-          context
+          context,
+          'storage-transform'
         );
-        processedEntries.push({ key: entry.key, value: processedValue });
+        storageEntries.push({ key: entry.key, value: processedValue });
       }
 
+      const storedRecords = await this._pluginManager.afterGetItems(
+        storageEntries,
+        batchContext,
+        'storage-transform'
+      );
+      const logicalEntries: BatchResponse<unknown> = [];
+      for (const entry of storedRecords) {
+        const context =
+          entryContexts.find((candidate) => candidate.targetKey === entry.key)
+            ?.context ?? this._pluginManager.createContext('getItem');
+        context.operationState.isBatch = true;
+        context.operationState.batchSize = requestedKeys.length;
+        const logicalValue = await this._pluginManager.afterGet(
+          entry.key,
+          decodeStoredRecordValue(entry.value),
+          context,
+          'logical'
+        );
+        logicalEntries.push({ key: entry.key, value: logicalValue });
+      }
       const finalEntries = await this._pluginManager.afterGetItems(
-        processedEntries,
-        batchContext
+        logicalEntries,
+        batchContext,
+        'logical'
       );
       return finalEntries.map((entry) => {
         const requestedKey = targetToRequested.get(entry.key) ?? entry.key;
         return {
           key: requestedKey,
-          value: decodeStoredRecordValue(entry.value),
+          value: entry.value,
         };
       });
     }) as typeof this.getItems;
@@ -1366,12 +1480,13 @@ export class LocalSpace implements LocalSpaceInstance {
           ...scope,
           get: async <T extends StorageValue>(key: string) =>
             decodeStoredRecordValue(await scope.get<T>(key)) as T | null,
-          set: <T extends StorageValue>(key: string, value: T) => {
+          set: async <T extends StorageValue>(key: string, value: T) => {
             const canonicalValue = prepareStorageValueWrite(value, {
               operation: 'runTransaction',
               key,
             });
-            return scope.set(key, canonicalValue) as Promise<T>;
+            await scope.set(key, encodeStorageValueRecord(canonicalValue));
+            return canonicalValue as T;
           },
           iterate: <T extends StorageValue, U>(
             iterator: (value: T, key: string, iterationNumber: number) => U

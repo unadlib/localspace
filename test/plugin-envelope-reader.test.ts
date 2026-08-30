@@ -14,6 +14,11 @@ import {
   type PluginEnvelopeKind,
   type PluginEnvelopeV1,
 } from '../src/core/plugin-envelope';
+import { readStoredRecord } from '../src/core/stored-record';
+import {
+  getRawMemoryValue,
+  setRawMemoryValue,
+} from './utils/raw-memory';
 
 const uniqueName = (prefix: string) =>
   `${prefix}-${Math.random().toString(36).slice(2)}`;
@@ -34,9 +39,15 @@ const createStorePair = async (prefix: string, plugin: LocalSpacePlugin) => {
   const name = uniqueName(prefix);
   const options = { name, storeName: 'store' };
   const store = localspace.createInstance({ ...options, plugins: [plugin] });
-  const raw = localspace.createInstance(options);
   await store.setDriver([store.MEMORY]);
-  await raw.setDriver([raw.MEMORY]);
+  const raw = {
+    getItem: async <T = unknown>(key: string): Promise<T | null> =>
+      (await getRawMemoryValue(options, key)) as T | null,
+    setItem: async <T>(key: string, value: T): Promise<T> => {
+      await setRawMemoryValue(options, key, value);
+      return value;
+    },
+  };
   return { store, raw };
 };
 
@@ -112,9 +123,14 @@ describe('versioned plugin envelope reader', () => {
       ttlPlugin({ defaultTTL: 60_000 })
     );
     await store.setItem('legacy', { source: '2.x' });
-    await expect(raw.getItem('legacy')).resolves.toMatchObject({
-      __ls_ttl: true,
-      data: { source: '2.x' },
+    const physical = await raw.getItem<{
+      __ls_ttl: true;
+      data: unknown;
+    }>('legacy');
+    expect(physical).toMatchObject({ __ls_ttl: true });
+    expect(readStoredRecord(physical?.data)).toEqual({
+      matched: true,
+      value: { source: '2.x' },
     });
 
     await raw.setItem(
@@ -136,7 +152,10 @@ describe('versioned plugin envelope reader', () => {
 
     await store.setItem('infinite', 'value');
     await expect(store.getItem('infinite')).resolves.toBe('value');
-    await expect(raw.getItem('infinite')).resolves.toBe('value');
+    expect(readStoredRecord(await raw.getItem('infinite'))).toEqual({
+      matched: true,
+      value: 'value',
+    });
 
     await expect(
       plugin.afterGet!(

@@ -4,7 +4,12 @@ import {
   memoryDriver,
   type Driver,
   type LocalSpaceInstance,
+  type StorageValue,
 } from '../src/index';
+import {
+  createStoredRecord,
+  decodeStoredRecordValue,
+} from '../src/core/stored-record';
 
 const PUBLIC_METHODS = [
   'clear',
@@ -56,10 +61,16 @@ const createTaggedDriver = (driverName: string, tag: string): Driver => ({
   ...memoryDriver,
   _driver: driverName,
   _support: true,
-  setItem: async function <T>(key: string, value: T): Promise<T> {
-    const stored = `${tag}:${String(value)}`;
+  setItem: async function <T extends StorageValue>(
+    key: string,
+    value: T
+  ): Promise<T> {
+    const logical = decodeStoredRecordValue(value);
+    const stored = createStoredRecord(
+      `${tag}:${String(logical)}`
+    ) as unknown as T;
     await memoryDriver.setItem.call(this, key, stored);
-    return stored as T;
+    return stored;
   },
 });
 

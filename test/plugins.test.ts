@@ -6,6 +6,8 @@ import localspace, {
   compressionPlugin,
   LocalSpacePlugin,
 } from '../src';
+import { readStoredRecord } from '../src/core/stored-record';
+import { setRawMemoryValue } from './utils/raw-memory';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -122,6 +124,7 @@ describe('Plugin system', () => {
         }),
       ],
     });
+    await secure.setDriver([secure.MEMORY]);
 
     await secure.setItem('record', { id: 42 });
 
@@ -129,6 +132,7 @@ describe('Plugin system', () => {
       name: 'secure-derived-db',
       storeName: 'secure-derived-store',
     });
+    await rawReader.setDriver([rawReader.MEMORY]);
     const raw = await rawReader.getItem('record');
     expect(raw).not.toBeNull();
     expect(raw).toMatchObject({ __ls_encrypted: true });
@@ -148,7 +152,11 @@ describe('Plugin system', () => {
       ...encryptedPayload,
       data: `tampered-${encryptedPayload.data}`,
     };
-    await rawReader.setItem('record', tampered);
+    await setRawMemoryValue(
+      { name: 'secure-derived-db', storeName: 'secure-derived-store' },
+      'record',
+      tampered
+    );
 
     await expect(secure.getItem('record')).rejects.toThrow(
       'Failed to decrypt payload'
@@ -408,7 +416,10 @@ describe('Plugin batch operations', () => {
       storeName: 'ttl-batch-store',
     });
     const rawA = await rawReader.getItem('a');
-    expect(rawA).toMatchObject({ __ls_ttl: true, data: 'val-a' });
+    expect(rawA).toMatchObject({ __ls_ttl: true });
+    expect(
+      readStoredRecord((rawA as { data?: unknown } | null)?.data)
+    ).toEqual({ matched: true, value: 'val-a' });
 
     // Batch get with TTL plugin should unwrap
     const result = await store.getItems(['a', 'b']);
@@ -564,9 +575,11 @@ describe('Plugin batch operations', () => {
       name: 'logical-batch-return-db',
       storeName: 'logical-batch-return-store',
     });
-    await expect(rawReader.getItem('a')).resolves.toMatchObject({
-      __ls_ttl: true,
-      data: 'value',
+    const rawValue = await rawReader.getItem<{ data?: unknown }>('a');
+    expect(rawValue).toMatchObject({ __ls_ttl: true });
+    expect(readStoredRecord(rawValue?.data)).toEqual({
+      matched: true,
+      value: 'value',
     });
   });
 
@@ -614,9 +627,11 @@ describe('Plugin batch operations', () => {
       name: 'reshaped-logical-batch-db',
       storeName: 'reshaped-logical-batch-store',
     });
-    await expect(rawReader.getItem('added')).resolves.toMatchObject({
-      __ls_ttl: true,
-      data: 9,
+    const rawAdded = await rawReader.getItem<{ data?: unknown }>('added');
+    expect(rawAdded).toMatchObject({ __ls_ttl: true });
+    expect(readStoredRecord(rawAdded?.data)).toEqual({
+      matched: true,
+      value: 9,
     });
   });
 });
@@ -699,7 +714,7 @@ describe('Plugin edge cases and combinations', () => {
     const store = localspace.createInstance({
       name: 'mixed-compress-db',
       storeName: 'mixed-compress-store',
-      plugins: [compressionPlugin({ threshold: 100 })],
+      plugins: [compressionPlugin({ threshold: 256 })],
     });
 
     await store.setItems([
@@ -778,6 +793,7 @@ describe('Plugin edge cases and combinations', () => {
       storeName: 'enc-error-batch-store',
       plugins: [encryptionPlugin({ key })],
     });
+    await store.setDriver([store.MEMORY]);
 
     await store.setItems([{ key: 'valid', value: 'secret' }]);
 
@@ -786,12 +802,14 @@ describe('Plugin edge cases and combinations', () => {
       name: 'enc-error-batch-db',
       storeName: 'enc-error-batch-store',
     });
+    await rawReader.setDriver([rawReader.MEMORY]);
     const raw = await rawReader.getItem('valid');
     if (raw && typeof raw === 'object') {
-      await rawReader.setItem('valid', {
-        ...raw,
-        data: 'tampered-data',
-      });
+      await setRawMemoryValue(
+        { name: 'enc-error-batch-db', storeName: 'enc-error-batch-store' },
+        'valid',
+        { ...raw, data: 'tampered-data' }
+      );
     }
 
     // Batch get should fail on decryption

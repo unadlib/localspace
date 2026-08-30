@@ -20,6 +20,11 @@ import {
   STORED_RECORD_VERSION,
   type StoredRecordV1,
 } from '../src/core/stored-record';
+import {
+  getRawMemoryValue,
+  setRawMemoryItems,
+  setRawMemoryValue,
+} from './utils/raw-memory';
 
 const uniqueName = (prefix: string) =>
   `${prefix}-${Math.random().toString(36).slice(2)}`;
@@ -46,9 +51,7 @@ const byteValues = (value: ArrayBufferView | ArrayBuffer): number[] => {
   if (value instanceof ArrayBuffer) {
     return [...new Uint8Array(value)];
   }
-  return [
-    ...new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
-  ];
+  return [...new Uint8Array(value.buffer, value.byteOffset, value.byteLength)];
 };
 
 const versionLegacyTransform = (
@@ -131,7 +134,13 @@ describe('StoredRecord v1 contract', () => {
     expect(result.matched).toBe(true);
     if (!result.matched) return;
     const decoded = result.value as Record<string, StorageValue>;
-    expect(Object.keys(decoded)).toEqual(['a', 'binaries', 'buffer', 'view', 'z']);
+    expect(Object.keys(decoded)).toEqual([
+      'a',
+      'binaries',
+      'buffer',
+      'view',
+      'z',
+    ]);
     expect(Object.getPrototypeOf(decoded.a as object)).toBeNull();
     expect((decoded.a as Record<string, StorageValue>).a).toBe(0);
     expect(Object.is((decoded.a as Record<string, StorageValue>).a, -0)).toBe(
@@ -229,27 +238,112 @@ describe('StoredRecord v1 contract', () => {
 
 type StorageBinaryLike = ArrayBuffer | ArrayBufferView;
 
-describe('2.1 forward StoredRecord reader', () => {
+describe('3.0 StoredRecord writer and legacy reader', () => {
   it.each(['MEMORY', 'INDEXEDDB', 'LOCALSTORAGE'] as const)(
-    'reads generated 3.0 records through %s without changing its writer',
+    'wraps every %s write and decodes exactly one record',
     async (driverKey) => {
-      const { reader, raw } = await createPair(driverKey);
+      const { reader } = await createPair(driverKey);
       const logical = { nested: ['value', 42] };
-      const generated = createStoredRecord(logical);
+      const recordShapedUserValue = createStoredRecord(
+        'application value'
+      ) as unknown as StorageValue;
 
-      await expect(raw.setItem('future', generated)).resolves.toEqual(
-        generated
+      await expect(reader.setItem('logical', logical)).resolves.toEqual(
+        logical
       );
-      await expect(reader.getItem('future')).resolves.toEqual(logical);
-
-      await reader.setItem('legacy', logical);
-      await expect(raw.getItem('legacy')).resolves.toEqual(logical);
+      await expect(reader.getItem('logical')).resolves.toEqual(logical);
+      await reader.setItem('record-shaped-user-value', recordShapedUserValue);
+      await expect(reader.getItem('record-shaped-user-value')).resolves.toEqual(
+        recordShapedUserValue
+      );
     }
   );
 
-  it('decodes generated records in batch, iteration, and transaction reads', async () => {
-    const { reader, raw } = await createPair('MEMORY');
-    await raw.setItems([
+  it('wraps batch and transaction writes without consuming record-shaped application values', async () => {
+    const { reader } = await createPair('MEMORY');
+    const config = {
+      name: reader.config('name'),
+      storeName: reader.config('storeName'),
+    };
+    const recordShapedUserValue = createStoredRecord(
+      'application value'
+    ) as unknown as StorageValue;
+
+    await expect(
+      reader.setItems([{ key: 'batch', value: recordShapedUserValue }])
+    ).resolves.toEqual([{ key: 'batch', value: recordShapedUserValue }]);
+    await expect(reader.getItems(['batch'])).resolves.toEqual([
+      { key: 'batch', value: recordShapedUserValue },
+    ]);
+    expect(readStoredRecord(await getRawMemoryValue(config, 'batch'))).toEqual({
+      matched: true,
+      value: recordShapedUserValue,
+    });
+
+    await reader.runTransaction('readwrite', async (scope) => {
+      await expect(
+        scope.set('transaction', recordShapedUserValue)
+      ).resolves.toEqual(recordShapedUserValue);
+      await expect(scope.get('transaction')).resolves.toEqual(
+        recordShapedUserValue
+      );
+    });
+    await expect(reader.getItem('transaction')).resolves.toEqual(
+      recordShapedUserValue
+    );
+    expect(
+      readStoredRecord(await getRawMemoryValue(config, 'transaction'))
+    ).toEqual({ matched: true, value: recordShapedUserValue });
+  });
+
+  it.each([
+    [
+      'ttl' as const,
+      ttlPlugin({ defaultTTL: 60_000 }),
+      createPluginEnvelope('ttl', {
+        data: 'application data',
+        expiresAt: 1,
+      }),
+    ],
+    [
+      'compression' as const,
+      compressionPlugin({ threshold: 0 }),
+      createPluginEnvelope('compression', {
+        algorithm: 'lz-string',
+        data: 'AAAA',
+        originalSize: 1,
+      }),
+    ],
+    [
+      'encryption' as const,
+      encryptionPlugin({
+        key: '0123456789abcdef0123456789abcdef',
+        ivGenerator: () => new Uint8Array(12),
+      }),
+      createPluginEnvelope('encryption', {
+        algorithm: 'AES-GCM',
+        iv: 'AAAAAAAAAAAAAAAA',
+        data: 'AAAA',
+      }),
+    ],
+  ])(
+    'preserves an exact valid %s envelope-shaped application value',
+    async (_kind, plugin, envelope) => {
+      const { reader } = await createPair('MEMORY', [plugin]);
+      const value = envelope as unknown as StorageValue;
+
+      await expect(reader.setItem('collision', value)).resolves.toEqual(value);
+      await expect(reader.getItem('collision')).resolves.toEqual(value);
+    }
+  );
+
+  it('retains physical 2.1-compatible records in batch, iteration, and transaction reads', async () => {
+    const { reader } = await createPair('MEMORY');
+    const config = {
+      name: reader.config('name'),
+      storeName: reader.config('storeName'),
+    };
+    await setRawMemoryItems(config, [
       { key: 'a', value: createStoredRecord({ value: 1 }) },
       { key: 'b', value: createStoredRecord({ value: 2 }) },
     ]);
@@ -276,14 +370,8 @@ describe('2.1 forward StoredRecord reader', () => {
   });
 
   it.each([
-    [
-      'ttl' as const,
-      ttlPlugin({ defaultTTL: 60_000 }),
-    ],
-    [
-      'compression' as const,
-      compressionPlugin({ threshold: 0 }),
-    ],
+    ['ttl' as const, ttlPlugin({ defaultTTL: 60_000 })],
+    ['compression' as const, compressionPlugin({ threshold: 0 })],
     [
       'encryption' as const,
       encryptionPlugin({
@@ -292,21 +380,19 @@ describe('2.1 forward StoredRecord reader', () => {
       }),
     ],
   ])(
-    'reads a generated record wrapped in the frozen %s envelope',
+    'reads a core record wrapped in the frozen %s envelope',
     async (kind, plugin) => {
       const { reader, raw } = await createPair('MEMORY', [plugin]);
-      const writer = localspace.createInstance({
+      const config = {
         name: reader.config('name'),
-        storeName: 'store',
-        plugins: [plugin],
-      });
-      await writer.setDriver([writer.MEMORY]);
+        storeName: reader.config('storeName'),
+      };
       const logical = { message: `future-${kind}` };
-      const record = createStoredRecord(logical);
 
-      await writer.setItem('legacy-transform', record);
+      await reader.setItem('legacy-transform', logical);
       const legacyTransform = await raw.getItem('legacy-transform');
-      await raw.setItem(
+      await setRawMemoryValue(
+        config,
         'future-transform',
         versionLegacyTransform(kind, legacyTransform)
       );

@@ -11,6 +11,10 @@ import {
   type PluginEnvelopeKind,
 } from '../src/core/plugin-envelope';
 import fixtureData from './fixtures/plugin-envelopes.json';
+import {
+  getRawMemoryValue,
+  setRawMemoryValue,
+} from './utils/raw-memory';
 
 type StoredFixture = {
   expected: unknown;
@@ -68,9 +72,15 @@ const createStorePair = async (
     ...options,
     plugins: [createPlugin(kind, encryptionKey)],
   });
-  const raw = localspace.createInstance(options);
   await store.setDriver([store.MEMORY]);
-  await raw.setDriver([raw.MEMORY]);
+  const raw = {
+    getItem: async <T = unknown>(key: string): Promise<T | null> =>
+      (await getRawMemoryValue(options, key)) as T | null,
+    setItem: async <T>(key: string, value: T): Promise<T> => {
+      await setRawMemoryValue(options, key, value);
+      return value;
+    },
+  };
   return { store, raw };
 };
 

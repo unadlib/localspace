@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import localspace, { encryptionPlugin, serializer } from '../src';
 import { LocalSpaceError } from '../src/errors';
+import { setRawMemoryItems, setRawMemoryValue } from './utils/raw-memory';
 
 const VALID_KEY = '0123456789abcdef0123456789abcdef';
 
@@ -8,19 +9,19 @@ const createMemoryStores = async (
   name: string,
   plugin: ReturnType<typeof encryptionPlugin>
 ) => {
+  const config = { name, storeName: 'secure' };
   const secure = localspace.createInstance({
-    name,
-    storeName: 'secure',
+    ...config,
     plugins: [plugin],
   });
-  const raw = localspace.createInstance({ name, storeName: 'secure' });
+  const raw = localspace.createInstance(config);
 
   await Promise.all([
     secure.setDriver([secure.MEMORY]),
     raw.setDriver([raw.MEMORY]),
   ]);
 
-  return { secure, raw };
+  return { secure, raw, config };
 };
 
 const createLegacyPayload = async (
@@ -145,14 +146,14 @@ describe('encryption plugin fail-closed behavior', () => {
   });
 
   it('propagates decryption failures under the default lenient policy', async () => {
-    const { secure, raw } = await createMemoryStores(
+    const { secure, raw, config } = await createMemoryStores(
       'encryption-decryption-error',
       encryptionPlugin({ key: VALID_KEY })
     );
     await secure.setItem('secret', 'plaintext');
 
     const payload = await raw.getItem<Record<string, unknown>>('secret');
-    await raw.setItem('secret', { ...payload, data: 'AAAA' });
+    await setRawMemoryValue(config, 'secret', { ...payload, data: 'AAAA' });
 
     const error = await secure.getItem('secret').catch((cause) => cause);
     expect(error).toBeInstanceOf(LocalSpaceError);
@@ -176,13 +177,13 @@ describe('encryption plugin fail-closed behavior', () => {
       false,
       ['decrypt']
     );
-    const { secure, raw } = await createMemoryStores(
+    const { secure, raw, config } = await createMemoryStores(
       'encryption-decrypt-only-key',
       encryptionPlugin({ key: decryptOnlyKey })
     );
     const firstIv = Uint8Array.from({ length: 12 }, (_, index) => index + 1);
     const secondIv = Uint8Array.from({ length: 12 }, (_, index) => index + 21);
-    await raw.setItems([
+    await setRawMemoryItems(config, [
       {
         key: 'first',
         value: await createLegacyPayload(
@@ -244,14 +245,15 @@ describe('encryption plugin fail-closed behavior', () => {
       ['encrypt']
     );
     const iv = Uint8Array.from({ length: 16 }, (_, index) => index + 1);
-    const { secure, raw } = await createMemoryStores(
+    const { secure, raw, config } = await createMemoryStores(
       'encryption-legacy-cbc-reader',
       encryptionPlugin({
         key: VALID_KEY,
         algorithm: { name: 'AES-CBC', iv },
       })
     );
-    await raw.setItem(
+    await setRawMemoryValue(
+      config,
       'legacy',
       await createLegacyPayload(
         { name: 'AES-CBC', iv },
@@ -286,11 +288,12 @@ describe('encryption plugin fail-closed behavior', () => {
       counter,
       length: 64,
     };
-    const { secure, raw } = await createMemoryStores(
+    const { secure, raw, config } = await createMemoryStores(
       'encryption-legacy-ctr-reader',
       encryptionPlugin({ key, algorithm })
     );
-    await raw.setItem(
+    await setRawMemoryValue(
+      config,
       'legacy',
       await createLegacyPayload(algorithm, key, 'legacy-ctr', payloadIv)
     );
