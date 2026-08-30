@@ -8,18 +8,23 @@ const packageJson = require('../package.json');
 function probeUnsetNodeEnv(moduleKind) {
   const loadLocalSpace =
     moduleKind === 'esm'
-      ? "const { encryptionPlugin } = await import('localspace');"
-      : "const { encryptionPlugin } = require('localspace');";
+      ? "const { LocalSpace } = await import('localspace');"
+      : "const { LocalSpace } = require('localspace');";
   const source = `
-const warnings = [];
-console.warn = (message) => warnings.push(String(message));
-delete process.env.NODE_ENV;
-${loadLocalSpace}
-encryptionPlugin({
-  key: '0123456789abcdef0123456789abcdef',
-  algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
-});
-process.stdout.write(JSON.stringify(warnings));`;
+(async () => {
+  const warnings = [];
+  console.warn = (message) => warnings.push(String(message));
+  delete process.env.NODE_ENV;
+  ${loadLocalSpace}
+  const instance = new LocalSpace({ name: 'package-unset-env', storeName: 'store' });
+  await instance.setDriver([instance.MEMORY]);
+  await instance.runTransaction('readonly', (scope) => scope.keys());
+  await instance.close();
+  process.stdout.write(JSON.stringify(warnings));
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});`;
   const env = { ...process.env };
   delete env.NODE_ENV;
   const args =
@@ -55,6 +60,8 @@ async function main() {
   assert.equal(typeof cjs.LocalSpace, 'function');
   assert.equal(typeof cjs.default?.setItem, 'function');
   assert.equal(typeof cjs.ttlPlugin, 'function');
+  assert.equal(typeof cjs.encryptionPlugin, 'function');
+  assert.equal(typeof cjs.legacyEncryptionMigrationPlugin, 'function');
   assert.equal('syncPlugin' in cjs, false);
   assert.equal('quotaPlugin' in cjs, false);
   assert.equal(typeof cjs.setDeprecationWarnings, 'function');
@@ -62,47 +69,28 @@ async function main() {
     () => require('localspace/src/localspace'),
     (error) => error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'
   );
+  assert.throws(
+    () =>
+      cjs.encryptionPlugin({
+        key: '0123456789abcdef0123456789abcdef',
+        algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
+      }),
+    (error) =>
+      error?.code === 'INVALID_CONFIG' &&
+      error.message.includes('supports only AES-GCM')
+  );
+  const legacyMigrationPlugin = cjs.legacyEncryptionMigrationPlugin({
+    key: '0123456789abcdef0123456789abcdef',
+    algorithm: { name: 'AES-CBC' },
+  });
+  assert.equal(legacyMigrationPlugin.name, 'encryption');
+  const weakTransactionWarning =
+    '[localspace] Deprecation: Memory `runTransaction()` in 2.1 provides snapshot rollback without isolation; 3.0 requires store-scoped serializable isolation.';
+  assert.deepEqual(probeUnsetNodeEnv('cjs'), [weakTransactionWarning]);
+  assert.deepEqual(probeUnsetNodeEnv('esm'), [weakTransactionWarning]);
+
   const originalWarn = console.warn;
   const originalNodeEnv = process.env.NODE_ENV;
-  const productionWarnings = [];
-  console.warn = (message) => productionWarnings.push(String(message));
-  try {
-    process.env.NODE_ENV = 'production';
-    cjs.encryptionPlugin({
-      key: '0123456789abcdef0123456789abcdef',
-      algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
-    });
-  } finally {
-    if (originalNodeEnv === undefined) {
-      delete process.env.NODE_ENV;
-    } else {
-      process.env.NODE_ENV = originalNodeEnv;
-    }
-    console.warn = originalWarn;
-  }
-  assert.deepEqual(productionWarnings, []);
-
-  const developmentWarnings = [];
-  console.warn = (message) => developmentWarnings.push(String(message));
-  try {
-    process.env.NODE_ENV = 'development';
-    cjs.encryptionPlugin({
-      key: '0123456789abcdef0123456789abcdef',
-      algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
-    });
-  } finally {
-    if (originalNodeEnv === undefined) {
-      delete process.env.NODE_ENV;
-    } else {
-      process.env.NODE_ENV = originalNodeEnv;
-    }
-    console.warn = originalWarn;
-  }
-  const legacyEncryptionWarning =
-    '[localspace] Deprecation: AES-CBC encryption is deprecated and read-only; migrate data to AES-GCM.';
-  assert.deepEqual(developmentWarnings, [legacyEncryptionWarning]);
-  assert.deepEqual(probeUnsetNodeEnv('cjs'), [legacyEncryptionWarning]);
-  assert.deepEqual(probeUnsetNodeEnv('esm'), [legacyEncryptionWarning]);
 
   const cjsReactNative = require('localspace/react-native');
   assert.equal(typeof cjsReactNative.createReactNativeInstance, 'function');
@@ -166,6 +154,7 @@ async function main() {
   assert.equal(typeof esm.default?.setItem, 'function');
   assert.equal(typeof esm.default?.capabilities, 'function');
   assert.equal(typeof esm.registerDriver, 'function');
+  assert.equal(typeof esm.legacyEncryptionMigrationPlugin, 'function');
   assert.equal('syncPlugin' in esm, false);
   assert.equal('quotaPlugin' in esm, false);
   assert.equal(typeof esm.setDeprecationWarnings, 'function');
@@ -174,18 +163,25 @@ async function main() {
     (error) => error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'
   );
 
-  const duplicateWarnings = [];
-  console.warn = (message) => duplicateWarnings.push(String(message));
+  const crossEntryWarnings = [];
+  console.warn = (message) => crossEntryWarnings.push(String(message));
   try {
     process.env.NODE_ENV = 'development';
-    esm.encryptionPlugin({
-      key: '0123456789abcdef0123456789abcdef',
-      algorithm: {
-        name: 'AES-CTR',
-        counter: new Uint8Array(16),
-        length: 64,
-      },
+    const cjsMemory = new cjs.LocalSpace({
+      name: 'package-cjs-warning',
+      storeName: 'store',
     });
+    await cjsMemory.setDriver([cjsMemory.MEMORY]);
+    await cjsMemory.runTransaction('readonly', (scope) => scope.keys());
+    await cjsMemory.close();
+
+    const esmMemory = new esm.LocalSpace({
+      name: 'package-esm-warning',
+      storeName: 'store',
+    });
+    await esmMemory.setDriver([esmMemory.MEMORY]);
+    await esmMemory.runTransaction('readonly', (scope) => scope.keys());
+    await esmMemory.close();
   } finally {
     if (originalNodeEnv === undefined) {
       delete process.env.NODE_ENV;
@@ -194,7 +190,7 @@ async function main() {
     }
     console.warn = originalWarn;
   }
-  assert.deepEqual(duplicateWarnings, []);
+  assert.deepEqual(crossEntryWarnings, [weakTransactionWarning]);
 
   const esmReactNative = await import('localspace/react-native');
   assert.equal(typeof esmReactNative.createReactNativeInstance, 'function');

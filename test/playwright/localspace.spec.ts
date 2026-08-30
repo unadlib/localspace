@@ -59,7 +59,7 @@ test.describe('localspace browser interoperability', () => {
     expect(hasDefaultExport).toBe(true);
   });
 
-  test('production ESM suppresses warnings with an empty process.env shim', async ({
+  test('bundled ESM separates legacy encryption migration from normal config', async ({
     page,
   }) => {
     await page.goto('/');
@@ -77,13 +77,24 @@ test.describe('localspace browser interoperability', () => {
       try {
         const moduleUrl = `/dist/index.esm.js?empty-process-env=${Date.now()}`;
         const localspaceModule = await import(moduleUrl);
-        localspaceModule.encryptionPlugin({
+        const migration = localspaceModule.legacyEncryptionMigrationPlugin({
           key: '0123456789abcdef0123456789abcdef',
-          algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
+          algorithm: { name: 'AES-CBC' },
         });
+        let normalConfigError: string | null = null;
+        try {
+          localspaceModule.encryptionPlugin({
+            key: '0123456789abcdef0123456789abcdef',
+            algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
+          });
+        } catch (error) {
+          normalConfigError = (error as { code?: string }).code ?? null;
+        }
         return {
           hasDefaultExport:
             typeof localspaceModule.default?.createInstance === 'function',
+          migrationName: migration.name,
+          normalConfigError,
           warnings,
         };
       } finally {
@@ -91,7 +102,59 @@ test.describe('localspace browser interoperability', () => {
       }
     });
 
-    expect(result).toEqual({ hasDefaultExport: true, warnings: [] });
+    expect(result).toEqual({
+      hasDefaultExport: true,
+      migrationName: 'encryption',
+      normalConfigError: 'INVALID_CONFIG',
+      warnings: [],
+    });
+  });
+
+  test('WebCrypto writes only a versioned AES-GCM envelope', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    const result = await page.evaluate(async (storeName) => {
+      const localspaceModule = await import('/dist/index.esm.js');
+      const options = { name: 'playwright-encryption-v1', storeName };
+      const encrypted = localspaceModule.default.createInstance({
+        ...options,
+        plugins: [
+          localspaceModule.encryptionPlugin({
+            key: '0123456789abcdef0123456789abcdef',
+          }),
+        ],
+      });
+      const raw = localspaceModule.default.createInstance(options);
+      await Promise.all([
+        encrypted.setDriver([encrypted.MEMORY]),
+        raw.setDriver([raw.MEMORY]),
+      ]);
+      const value = { secret: 'browser-webcrypto' };
+      await encrypted.setItem('secret', value);
+      const physical = await raw.getItem('secret');
+      const restored = await encrypted.getItem('secret');
+      await Promise.all([encrypted.close(), raw.close()]);
+
+      return {
+        header: physical?.__localspace__ ?? null,
+        algorithm: physical?.payload?.algorithm ?? null,
+        hasLegacyMarker: physical?.__ls_encrypted === true,
+        restored,
+      };
+    }, randomStoreName('encryption-v1'));
+
+    expect(result).toEqual({
+      header: {
+        namespace: 'localspace.plugin',
+        kind: 'encryption',
+        version: 1,
+      },
+      algorithm: 'AES-GCM',
+      hasLegacyMarker: false,
+      restored: { secret: 'browser-webcrypto' },
+    });
   });
 
   test('production browser bundle suppresses deprecation warnings', async ({

@@ -6,6 +6,10 @@ import localspace, {
   compressionPlugin,
   LocalSpacePlugin,
 } from '../src';
+import {
+  createPluginEnvelope,
+  readPluginEnvelope,
+} from '../src/core/plugin-envelope';
 import { readStoredRecord } from '../src/core/stored-record';
 import { setRawMemoryValue } from './utils/raw-memory';
 
@@ -102,7 +106,13 @@ describe('Plugin system', () => {
     });
 
     const raw = await rawReader.getItem('secret');
-    expect(raw).toMatchObject({ __ls_encrypted: true });
+    expect(raw).toMatchObject({
+      __localspace__: {
+        namespace: 'localspace.plugin',
+        kind: 'encryption',
+        version: 1,
+      },
+    });
 
     const decrypted = await secure.getItem<{ user: string }>('secret');
     expect(decrypted?.user).toBe('ada');
@@ -135,27 +145,21 @@ describe('Plugin system', () => {
     await rawReader.setDriver([rawReader.MEMORY]);
     const raw = await rawReader.getItem('record');
     expect(raw).not.toBeNull();
-    expect(raw).toMatchObject({ __ls_encrypted: true });
-
-    if (!raw || typeof raw !== 'object') {
-      throw new Error('Encrypted payload missing');
-    }
-
-    type RawEncryptedPayload = {
-      __ls_encrypted: true;
+    const parsed = readPluginEnvelope<{
       algorithm: string;
       iv: string;
       data: string;
-    };
-    const encryptedPayload = raw as RawEncryptedPayload;
-    const tampered: RawEncryptedPayload = {
-      ...encryptedPayload,
-      data: `tampered-${encryptedPayload.data}`,
-    };
+    }>(raw, 'encryption');
+    if (!parsed.matched) {
+      throw new Error('Encrypted payload missing');
+    }
     await setRawMemoryValue(
       { name: 'secure-derived-db', storeName: 'secure-derived-store' },
       'record',
-      tampered
+      createPluginEnvelope('encryption', {
+        ...parsed.payload,
+        data: `tampered-${parsed.payload.data}`,
+      })
     );
 
     await expect(secure.getItem('record')).rejects.toThrow(
@@ -271,7 +275,9 @@ describe('Plugin system', () => {
       storeName: 'combo-store',
     });
     const raw = await rawReader.getItem('combo');
-    expect(raw).toMatchObject({ __ls_encrypted: true });
+    expect(raw).toMatchObject({
+      __localspace__: { kind: 'encryption', version: 1 },
+    });
 
     // Same store can decompress, decrypt, and unwrap TTL
     const restored = await store.getItem<{ message: string }>('combo');
@@ -479,7 +485,9 @@ describe('Plugin batch operations', () => {
       storeName: 'enc-batch-store',
     });
     const raw1 = await rawReader.getItem('secret1');
-    expect(raw1).toMatchObject({ __ls_encrypted: true });
+    expect(raw1).toMatchObject({
+      __localspace__: { kind: 'encryption', version: 1 },
+    });
 
     // Batch get with encryption plugin should decrypt
     const result = await store.getItems<{ data: string }>([
@@ -551,7 +559,9 @@ describe('Plugin batch operations', () => {
       storeName: 'combo-batch-store',
     });
     const raw = await rawReader.getItem('item1');
-    expect(raw).toMatchObject({ __ls_encrypted: true });
+    expect(raw).toMatchObject({
+      __localspace__: { kind: 'encryption', version: 1 },
+    });
 
     // Batch get through plugins should unwrap all layers
     const result = await store.getItems<{ msg: string }>(['item1', 'item2']);
@@ -670,7 +680,9 @@ describe('Plugin edge cases and combinations', () => {
       storeName: 'order-correct-store',
     });
     const raw = await rawReader.getItem('data');
-    expect(raw).toMatchObject({ __ls_encrypted: true });
+    expect(raw).toMatchObject({
+      __localspace__: { kind: 'encryption', version: 1 },
+    });
 
     // Should decrypt and decompress correctly
     const result = await correctStore.getItem<string>('data');
@@ -822,11 +834,18 @@ describe('Plugin edge cases and combinations', () => {
     });
     await rawReader.setDriver([rawReader.MEMORY]);
     const raw = await rawReader.getItem('valid');
-    if (raw && typeof raw === 'object') {
+    const parsed = readPluginEnvelope<Record<string, unknown>>(
+      raw,
+      'encryption'
+    );
+    if (parsed.matched) {
       await setRawMemoryValue(
         { name: 'enc-error-batch-db', storeName: 'enc-error-batch-store' },
         'valid',
-        { ...raw, data: 'tampered-data' }
+        createPluginEnvelope('encryption', {
+          ...parsed.payload,
+          data: 'tampered-data',
+        })
       );
     }
 

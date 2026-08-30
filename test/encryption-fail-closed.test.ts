@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import localspace, { encryptionPlugin, serializer } from '../src';
+import localspace, {
+  encryptionPlugin,
+  legacyEncryptionMigrationPlugin,
+  serializer,
+} from '../src';
+import {
+  createPluginEnvelope,
+  readPluginEnvelope,
+} from '../src/core/plugin-envelope';
 import { LocalSpaceError } from '../src/errors';
 import { setRawMemoryItems, setRawMemoryValue } from './utils/raw-memory';
 
@@ -152,8 +160,21 @@ describe('encryption plugin fail-closed behavior', () => {
     );
     await secure.setItem('secret', 'plaintext');
 
-    const payload = await raw.getItem<Record<string, unknown>>('secret');
-    await setRawMemoryValue(config, 'secret', { ...payload, data: 'AAAA' });
+    const parsed = readPluginEnvelope<Record<string, unknown>>(
+      await raw.getItem('secret'),
+      'encryption'
+    );
+    if (!parsed.matched) {
+      throw new Error('Versioned encryption payload missing');
+    }
+    await setRawMemoryValue(
+      config,
+      'secret',
+      createPluginEnvelope('encryption', {
+        ...parsed.payload,
+        data: 'AAAA',
+      })
+    );
 
     const error = await secure.getItem('secret').catch((cause) => cause);
     expect(error).toBeInstanceOf(LocalSpaceError);
@@ -235,8 +256,7 @@ describe('encryption plugin fail-closed behavior', () => {
     ]);
   });
 
-  it('reads AES-CBC legacy payloads but rejects new writes', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  it('keeps AES-CBC behind the explicit read-only migration plugin', async () => {
     const fixtureKey = await crypto.subtle.importKey(
       'raw',
       new TextEncoder().encode(VALID_KEY),
@@ -247,35 +267,40 @@ describe('encryption plugin fail-closed behavior', () => {
     const iv = Uint8Array.from({ length: 16 }, (_, index) => index + 1);
     const { secure, raw, config } = await createMemoryStores(
       'encryption-legacy-cbc-reader',
-      encryptionPlugin({
+      legacyEncryptionMigrationPlugin({
         key: VALID_KEY,
-        algorithm: { name: 'AES-CBC', iv },
+        algorithm: { name: 'AES-CBC' },
       })
     );
-    await setRawMemoryValue(
-      config,
-      'legacy',
-      await createLegacyPayload(
-        { name: 'AES-CBC', iv },
-        fixtureKey,
-        {
-          secret: 'legacy-cbc',
-        },
-        iv
-      )
+    const legacy = await createLegacyPayload(
+      { name: 'AES-CBC', iv },
+      fixtureKey,
+      { secret: 'legacy-cbc' },
+      iv
     );
+    const { __ls_encrypted: _marker, ...payload } = legacy;
+    await setRawMemoryItems(config, [
+      { key: 'legacy', value: legacy },
+      {
+        key: 'versioned',
+        value: createPluginEnvelope('encryption', payload),
+      },
+    ]);
 
-    await expect(secure.getItem('legacy')).resolves.toEqual({
-      secret: 'legacy-cbc',
-    });
+    await expect(
+      secure.getItems<{ secret: string }>(['versioned', 'legacy'])
+    ).resolves.toEqual([
+      { key: 'versioned', value: { secret: 'legacy-cbc' } },
+      { key: 'legacy', value: { secret: 'legacy-cbc' } },
+    ]);
     await expect(secure.setItem('new', 'plaintext')).rejects.toMatchObject({
       code: 'UNSUPPORTED_OPERATION',
+      details: { algorithm: 'AES-CBC', operation: 'encrypt' },
     });
     await expect(raw.getItem('new')).resolves.toBeNull();
   });
 
-  it('reads AES-CTR legacy payloads with the original counter', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  it('keeps AES-CTR behind an explicit reader with the original counter', async () => {
     const key = (await crypto.subtle.generateKey(
       { name: 'AES-CTR', length: 256 },
       false,
@@ -290,7 +315,7 @@ describe('encryption plugin fail-closed behavior', () => {
     };
     const { secure, raw, config } = await createMemoryStores(
       'encryption-legacy-ctr-reader',
-      encryptionPlugin({ key, algorithm })
+      legacyEncryptionMigrationPlugin({ key, algorithm })
     );
     await setRawMemoryValue(
       config,
@@ -299,10 +324,90 @@ describe('encryption plugin fail-closed behavior', () => {
     );
 
     await expect(secure.getItem('legacy')).resolves.toBe('legacy-ctr');
+    const physical = await raw.getItem('legacy');
+    const wrongCounterReader = localspace.createInstance({
+      ...config,
+      plugins: [
+        legacyEncryptionMigrationPlugin({
+          key,
+          algorithm: {
+            name: 'AES-CTR',
+            counter: new Uint8Array(16),
+            length: 64,
+          },
+        }),
+      ],
+    });
+    await wrongCounterReader.setDriver([wrongCounterReader.MEMORY]);
+    await expect(wrongCounterReader.getItem('legacy')).rejects.toMatchObject({
+      code: 'OPERATION_FAILED',
+    });
+    await expect(raw.getItem('legacy')).resolves.toEqual(physical);
+    await wrongCounterReader.close();
+
     await expect(
       secure.setItems([{ key: 'new', value: 'plaintext' }])
-    ).rejects.toMatchObject({ code: 'UNSUPPORTED_OPERATION' });
+    ).rejects.toMatchObject({
+      code: 'UNSUPPORTED_OPERATION',
+    });
     await expect(raw.getItem('new')).resolves.toBeNull();
+  });
+
+  it('rejects legacy algorithms from the normal API and validates migration parameters', () => {
+    expect(() =>
+      encryptionPlugin({
+        key: VALID_KEY,
+        algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
+      } as never)
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'INVALID_CONFIG',
+        message: expect.stringContaining('supports only AES-GCM'),
+      })
+    );
+    expect(() =>
+      encryptionPlugin({ key: VALID_KEY, algorithm: 'AES-GCM' } as never)
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_CONFIG' }));
+    expect(() =>
+      legacyEncryptionMigrationPlugin({
+        key: VALID_KEY,
+        algorithm: { name: 'AES-GCM' },
+      } as never)
+    ).toThrowError(expect.objectContaining({ code: 'INVALID_CONFIG' }));
+    expect(() =>
+      legacyEncryptionMigrationPlugin({
+        key: VALID_KEY,
+        algorithm: {
+          name: 'AES-CTR',
+          counter: new Uint8Array(8),
+          length: 64,
+        },
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'INVALID_CONFIG',
+        message: expect.stringContaining('exactly 16 bytes'),
+      })
+    );
+    expect(() =>
+      localspace.createInstance({
+        plugins: [
+          encryptionPlugin({ key: VALID_KEY }),
+          legacyEncryptionMigrationPlugin({
+            key: VALID_KEY,
+            algorithm: { name: 'AES-CBC' },
+          }),
+        ],
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'INVALID_CONFIG',
+        details: expect.objectContaining({
+          reason: 'duplicate-plugin',
+          plugin: 'encryption',
+        }),
+      })
+    );
   });
 
   it('rejects a CryptoKey whose algorithm does not match the plugin', async () => {

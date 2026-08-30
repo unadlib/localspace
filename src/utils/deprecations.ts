@@ -1,5 +1,4 @@
 export type LocalSpaceDeprecation =
-  | 'legacy-encryption-algorithm'
   | 'react-native-auto-detection'
   | 'storage-bucket-fallback'
   | 'weak-memory-transaction';

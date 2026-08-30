@@ -1,6 +1,8 @@
 import localspace, {
   LocalSpace,
   compressionPlugin,
+  encryptionPlugin,
+  legacyEncryptionMigrationPlugin,
   memoryDriver,
   registerDriver,
   setDeprecationWarnings,
@@ -8,6 +10,9 @@ import localspace, {
   type CompressionCodec,
   type Driver,
   type DriverCapabilities,
+  type EncryptionAlgorithm,
+  type EncryptionPluginOptions,
+  type LegacyEncryptionMigrationOptions,
   type LocalSpaceConfig,
   type LocalSpaceConfigSnapshot,
   type LocalSpaceCapabilities,
@@ -44,6 +49,22 @@ const compression = compressionPlugin({
   codec: compressionCodec,
   algorithm: 'package-types-codec-v1',
 });
+const encryptionAlgorithm: EncryptionAlgorithm = {
+  name: 'AES-GCM',
+  iv: new Uint8Array(12),
+};
+const encryptionOptions: EncryptionPluginOptions = {
+  key: '0123456789abcdef0123456789abcdef',
+  algorithm: encryptionAlgorithm,
+};
+const encryption = encryptionPlugin(encryptionOptions);
+const legacyEncryptionOptions: LegacyEncryptionMigrationOptions = {
+  key: '0123456789abcdef0123456789abcdef',
+  algorithm: { name: 'AES-CBC' },
+};
+const legacyEncryption = legacyEncryptionMigrationPlugin(
+  legacyEncryptionOptions
+);
 void instance.setItem('migration', migrationValue);
 void instance.setItems([{ key: 'migration', value: migrationValue }]);
 void instance.getItem<StorageValue>('migration');
@@ -117,11 +138,17 @@ const typecheckRemovedApis = (): void => {
   void instance.setItems([{ key: 'map', value: new Map() }]);
   // @ts-expect-error reads cannot promise values outside StorageValue
   void instance.getItem<Date>('date');
+  const legacyAlgorithm: EncryptionPluginOptions = {
+    key: '0123456789abcdef0123456789abcdef',
+    // @ts-expect-error AES-CBC was removed from normal encryption configuration
+    algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
+  };
   void instance.runTransaction('readwrite', (transaction) => {
     // @ts-expect-error transaction writes use the same StorageValue contract
     return transaction.set('date', new Date());
   });
   void strictOptions;
+  void legacyAlgorithm;
 };
 setDeprecationWarnings(false);
 void registerDriver(customDriver, { overwrite: true });
@@ -139,6 +166,11 @@ void [
   migrationValue,
   compressionCodec,
   compression,
+  encryptionAlgorithm,
+  encryptionOptions,
+  encryption,
+  legacyEncryptionOptions,
+  legacyEncryption,
   iterateResult,
   observerPlugin,
   customDriver,

@@ -271,22 +271,29 @@ describe('versioned plugin envelope reader', () => {
     });
   });
 
-  it('keeps writing legacy encryption payloads and reads the versioned form', async () => {
+  it('writes versioned encryption envelopes and retains the legacy GCM reader', async () => {
     const { store, raw } = await createStorePair(
       'encryption-envelope-reader',
       encryptionPlugin({ key: '0123456789abcdef0123456789abcdef' })
     );
     const original = { source: '3.0', secret: true };
-    await store.setItem('legacy', original);
-    const legacy = await raw.getItem<Record<string, unknown>>('legacy');
-    expect(legacy).toMatchObject({
-      __ls_encrypted: true,
-      algorithm: 'AES-GCM',
-    });
+    await store.setItem('versioned', original);
+    const versioned = readPluginEnvelope<Record<string, unknown>>(
+      await raw.getItem('versioned'),
+      'encryption'
+    );
+    expect(versioned.matched).toBe(true);
+    if (!versioned.matched) {
+      throw new Error('Versioned encryption payload missing');
+    }
+    expect(versioned.payload).toMatchObject({ algorithm: 'AES-GCM' });
+    await expect(store.getItem('versioned')).resolves.toEqual(original);
 
-    const { __ls_encrypted: _marker, ...payload } = legacy!;
-    await raw.setItem('future', envelope('encryption', payload));
-    await expect(store.getItem('future')).resolves.toEqual(original);
+    await raw.setItem('legacy', {
+      __ls_encrypted: true,
+      ...versioned.payload,
+    });
+    await expect(store.getItem('legacy')).resolves.toEqual(original);
   });
 
   it('does not mistake marker-only user objects for legacy payloads', async () => {

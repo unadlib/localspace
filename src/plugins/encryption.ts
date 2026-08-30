@@ -7,14 +7,15 @@ import type {
 import { normalizeBatchEntries } from '../utils/helpers.js';
 import { createLocalSpaceError, toLocalSpaceError } from '../errors.js';
 import serializer from '../utils/serializer.js';
-import { warnDeprecation } from '../utils/deprecations.js';
 import {
+  createPluginEnvelope,
   hasOwnPayloadField,
   readPluginEnvelope,
+  type PluginEnvelopeV1,
 } from '../core/plugin-envelope.js';
 import { markBuiltInStorageTransformPlugin } from '../core/plugin-capabilities.js';
 
-export interface EncryptionPluginOptions {
+interface EncryptionKeyOptions {
   /** Pre-shared CryptoKey (usage checked per operation) or raw key material */
   key?: CryptoKey | ArrayBuffer | string;
   /** Derive a key using PBKDF2 */
@@ -25,19 +26,38 @@ export interface EncryptionPluginOptions {
     hash?: string;
     length?: number;
   };
-  /**
-   * Web Crypto algorithm parameters. AES-CBC and AES-CTR are deprecated,
-   * read-only migration modes; new writes require authenticated AES-GCM.
-   */
-  algorithm?: AesGcmParams | AesCbcParams | AesCtrParams;
+  /** Provide a custom SubtleCrypto implementation (e.g., from node:crypto) */
+  subtle?: SubtleCrypto;
+}
+
+export type EncryptionAlgorithm = Omit<AesGcmParams, 'name'> & {
+  name: 'AES-GCM';
+};
+
+export interface EncryptionPluginOptions extends EncryptionKeyOptions {
+  /** AES-GCM parameters. The writer always supplies a fresh IV. */
+  algorithm?: EncryptionAlgorithm;
   /** IV length in bytes (default 12) */
   ivLength?: number;
   /** Custom IV generator */
   ivGenerator?: () => Uint8Array;
-  /** Provide a custom SubtleCrypto implementation (e.g., from node:crypto) */
-  subtle?: SubtleCrypto;
   /** Custom secure random filler, useful for non-standard runtimes */
   randomSource?: (buffer: Uint8Array) => Uint8Array;
+}
+
+export type LegacyEncryptionMigrationAlgorithm =
+  | { name: 'AES-CBC' }
+  | {
+      name: 'AES-CTR';
+      /** The exact counter used by the legacy writer. */
+      counter: BufferSource;
+      /** The exact counter length used by the legacy writer. */
+      length: number;
+    };
+
+export interface LegacyEncryptionMigrationOptions extends EncryptionKeyOptions {
+  /** Legacy read algorithm. This API never encrypts new values. */
+  algorithm: LegacyEncryptionMigrationAlgorithm;
 }
 
 type EncryptedPayloadBody = {
@@ -46,9 +66,11 @@ type EncryptedPayloadBody = {
   data: string;
 };
 
-type EncryptedPayload = EncryptedPayloadBody & {
+type LegacyEncryptedPayload = EncryptedPayloadBody & {
   __ls_encrypted: true;
 };
+
+type VersionedEncryptedPayload = PluginEnvelopeV1<EncryptedPayloadBody>;
 
 const AES_GCM = 'AES-GCM';
 const AES_CBC = 'AES-CBC';
@@ -57,6 +79,13 @@ const SUPPORTED_AES_ALGORITHMS = new Set([AES_GCM, AES_CBC, AES_CTR]);
 const AES_KEY_LENGTHS = new Set([16, 24, 32]);
 const BASE64_PATTERN =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+const isCanonicalBase64 = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  value.length > 0 &&
+  value.length % 4 === 0 &&
+  BASE64_PATTERN.test(value) &&
+  serializer.bufferToString(serializer.stringToBuffer(value)) === value;
 
 const toArrayBuffer = (value: string | ArrayBuffer): ArrayBuffer => {
   if (typeof value !== 'string') {
@@ -119,7 +148,7 @@ const validateCryptoKey = (
   return key;
 };
 
-const ensureCrypto = (_options: EncryptionPluginOptions): Crypto => {
+const ensureCrypto = (): Crypto => {
   if (typeof globalThis !== 'undefined' && globalThis.crypto) {
     return globalThis.crypto;
   }
@@ -135,11 +164,11 @@ const ensureCrypto = (_options: EncryptionPluginOptions): Crypto => {
   );
 };
 
-const resolveSubtle = (options: EncryptionPluginOptions): SubtleCrypto => {
+const resolveSubtle = (options: EncryptionKeyOptions): SubtleCrypto => {
   if (options.subtle) {
     return options.subtle;
   }
-  const crypto = ensureCrypto(options);
+  const crypto = ensureCrypto();
   if (!crypto.subtle) {
     throw createLocalSpaceError(
       'UNSUPPORTED_OPERATION',
@@ -153,37 +182,47 @@ const fillRandom = (
   length: number,
   options: EncryptionPluginOptions
 ): Uint8Array => {
+  let generated: unknown;
   if (options.ivGenerator) {
-    const iv = options.ivGenerator();
-    if (iv.length !== length) {
+    generated = options.ivGenerator();
+  } else if (options.randomSource) {
+    generated = options.randomSource(new Uint8Array(length));
+  } else {
+    const crypto = ensureCrypto();
+    if (typeof crypto.getRandomValues !== 'function') {
       throw createLocalSpaceError(
-        'INVALID_ARGUMENT',
-        `Custom IV generator must return ${length} bytes.`
+        'UNSUPPORTED_OPERATION',
+        'A secure random source is required for IV generation.'
       );
     }
-    return iv;
+    generated = crypto.getRandomValues(new Uint8Array(length));
   }
-  if (options.randomSource) {
-    return options.randomSource(new Uint8Array(length));
-  }
-  const crypto = ensureCrypto(options);
-  if (typeof crypto.getRandomValues !== 'function') {
+
+  if (Object.prototype.toString.call(generated) !== '[object Uint8Array]') {
     throw createLocalSpaceError(
-      'UNSUPPORTED_OPERATION',
-      'A secure random source is required for IV generation.'
+      'INVALID_CONFIG',
+      'Encryption IV source must return Uint8Array.'
     );
   }
-  return crypto.getRandomValues(new Uint8Array(length));
+  const source = generated as Uint8Array;
+  if (source.byteLength !== length) {
+    throw createLocalSpaceError(
+      'INVALID_ARGUMENT',
+      `Encryption IV source must return ${length} bytes.`,
+      { expectedIvLength: length, actualIvLength: source.byteLength }
+    );
+  }
+  const copy = new Uint8Array(length);
+  copy.set(source);
+  return copy;
 };
 
 const importKey = async (
-  options: EncryptionPluginOptions,
+  options: EncryptionKeyOptions,
   subtle: SubtleCrypto,
-  algorithmName: string
+  algorithmName: string,
+  importedUsages: KeyUsage[]
 ): Promise<CryptoKey> => {
-  const importedUsages: KeyUsage[] =
-    algorithmName === AES_GCM ? ['encrypt', 'decrypt'] : ['decrypt'];
-
   if (isCryptoKey(options.key)) {
     return validateCryptoKey(options.key, algorithmName, []);
   }
@@ -240,12 +279,8 @@ const validateEncryptedPayload = (value: unknown): EncryptedPayloadBody => {
     !payload ||
     typeof payload !== 'object' ||
     !SUPPORTED_AES_ALGORITHMS.has(payload.algorithm ?? '') ||
-    typeof payload.iv !== 'string' ||
-    payload.iv.length === 0 ||
-    !BASE64_PATTERN.test(payload.iv) ||
-    typeof payload.data !== 'string' ||
-    payload.data.length === 0 ||
-    !BASE64_PATTERN.test(payload.data)
+    !isCanonicalBase64(payload.iv) ||
+    !isCanonicalBase64(payload.data)
   ) {
     throw createLocalSpaceError(
       'DESERIALIZATION_FAILED',
@@ -266,7 +301,7 @@ const parseEncryptedPayload = (value: unknown): EncryptedPayloadBody | null => {
   if (
     !value ||
     typeof value !== 'object' ||
-    (value as Partial<EncryptedPayload>).__ls_encrypted !== true
+    (value as Partial<LegacyEncryptedPayload>).__ls_encrypted !== true
   ) {
     return null;
   }
@@ -281,51 +316,9 @@ const parseEncryptedPayload = (value: unknown): EncryptedPayloadBody | null => {
   return validateEncryptedPayload(value);
 };
 
-const createEncryptionPlugin = (
-  options: EncryptionPluginOptions
-): LocalSpacePlugin => {
-  const ivLength = options.ivLength ?? 12;
-  const algorithmName = options.algorithm?.name ?? AES_GCM;
+type EncryptionPluginMode = 'gcm' | 'legacy-migration';
 
-  if (algorithmName === AES_CBC || algorithmName === AES_CTR) {
-    warnDeprecation(
-      'legacy-encryption-algorithm',
-      `${algorithmName} encryption is deprecated and read-only; migrate data to AES-GCM.`
-    );
-  }
-  if (!SUPPORTED_AES_ALGORITHMS.has(algorithmName)) {
-    throw createLocalSpaceError(
-      'INVALID_CONFIG',
-      `Unsupported encryption algorithm: ${algorithmName}.`,
-      { algorithm: algorithmName }
-    );
-  }
-
-  const subtle = resolveSubtle(options);
-  let keyPromise: Promise<CryptoKey> | null = null;
-
-  const ensureKey = async (requiredUsage: 'encrypt' | 'decrypt') => {
-    if (!keyPromise) {
-      keyPromise = importKey(options, subtle, algorithmName).catch((error) => {
-        throw toLocalSpaceError(
-          error,
-          'INVALID_CONFIG',
-          'Failed to initialize encryption key'
-        );
-      });
-    }
-    const key = await keyPromise;
-    return validateCryptoKey(key, algorithmName, [requiredUsage]);
-  };
-
-  if (!Number.isInteger(ivLength) || ivLength <= 0) {
-    throw createLocalSpaceError(
-      'INVALID_CONFIG',
-      'Encryption IV length must be a positive integer.',
-      { ivLength }
-    );
-  }
-
+const validateKeyOptions = (options: EncryptionKeyOptions): void => {
   if (options.key === undefined && !options.keyDerivation) {
     throw createLocalSpaceError(
       'INVALID_CONFIG',
@@ -350,16 +343,147 @@ const createEncryptionPlugin = (
       );
     }
   }
+};
 
-  const encryptionAlgorithm = (iv: Uint8Array): AesGcmParams => {
-    const configuredAlgorithm =
-      options.algorithm?.name === AES_GCM ? options.algorithm : undefined;
-    return {
-      ...(configuredAlgorithm ?? { name: AES_GCM, iv: iv as BufferSource }),
+const copyCounter = (value: unknown): Uint8Array<ArrayBuffer> => {
+  let source: Uint8Array;
+  if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView;
+    source = new Uint8Array(
+      view.buffer as ArrayBuffer,
+      view.byteOffset,
+      view.byteLength
+    );
+  } else if (Object.prototype.toString.call(value) === '[object ArrayBuffer]') {
+    source = new Uint8Array(value as ArrayBuffer);
+  } else {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'AES-CTR migration counter must be a BufferSource.'
+    );
+  }
+
+  if (source.byteLength !== 16) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'AES-CTR migration counter must contain exactly 16 bytes.',
+      { counterByteLength: source.byteLength }
+    );
+  }
+  const copy = new Uint8Array(new ArrayBuffer(16));
+  copy.set(source);
+  return copy;
+};
+
+const createEncryptionPlugin = (
+  options: EncryptionPluginOptions | LegacyEncryptionMigrationOptions,
+  mode: EncryptionPluginMode
+): LocalSpacePlugin => {
+  const rawAlgorithm = (options as { algorithm?: unknown }).algorithm;
+  const configuredAlgorithm =
+    rawAlgorithm && typeof rawAlgorithm === 'object'
+      ? (rawAlgorithm as { name?: unknown })
+      : undefined;
+  const configuredAlgorithmName = configuredAlgorithm?.name;
+  const algorithmName =
+    mode === 'gcm'
+      ? (configuredAlgorithmName ?? AES_GCM)
+      : configuredAlgorithmName;
+
+  if (
+    mode === 'gcm' &&
+    (algorithmName !== AES_GCM ||
+      (rawAlgorithm !== undefined && !configuredAlgorithm))
+  ) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'encryptionPlugin supports only AES-GCM; use legacyEncryptionMigrationPlugin for AES-CBC or AES-CTR reads.',
+      { algorithm: algorithmName }
+    );
+  }
+  if (
+    mode === 'legacy-migration' &&
+    algorithmName !== AES_CBC &&
+    algorithmName !== AES_CTR
+  ) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'legacyEncryptionMigrationPlugin requires AES-CBC or AES-CTR.',
+      { algorithm: algorithmName }
+    );
+  }
+
+  const normalOptions =
+    mode === 'gcm' ? (options as EncryptionPluginOptions) : null;
+  const legacyOptions =
+    mode === 'legacy-migration'
+      ? (options as LegacyEncryptionMigrationOptions)
+      : null;
+  const ivLength = normalOptions?.ivLength ?? 12;
+  if (mode === 'gcm' && (!Number.isInteger(ivLength) || ivLength <= 0)) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Encryption IV length must be a positive integer.',
+      { ivLength }
+    );
+  }
+
+  let legacyCtrAlgorithm: AesCtrParams | null = null;
+  if (algorithmName === AES_CTR) {
+    const algorithm = legacyOptions?.algorithm;
+    if (
+      !algorithm ||
+      algorithm.name !== AES_CTR ||
+      !Number.isInteger(algorithm.length) ||
+      algorithm.length < 1 ||
+      algorithm.length > 128
+    ) {
+      throw createLocalSpaceError(
+        'INVALID_CONFIG',
+        'AES-CTR legacy reads require the original 16-byte counter and a length from 1 through 128.',
+        { algorithm: AES_CTR }
+      );
+    }
+    legacyCtrAlgorithm = {
+      name: AES_CTR,
+      counter: copyCounter(algorithm.counter),
+      length: algorithm.length,
+    };
+  }
+
+  validateKeyOptions(options);
+  const subtle = resolveSubtle(options);
+  const importedUsages: KeyUsage[] =
+    mode === 'gcm' ? ['encrypt', 'decrypt'] : ['decrypt'];
+  let keyPromise: Promise<CryptoKey> | null = null;
+
+  const ensureKey = async (requiredUsage: 'encrypt' | 'decrypt') => {
+    if (!keyPromise) {
+      keyPromise = importKey(
+        options,
+        subtle,
+        algorithmName as string,
+        importedUsages
+      ).catch((error) => {
+        throw toLocalSpaceError(
+          error,
+          'INVALID_CONFIG',
+          'Failed to initialize encryption key'
+        );
+      });
+    }
+    const key = await keyPromise;
+    return validateCryptoKey(key, algorithmName as string, [requiredUsage]);
+  };
+
+  const encryptionAlgorithm = (iv: Uint8Array): AesGcmParams => ({
+    ...(normalOptions?.algorithm ?? {
       name: AES_GCM,
       iv: iv as BufferSource,
-    };
-  };
+    }),
+    name: AES_GCM,
+    iv: iv as BufferSource,
+  });
 
   const serializeValue = async (
     value: unknown,
@@ -390,41 +514,29 @@ const createEncryptionPlugin = (
   const encryptValue = async (
     value: unknown,
     itemKey?: string
-  ): Promise<EncryptedPayload> => {
+  ): Promise<VersionedEncryptedPayload> => {
     try {
-      if (algorithmName !== AES_GCM) {
+      if (mode !== 'gcm' || !normalOptions) {
         throw createLocalSpaceError(
           'UNSUPPORTED_OPERATION',
-          `${algorithmName} is available only for reading legacy payloads; new writes require ${AES_GCM}.`,
+          'The legacy encryption migration plugin is read-only; write migrated values through encryptionPlugin with AES-GCM.',
           { algorithm: algorithmName, operation: 'encrypt' }
         );
       }
       const cryptoKey = await ensureKey('encrypt');
       const payloadBytes = await serializeValue(value, itemKey);
-      const iv = fillRandom(ivLength, options);
-      if (!(iv instanceof Uint8Array) || iv.byteLength !== ivLength) {
-        throw createLocalSpaceError(
-          'INVALID_CONFIG',
-          `Random source must return ${ivLength} bytes.`
-        );
-      }
+      const iv = fillRandom(ivLength, normalOptions);
       const encrypted = await subtle.encrypt(
         encryptionAlgorithm(iv),
         cryptoKey,
         payloadBytes as BufferSource
       );
 
-      return {
-        __ls_encrypted: true,
+      return createPluginEnvelope('encryption', {
         algorithm: AES_GCM,
-        iv: serializer.bufferToString(
-          iv.buffer.slice(
-            iv.byteOffset,
-            iv.byteOffset + iv.byteLength
-          ) as ArrayBuffer
-        ),
+        iv: serializer.bufferToString(iv.slice().buffer as ArrayBuffer),
         data: serializer.bufferToString(encrypted),
-      };
+      });
     } catch (error) {
       throw toLocalSpaceError(
         error,
@@ -453,37 +565,31 @@ const createEncryptionPlugin = (
         );
       }
       const cryptoKey = await ensureKey('decrypt');
-      const ivBuffer = serializer.stringToBuffer(payload.iv);
-      const dataBuffer = serializer.stringToBuffer(payload.data);
+      const iv = new Uint8Array(serializer.stringToBuffer(payload.iv));
+      const data = new Uint8Array(serializer.stringToBuffer(payload.data));
       let decryptAlgorithm: AlgorithmIdentifier;
-      if (payload.algorithm === AES_CBC) {
-        decryptAlgorithm = {
-          name: AES_CBC,
-          iv: new Uint8Array(ivBuffer),
-        } as AesCbcParams;
-      } else if (payload.algorithm === AES_CTR) {
-        const configuredAlgorithm = options.algorithm;
-        if (
-          configuredAlgorithm?.name !== AES_CTR ||
-          !('counter' in configuredAlgorithm) ||
-          !('length' in configuredAlgorithm)
-        ) {
+      if (algorithmName === AES_CBC) {
+        if (iv.byteLength !== 16) {
           throw createLocalSpaceError(
-            'INVALID_CONFIG',
-            'AES-CTR legacy reads require the original counter and length parameters.',
-            { algorithm: AES_CTR }
+            'DESERIALIZATION_FAILED',
+            'AES-CBC legacy payload IV must contain exactly 16 bytes.',
+            { algorithm: AES_CBC, ivByteLength: iv.byteLength }
           );
         }
-        decryptAlgorithm = configuredAlgorithm;
+        decryptAlgorithm = { name: AES_CBC, iv } as AesCbcParams;
+      } else if (algorithmName === AES_CTR) {
+        decryptAlgorithm = legacyCtrAlgorithm!;
       } else {
-        decryptAlgorithm = encryptionAlgorithm(new Uint8Array(ivBuffer));
+        decryptAlgorithm = encryptionAlgorithm(iv);
       }
       const plainBuffer = await subtle.decrypt(
         decryptAlgorithm,
         cryptoKey,
-        new Uint8Array(dataBuffer)
+        data
       );
-      const decoded = new TextDecoder().decode(plainBuffer);
+      const decoded = new TextDecoder('utf-8', { fatal: true }).decode(
+        plainBuffer
+      );
       return serializer.deserialize(decoded) as T;
     } catch (error) {
       throw toLocalSpaceError(
@@ -498,57 +604,42 @@ const createEncryptionPlugin = (
   };
 
   return {
+    // Keep the same plugin identity so a migration reader cannot be combined
+    // accidentally with the normal encryption transform on one instance.
     name: 'encryption',
     priority: 0,
-    beforeSet: async <T>(_key: string, value: T): Promise<T> => {
-      return (await encryptValue(value)) as unknown as T;
-    },
+    beforeSet: async <T>(_key: string, value: T): Promise<T> =>
+      (await encryptValue(value)) as unknown as T,
     afterGet: async <T>(
       _key: string,
       value: T | null,
       _context: PluginContext
     ): Promise<T | null> => {
       const payload = parseEncryptedPayload(value);
-      if (!payload) {
-        return value;
-      }
-      return decryptValue<T>(payload);
+      return payload ? decryptValue<T>(payload) : value;
     },
     beforeSetItems: async <T>(
       entries: BatchItems<T>,
       _context: PluginContext
-    ): Promise<BatchItems<T>> => {
-      const normalized = normalizeBatchEntries(entries);
-      const encrypted = await Promise.all(
-        normalized.map(async ({ key: itemKey, value }) => {
-          return {
-            key: itemKey,
-            value: (await encryptValue(value, itemKey)) as unknown as T,
-          };
-        })
-      );
-
-      return encrypted;
-    },
+    ): Promise<BatchItems<T>> =>
+      Promise.all(
+        normalizeBatchEntries(entries).map(async ({ key: itemKey, value }) => ({
+          key: itemKey,
+          value: (await encryptValue(value, itemKey)) as unknown as T,
+        }))
+      ),
     afterGetItems: async <T>(
       entries: BatchResponse<T>,
       _context: PluginContext
-    ): Promise<BatchResponse<T>> => {
-      const decrypted = await Promise.all(
+    ): Promise<BatchResponse<T>> =>
+      Promise.all(
         entries.map(async ({ key: itemKey, value }) => {
           const payload = parseEncryptedPayload(value);
-          if (!payload) {
-            return { key: itemKey, value };
-          }
-          return {
-            key: itemKey,
-            value: await decryptValue<T>(payload, itemKey),
-          };
+          return payload
+            ? { key: itemKey, value: await decryptValue<T>(payload, itemKey) }
+            : { key: itemKey, value };
         })
-      );
-
-      return decrypted;
-    },
+      ),
   };
 };
 
@@ -556,7 +647,19 @@ export const encryptionPlugin = (
   options: EncryptionPluginOptions
 ): LocalSpacePlugin =>
   markBuiltInStorageTransformPlugin(
-    createEncryptionPlugin(options),
+    createEncryptionPlugin(options, 'gcm'),
+    'encryption'
+  );
+
+/**
+ * Explicit, read-only bridge for decrypting supported AES-CBC/AES-CTR payloads
+ * before rewriting them through a separate AES-GCM instance.
+ */
+export const legacyEncryptionMigrationPlugin = (
+  options: LegacyEncryptionMigrationOptions
+): LocalSpacePlugin =>
+  markBuiltInStorageTransformPlugin(
+    createEncryptionPlugin(options, 'legacy-migration'),
     'encryption'
   );
 
