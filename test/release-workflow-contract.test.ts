@@ -10,6 +10,10 @@ const detoxWorkflow = readFileSync(
   path.resolve(process.cwd(), '.github/workflows/detox-mobile.yml'),
   'utf8'
 );
+const publishWorkflow = readFileSync(
+  path.resolve(process.cwd(), '.github/workflows/npm-publish.yml'),
+  'utf8'
+);
 
 const extractJob = (name: string): string => {
   const startMarker = `\n  ${name}:\n`;
@@ -46,5 +50,34 @@ describe('release workflow contracts', () => {
     expect(detoxWorkflow).toContain('scripts/verify-detox-rc-install.mjs');
     expect(detoxWorkflow).not.toContain('pnpm run build\n');
     expect(detoxWorkflow).not.toContain('app_exists');
+  });
+
+  it('keeps npm publication on the exact OIDC release path', () => {
+    expect(publishWorkflow).toMatch(
+      /permissions:\n\s+contents: read\n\s+id-token: write/
+    );
+    expect(publishWorkflow).toMatch(
+      /uses: actions\/checkout@v\d+\n\s+with:\n\s+fetch-depth: 0/
+    );
+    expect(publishWorkflow).toMatch(
+      /uses: actions\/setup-node@v\d+\n\s+with:\n\s+node-version: '24'\n\s+package-manager-cache: false/
+    );
+    expect(publishWorkflow).toContain(
+      'RELEASE_TAG: ${{ github.event.release.tag_name }}'
+    );
+    expect(publishWorkflow).toContain(
+      'scripts/verify-release-identity.mjs --require-oidc --require-unpublished'
+    );
+    expect(publishWorkflow).not.toMatch(/registry-url|NODE_AUTH_TOKEN/);
+
+    const rollbackGate = publishWorkflow.indexOf(
+      'scripts/rehearse-data-rollback.mjs --require-published'
+    );
+    const publish = publishWorkflow.indexOf(
+      'npm publish --provenance --access public'
+    );
+    expect(rollbackGate).toBeGreaterThan(-1);
+    expect(publish).toBeGreaterThan(rollbackGate);
+    expect(publishWorkflow.slice(publish)).not.toContain('run:');
   });
 });
