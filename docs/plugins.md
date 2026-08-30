@@ -105,7 +105,8 @@ interface PluginContext {
 - `metadata` is shared across contexts for the lifetime of the plugin manager;
   namespace keys to avoid collisions.
 - `operationState` is per operation/context and is suitable for carrying a
-  before-hook result into its after hook.
+  plugin's own before-hook state into its after hook. It is not a public-result
+  override channel.
 - mapped single hooks in a batch receive `operationState.isBatch === true` and
   `batchSize`, but these fields are informational. Do not use an `isBatch`
   guard to compensate for duplicate execution: 3.0 never invokes both matching
@@ -142,7 +143,8 @@ a write hook must still satisfy `StorageValue`; LocalSpace validates plugin
 output and reports the plugin name in `SERIALIZATION_FAILED` details.
 
 `beforeGet` and `beforeRemove` may rewrite a key. `afterSet` and `afterRemove`
-are observers.
+are observers; their return values and `operationState` mutations cannot
+rewrite the public operation result.
 
 ## Batch hooks: one form per plugin and phase
 

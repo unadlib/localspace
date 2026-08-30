@@ -661,18 +661,7 @@ export class PluginManager {
       }
     }
 
-    return current.map((entry, index) => {
-      const operationState = items[index]?.context.operationState;
-      const hasReturnValue =
-        !!operationState &&
-        Object.prototype.hasOwnProperty.call(operationState, 'returnValue');
-      return {
-        key: entry.key,
-        value: hasReturnValue
-          ? (operationState.returnValue as T | null)
-          : entry.value,
-      };
-    });
+    return current.map(({ key, value }) => ({ key, value }));
   }
 
   private createPreparedKeyItem(

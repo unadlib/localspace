@@ -1117,10 +1117,7 @@ export class LocalSpace implements LocalSpaceInstance {
         context,
         'logical'
       );
-      const returnValue = (context.operationState.returnValue ??
-        context.operationState.originalValue ??
-        logicalValue) as unknown;
-      return returnValue;
+      return logicalValue;
     }) as typeof this.setItem;
   }
 

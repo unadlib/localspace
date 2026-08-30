@@ -235,6 +235,33 @@ describe('Plugin system', () => {
     ]);
   });
 
+  it('keeps afterSet observers from rewriting public write results', async () => {
+    const observer: LocalSpacePlugin = {
+      name: 'write-result-observer',
+      afterSet: (_key, _value, context) => {
+        context.operationState.returnValue = 'observer-rewrite';
+      },
+    };
+    const store = localspace.createInstance({
+      name: 'write-result-observer-db',
+      storeName: 'store',
+      driver: localspace.MEMORY,
+      plugins: [observer],
+    });
+
+    await expect(store.setItem('single', 'single-value')).resolves.toBe(
+      'single-value'
+    );
+    await expect(
+      store.setItems([{ key: 'batch', value: 'batch-value' }])
+    ).resolves.toEqual([{ key: 'batch', value: 'batch-value' }]);
+    await expect(store.getItems(['single', 'batch'])).resolves.toEqual([
+      { key: 'single', value: 'single-value' },
+      { key: 'batch', value: 'batch-value' },
+    ]);
+    await store.close();
+  });
+
   it('runs onDestroy hooks once via instance.close()', async () => {
     const onDestroy = vi.fn();
     const plugin: LocalSpacePlugin = {

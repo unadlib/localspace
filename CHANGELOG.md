@@ -42,7 +42,9 @@
   readiness/storage operation.
 - Changed batch plugin execution to one hook form per plugin and phase: invoke
   the batch hook once when present, otherwise map the matching single hook.
-  Priority ordering is preserved globally across both forms.
+  Priority ordering is preserved globally across both forms. Single-item
+  `afterSet` observers cannot rewrite public return values through hidden
+  operation state.
 - Changed `iterate()` to await async callbacks sequentially, expose only logical
   decoded values, and return `U | undefined`.
 - Changed TTL visibility so item, batch, iteration, key, and length views agree
