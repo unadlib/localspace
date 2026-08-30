@@ -323,12 +323,17 @@ describe('3.0 StorageValue contract', () => {
     });
   });
 
-  it('rejects the removed strictValues option at construction', () => {
-    expect(() => new LocalSpace({ strictValues: true } as never)).toThrowError(
-      expect.objectContaining({
-        code: 'INVALID_CONFIG',
-        details: { configKey: 'strictValues', reason: 'removed-option' },
-      })
-    );
-  });
+  it.each(['strictValues', 'strictTransactions'] as const)(
+    'rejects the removed %s migration option at construction',
+    (configKey) => {
+      expect(
+        () => new LocalSpace({ [configKey]: true } as never)
+      ).toThrowError(
+        expect.objectContaining({
+          code: 'INVALID_CONFIG',
+          details: { configKey, reason: 'removed-option' },
+        })
+      );
+    }
+  );
 });

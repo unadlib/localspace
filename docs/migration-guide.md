@@ -18,13 +18,15 @@ bridge and 3.0 versions (including tarball integrity) used by the application.
 1. Upgrade to the final 2.1.x bridge release named by the 3.0 release notes.
 2. Run development builds and clear every emitted migration warning.
 3. Enable `strictValues: true` on the bridge and exercise every write path.
-4. Refactor transaction runners to use only their supplied scope.
+4. Enable `strictTransactions: true` and refactor transaction runners to use
+   only their supplied scope.
 5. Convert custom plugins to the 3.0 single-or-batch hook model.
 6. Back up representative production data and rehearse the exact package/data
    upgrade and rollback sequence.
 
-`strictValues` is a 2.1 bridge-only migration aid. LocalSpace 3.0 validates
-unconditionally and rejects the option itself.
+`strictValues` and `strictTransactions` are 2.1 bridge-only migration aids.
+LocalSpace 3.0 enforces both contracts unconditionally and rejects the options
+themselves.
 
 ### Breaking-change summary
 
@@ -36,6 +38,7 @@ unconditionally and rejects the option itself.
 | `destroy()`                                                            | use `close()` for disposal, `clear()`/`dropInstance()` for deletion                    |
 | broad arbitrary value generics                                         | store only `StorageValue`; convert rich values explicitly                              |
 | optional `strictValues`                                                | remove it; validation is always enabled                                                |
+| optional `strictTransactions`                                          | remove it; transaction-scope enforcement is always enabled                             |
 | ordinary facade calls inside a transaction runner                      | use only `tx.get/set/remove/keys/iterate/clear`                                        |
 | memory snapshot rollback without isolation                             | rely on the new serialized realm/namespace contract, or remove transaction assumptions |
 | localStorage/RN transaction stubs                                      | check `capabilities().transactions`; unsupported calls reject early                    |

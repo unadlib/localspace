@@ -342,10 +342,10 @@ interface LocalSpaceOptions extends LocalSpaceConfig {
 | `plugins`                 | `[]`                    | construction-time plugins                                                                                    |
 | `drivers`                 | `[]`                    | construction-scoped immutable driver definitions                                                             |
 
-The removed `size`, `strictValues`, `prewarmTransactions`,
-`connectionIdleMs`, and `maxConcurrentTransactions` options reject with
-`INVALID_CONFIG` instead of being ignored. In 3.0 value validation is always
-enabled.
+The removed `size`, `strictValues`, `strictTransactions`,
+`prewarmTransactions`, `connectionIdleMs`, and `maxConcurrentTransactions`
+options reject with `INVALID_CONFIG` instead of being ignored. In 3.0 value
+validation and transaction-scope enforcement are always enabled.
 
 ### Plugin registration lock
 

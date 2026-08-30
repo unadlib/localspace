@@ -73,7 +73,8 @@
 ### Removed
 
 - Removed `config(options)`, `instance.defineDriver()`, and `destroy()`.
-- Removed the 2.1-only `strictValues` option because 3.0 validation is mandatory.
+- Removed the 2.1-only `strictValues` and `strictTransactions` migration options
+  because 3.0 validation and transaction-scope enforcement are mandatory.
 - Removed `prewarmTransactions`, `connectionIdleMs`, and
   `maxConcurrentTransactions` after pinned same-run measurements showed no
   stable benefit; supplying them now rejects instead of being ignored.

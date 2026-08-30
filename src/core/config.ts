@@ -8,6 +8,7 @@ import { createLocalSpaceError } from '../errors.js';
 export type InternalConfigOptions = Partial<LocalSpaceConfig> & {
   size?: unknown;
   strictValues?: unknown;
+  strictTransactions?: unknown;
   prewarmTransactions?: unknown;
   connectionIdleMs?: unknown;
   maxConcurrentTransactions?: unknown;
@@ -70,6 +71,13 @@ export function normalizeConfigOptions(
       'INVALID_CONFIG',
       'Configuration option "strictValues" was removed because LocalSpace 3.0 always validates StorageValue writes.',
       { configKey: 'strictValues', reason: 'removed-option' }
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(options, 'strictTransactions')) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Configuration option "strictTransactions" was removed because LocalSpace 3.0 always enforces transaction-scope operations.',
+      { configKey: 'strictTransactions', reason: 'removed-option' }
     );
   }
   for (const key of REMOVED_INDEXEDDB_OPTIONS) {
@@ -170,6 +178,7 @@ export function createConfigSnapshot(
   const snapshotRecord = snapshot as LocalSpaceConfig & Record<string, unknown>;
   delete snapshotRecord.size;
   delete snapshotRecord.strictValues;
+  delete snapshotRecord.strictTransactions;
 
   return Object.freeze(snapshot) as LocalSpaceConfigSnapshot;
 }

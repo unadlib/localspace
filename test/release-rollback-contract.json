@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "bridge": {
-    "sourceCommit": "8c8173495705f6847690e04d561006f306829c0d",
-    "sourcePackageVersion": "2.1.0",
+    "sourceCommit": "bef5d3df7a53a9ace79f71bbfc82c4c8fd786cf9",
+    "sourcePackageVersion": "2.1.1",
     "requiredPublishedVersion": "2.1.1",
     "publishedVersion": null,
     "publishedIntegrity": null
