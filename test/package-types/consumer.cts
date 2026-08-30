@@ -140,6 +140,10 @@ const typecheckRemovedApis = (): void => {
   instance._config.name = 'changed';
   // @ts-expect-error strictValues was a 2.1 migration-only option
   const strictOptions: LocalSpaceOptions = { strictValues: true };
+  const strictTransactionOptions: LocalSpaceOptions = {
+    // @ts-expect-error strictTransactions was a 2.1 migration-only option
+    strictTransactions: true,
+  };
   // @ts-expect-error Date is outside the 3.0 StorageValue contract
   void instance.setItem('date', new Date());
   // @ts-expect-error undefined is outside the 3.0 StorageValue contract
@@ -166,6 +170,7 @@ const typecheckRemovedApis = (): void => {
     return transaction.set('date', new Date());
   });
   void strictOptions;
+  void strictTransactionOptions;
   void legacyAlgorithm;
   void callerOwnedIv;
 };

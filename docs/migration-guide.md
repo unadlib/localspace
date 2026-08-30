@@ -91,6 +91,7 @@ Remove these options entirely:
 {
   size,
   strictValues,
+  strictTransactions,
   prewarmTransactions,
   connectionIdleMs,
   maxConcurrentTransactions,
