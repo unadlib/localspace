@@ -5,30 +5,43 @@ on:
 jobs:
   publish-npm:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
       - name: Enable pnpm
         run: corepack enable
+      - name: Verify release identity and trusted-publishing environment
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: node scripts/verify-release-identity.mjs --require-oidc --require-unpublished
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm run lint
       - name: Type check
         run: pnpm run check:type
-      - name: Run unit tests
-        run: pnpm run test:unit
+      - name: Run unit tests with coverage
+        run: pnpm run test:coverage
       - name: Check package exports
         run: pnpm run test:exports
+      - name: Check React Native Jest integration
+        run: pnpm run test:rn:integration
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run browser integration tests
+        run: pnpm run test:e2e
       - name: Check package contents
         run: npm pack --dry-run --json
       - name: Publish to npm
-        run: npm publish
+        run: npm publish --provenance --access public
         env:
           CI: true
