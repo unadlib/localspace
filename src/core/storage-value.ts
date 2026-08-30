@@ -95,6 +95,17 @@ const findStorageValueIssue = (
     try {
       // Accessing byteLength also rejects detached or forged binary objects.
       const byteLength = (value as ArrayBuffer | ArrayBufferView).byteLength;
+      if (
+        tag !== '[object ArrayBuffer]' &&
+        objectToString.call((value as ArrayBufferView).buffer) ===
+          '[object SharedArrayBuffer]'
+      ) {
+        return issue(
+          path,
+          'binary views backed by shared memory are not supported',
+          value
+        );
+      }
       return typeof byteLength === 'number'
         ? null
         : issue(path, 'binary values must expose a byteLength', value);

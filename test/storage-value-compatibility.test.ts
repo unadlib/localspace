@@ -229,6 +229,18 @@ describe('2.1 StorageValue migration contract', () => {
     expect(inspectStorageValue(value)).toMatchObject({ reason });
   });
 
+  it('rejects typed arrays backed by shared memory', () => {
+    if (typeof SharedArrayBuffer === 'undefined') return;
+
+    expect(
+      inspectStorageValue(new Uint8Array(new SharedArrayBuffer(4)))
+    ).toEqual({
+      path: '$',
+      reason: 'binary views backed by shared memory are not supported',
+      valueType: 'Uint8Array',
+    });
+  });
+
   it('rejects cycles with the failing path', () => {
     const value: { child?: unknown } = {};
     value.child = value;
