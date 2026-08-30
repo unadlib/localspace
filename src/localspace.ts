@@ -1750,14 +1750,22 @@ export class LocalSpace implements LocalSpaceInstance {
   }
 
   private _assertLifecycleIdle(operation: 'close' | 'setDriver'): void {
-    if (this._operationsStarting === 0 && this._activeOperations.size === 0) {
+    if (
+      this._operationsStarting === 0 &&
+      this._activeOperations.size === 0 &&
+      this._activeTransactionRunners === 0
+    ) {
       return;
     }
 
     throw createLocalSpaceError(
       'OPERATION_FAILED',
       `Cannot ${operation} while storage operations are active.`,
-      { operation, reason: 'active-operations' }
+      {
+        operation,
+        reason: 'active-operations',
+        activeTransactionRunners: this._activeTransactionRunners,
+      }
     );
   }
 

@@ -428,10 +428,18 @@ describe('Plugin batch operations', () => {
       storeName: 'ttl-batch-store',
     });
     const rawA = await rawReader.getItem('a');
-    expect(rawA).toMatchObject({ __ls_ttl: true });
-    expect(readStoredRecord((rawA as { data?: unknown } | null)?.data)).toEqual(
-      { matched: true, value: 'val-a' }
-    );
+    expect(rawA).toMatchObject({
+      __localspace__: {
+        namespace: 'localspace.plugin',
+        kind: 'ttl',
+        version: 1,
+      },
+    });
+    expect(
+      readStoredRecord(
+        (rawA as { payload?: { data?: unknown } } | null)?.payload?.data
+      )
+    ).toEqual({ matched: true, value: 'val-a' });
 
     // Batch get with TTL plugin should unwrap
     const result = await store.getItems(['a', 'b']);
@@ -597,9 +605,18 @@ describe('Plugin batch operations', () => {
       name: 'logical-batch-return-db',
       storeName: 'logical-batch-return-store',
     });
-    const rawValue = await rawReader.getItem<{ data?: unknown }>('a');
-    expect(rawValue).toMatchObject({ __ls_ttl: true });
-    expect(readStoredRecord(rawValue?.data)).toEqual({
+    const rawValue = await rawReader.getItem<{
+      __localspace__?: unknown;
+      payload?: { data?: unknown };
+    }>('a');
+    expect(rawValue).toMatchObject({
+      __localspace__: {
+        namespace: 'localspace.plugin',
+        kind: 'ttl',
+        version: 1,
+      },
+    });
+    expect(readStoredRecord(rawValue?.payload?.data)).toEqual({
       matched: true,
       value: 'value',
     });
@@ -649,9 +666,18 @@ describe('Plugin batch operations', () => {
       name: 'reshaped-logical-batch-db',
       storeName: 'reshaped-logical-batch-store',
     });
-    const rawAdded = await rawReader.getItem<{ data?: unknown }>('added');
-    expect(rawAdded).toMatchObject({ __ls_ttl: true });
-    expect(readStoredRecord(rawAdded?.data)).toEqual({
+    const rawAdded = await rawReader.getItem<{
+      __localspace__?: unknown;
+      payload?: { data?: unknown };
+    }>('added');
+    expect(rawAdded).toMatchObject({
+      __localspace__: {
+        namespace: 'localspace.plugin',
+        kind: 'ttl',
+        version: 1,
+      },
+    });
+    expect(readStoredRecord(rawAdded?.payload?.data)).toEqual({
       matched: true,
       value: 9,
     });

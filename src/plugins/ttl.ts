@@ -7,6 +7,7 @@ import type {
 import { normalizeBatchEntries } from '../utils/helpers.js';
 import { createLocalSpaceError, toLocalSpaceError } from '../errors.js';
 import {
+  createPluginEnvelope,
   hasOwnPayloadField,
   readPluginEnvelope,
 } from '../core/plugin-envelope.js';
@@ -51,7 +52,7 @@ type TtlPayloadBody<T> = {
   expiresAt: number;
 };
 
-type TtlPayload<T> = TtlPayloadBody<T> & {
+type LegacyTtlPayload<T> = TtlPayloadBody<T> & {
   __ls_ttl: true;
 };
 
@@ -109,7 +110,7 @@ const parseTtlPayload = (value: unknown): TtlPayloadBody<unknown> | null => {
   if (
     !value ||
     typeof value !== 'object' ||
-    (value as Partial<TtlPayload<unknown>>).__ls_ttl !== true
+    (value as Partial<LegacyTtlPayload<unknown>>).__ls_ttl !== true
   ) {
     return null;
   }
@@ -367,11 +368,10 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
     if (!ttlMs || ttlMs <= 0 || !Number.isFinite(ttlMs)) {
       return value;
     }
-    return {
-      __ls_ttl: true,
+    return createPluginEnvelope('ttl', {
       data: value,
       expiresAt: Date.now() + ttlMs,
-    } as unknown as T;
+    }) as unknown as T;
   },
   afterGet: async <T>(
     key: string,
@@ -426,11 +426,10 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
       }
       return {
         key,
-        value: {
-          __ls_ttl: true,
+        value: createPluginEnvelope('ttl', {
           data: value,
           expiresAt: now + ttlMs,
-        } as unknown as T,
+        }) as unknown as T,
       };
     });
     return wrapped;

@@ -450,6 +450,137 @@ test.describe('localspace browser interoperability', () => {
     expect(result.storedValue).toBeNull();
   });
 
+  test('IndexedDB serializes transactions across competing page connections', async ({
+    page,
+    context,
+  }) => {
+    const storeName = randomStoreName('transaction-competing-pages');
+    const secondPage = await context.newPage();
+    await Promise.all([page.goto('/'), secondPage.goto('/')]);
+
+    await page.evaluate(async (targetStoreName) => {
+      const localspaceModule = await import('/dist/index.esm.js');
+      const instance = localspaceModule.default.createInstance({
+        name: 'playwright-transaction-pages',
+        storeName: targetStoreName,
+        prewarmTransactions: false,
+      });
+      await instance.setDriver([instance.INDEXEDDB]);
+      await instance.ready();
+      await instance.setItem('counter', 0);
+      (window as any).__transactionInstance = instance;
+    }, storeName);
+    await secondPage.evaluate(async (targetStoreName) => {
+      const localspaceModule = await import('/dist/index.esm.js');
+      const instance = localspaceModule.default.createInstance({
+        name: 'playwright-transaction-pages',
+        storeName: targetStoreName,
+        prewarmTransactions: false,
+      });
+      await instance.setDriver([instance.INDEXEDDB]);
+      await instance.ready();
+      (window as any).__transactionInstance = instance;
+    }, storeName);
+
+    await page.evaluate(() => {
+      const state = window as any;
+      state.__transactionEntered = false;
+      state.__firstTransaction = state.__transactionInstance.runTransaction(
+        'readwrite',
+        async (scope: any) => {
+          const current = (await scope.get('counter')) ?? 0;
+          await scope.iterate(async (_value: unknown, key: string) => {
+            if (key === 'counter') {
+              state.__transactionEntered = true;
+              await new Promise<void>((resolve) => {
+                state.__releaseTransaction = resolve;
+              });
+              return 'released';
+            }
+            return undefined;
+          });
+          await scope.set('counter', current + 1);
+          return current + 1;
+        }
+      );
+    });
+    await page.waitForFunction(() => (window as any).__transactionEntered);
+
+    await secondPage.evaluate(() => {
+      const state = window as any;
+      state.__secondReadResolved = false;
+      state.__secondTransaction = state.__transactionInstance.runTransaction(
+        'readwrite',
+        async (scope: any) => {
+          const current = (await scope.get('counter')) ?? 0;
+          state.__secondReadResolved = true;
+          await scope.set('counter', current + 1);
+          return current + 1;
+        }
+      );
+    });
+    await secondPage.waitForTimeout(100);
+    expect(
+      await secondPage.evaluate(() => (window as any).__secondReadResolved)
+    ).toBe(false);
+
+    await page.evaluate(() => (window as any).__releaseTransaction());
+    const [firstOutcome, secondOutcome] = await Promise.all([
+      page.evaluate(async () => {
+        try {
+          return { value: await (window as any).__firstTransaction };
+        } catch (error) {
+          const failure = error as any;
+          return {
+            error: {
+              code: failure.code,
+              message: failure.message,
+              details: failure.details,
+            },
+          };
+        }
+      }),
+      secondPage.evaluate(async () => {
+        try {
+          return { value: await (window as any).__secondTransaction };
+        } catch (error) {
+          const failure = error as any;
+          return {
+            error: {
+              code: failure.code,
+              message: failure.message,
+              details: failure.details,
+            },
+          };
+        }
+      }),
+    ]);
+    expect([firstOutcome, secondOutcome]).toEqual([{ value: 1 }, { value: 2 }]);
+    await expect(
+      secondPage.evaluate(() =>
+        (window as any).__transactionInstance.getItem('counter')
+      )
+    ).resolves.toBe(2);
+
+    await Promise.all([
+      page.evaluate(() => (window as any).__transactionInstance.close()),
+      secondPage.evaluate(() => (window as any).__transactionInstance.close()),
+    ]);
+    await secondPage.close();
+
+    await page.evaluate(async (targetStoreName) => {
+      const localspaceModule = await import('/dist/index.esm.js');
+      const cleanup = localspaceModule.default.createInstance({
+        name: 'playwright-transaction-pages',
+        storeName: targetStoreName,
+        prewarmTransactions: false,
+      });
+      await cleanup.setDriver([cleanup.INDEXEDDB]);
+      await cleanup.dropInstance();
+      await cleanup.close();
+    }, storeName);
+  });
+
   test('close releases an IndexedDB instance without deleting its data', async ({
     page,
   }) => {

@@ -51,17 +51,13 @@ describe.each(TRANSFORM_PLUGINS)(
       await expect(store.getItem('secret')).resolves.toBe(logicalValue);
       const rawValue = await rawStore.getItem('secret');
       expect(rawValue).not.toEqual(logicalValue);
-      if (name === 'ttl') {
-        expect(rawValue).toMatchObject({ __ls_ttl: true });
-      } else {
-        expect(rawValue).toMatchObject({
-          __localspace__: {
-            namespace: 'localspace.plugin',
-            kind: name,
-            version: 1,
-          },
-        });
-      }
+      expect(rawValue).toMatchObject({
+        __localspace__: {
+          namespace: 'localspace.plugin',
+          kind: name,
+          version: 1,
+        },
+      });
     });
 
     it('decodes logical values before invoking iterate callbacks', async () => {

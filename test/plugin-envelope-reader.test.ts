@@ -114,30 +114,36 @@ describe('versioned plugin envelope reader', () => {
     ).toThrowError(expect.objectContaining({ code: 'DESERIALIZATION_FAILED' }));
   });
 
-  it('keeps writing legacy TTL payloads and reads the versioned form', async () => {
+  it('writes versioned TTL payloads and retains the legacy reader', async () => {
     const { store, raw } = await createStorePair(
       'ttl-envelope-reader',
       ttlPlugin({ defaultTTL: 60_000 })
     );
-    await store.setItem('legacy', { source: '2.x' });
-    const physical = await raw.getItem<{
-      __ls_ttl: true;
-      data: unknown;
-    }>('legacy');
-    expect(physical).toMatchObject({ __ls_ttl: true });
-    expect(readStoredRecord(physical?.data)).toEqual({
+    await store.setItem('versioned', { source: '3.0' });
+    const physical = await raw.getItem<
+      PluginEnvelopeV1<{
+        data: unknown;
+        expiresAt: number;
+      }>
+    >('versioned');
+    expect(physical).toMatchObject({
+      __localspace__: {
+        namespace: 'localspace.plugin',
+        kind: 'ttl',
+        version: 1,
+      },
+    });
+    expect(readStoredRecord(physical?.payload.data)).toEqual({
       matched: true,
-      value: { source: '2.x' },
+      value: { source: '3.0' },
     });
 
-    await raw.setItem(
-      'future',
-      envelope('ttl', {
-        data: { source: '3.0' },
-        expiresAt: Date.now() + 60_000,
-      })
-    );
-    await expect(store.getItem('future')).resolves.toEqual({ source: '3.0' });
+    await raw.setItem('legacy', {
+      __ls_ttl: true,
+      data: { source: '2.x' },
+      expiresAt: Date.now() + 60_000,
+    });
+    await expect(store.getItem('legacy')).resolves.toEqual({ source: '2.x' });
   });
 
   it('preserves legacy TTL representations for undefined and infinite expiry', async () => {

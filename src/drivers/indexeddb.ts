@@ -1548,6 +1548,11 @@ function runTransaction<T>(
             let runnerSettled = false;
             let keepAliveDepth = 0;
             let keepAliveRequestPending = false;
+            type ScopeOperationSettlement = {
+              complete(): void;
+              abort(error: unknown): void;
+            };
+            const pendingScopeSettlements: ScopeOperationSettlement[] = [];
 
             const isTransactionActive = (): boolean => {
               if (transactionFinished) {
@@ -1598,6 +1603,7 @@ function runTransaction<T>(
                 const request = store.count();
                 const continueKeepAlive = (): void => {
                   keepAliveRequestPending = false;
+                  pendingScopeSettlements.shift()?.complete();
                   if (keepAliveDepth > 0 && isTransactionActive()) {
                     issueKeepAliveRequest();
                   }
@@ -1609,17 +1615,68 @@ function runTransaction<T>(
               }
             };
 
-            const runScopeOperation = async <U>(
+            const runScopeOperation = <U>(
               scopeOperation: keyof TransactionScope,
               operation: () => Promise<U> | U
             ): Promise<U> => {
               assertTransactionActive(scopeOperation);
               keepAliveDepth += 1;
               issueKeepAliveRequest();
-              try {
-                return await operation();
-              } finally {
-                keepAliveDepth -= 1;
+              return new Promise<U>((resolveOperation, rejectOperation) => {
+                let leaseReleased = false;
+                const releaseLease = (): void => {
+                  if (leaseReleased) {
+                    return;
+                  }
+                  leaseReleased = true;
+                  keepAliveDepth = Math.max(0, keepAliveDepth - 1);
+                };
+                const enqueueSettlement = (
+                  complete: () => void,
+                  abort: (error: unknown) => void
+                ): void => {
+                  if (transactionFinished) {
+                    abort(transactionInactiveError(scopeOperation));
+                    return;
+                  }
+                  pendingScopeSettlements.push({ complete, abort });
+                  issueKeepAliveRequest();
+                };
+
+                Promise.resolve()
+                  .then(operation)
+                  .then(
+                    (value) => {
+                      enqueueSettlement(
+                        () => {
+                          releaseLease();
+                          resolveOperation(value);
+                        },
+                        (error) => {
+                          releaseLease();
+                          rejectOperation(error);
+                        }
+                      );
+                    },
+                    (operationError) => {
+                      enqueueSettlement(
+                        () => {
+                          releaseLease();
+                          rejectOperation(operationError);
+                        },
+                        () => {
+                          releaseLease();
+                          rejectOperation(operationError);
+                        }
+                      );
+                    }
+                  );
+              });
+            };
+
+            const abortPendingScopeOperations = (error: unknown): void => {
+              for (const settlement of pendingScopeSettlements.splice(0)) {
+                settlement.abort(error);
               }
             };
 
@@ -1771,18 +1828,33 @@ function runTransaction<T>(
               transaction.oncomplete = () => {
                 transactionFinished = true;
                 if (!runnerSettled) {
-                  rej(transactionInactiveError('runner'));
+                  const inactiveError = transactionInactiveError('runner');
+                  abortPendingScopeOperations(inactiveError);
+                  rej(inactiveError);
                   return;
                 }
                 res();
               };
               transaction.onabort = () => {
                 transactionFinished = true;
-                rej(transaction.error || new Error('Transaction aborted'));
+                const abortError = new LocalSpaceError(
+                  'OPERATION_FAILED',
+                  'IndexedDB transaction was aborted.',
+                  {
+                    driver: DRIVER_NAME,
+                    operation: 'runTransaction',
+                    transactionMode: mode,
+                    reason: 'transaction-aborted',
+                  },
+                  transaction.error ?? undefined
+                );
+                abortPendingScopeOperations(abortError);
+                rej(abortError);
               };
               transaction.onerror = () => {
-                transactionFinished = true;
-                rej(transaction.error || new Error('Transaction error'));
+                // A transaction error bubbles before the corresponding abort.
+                // Wait for `abort` so callers receive one stable terminal
+                // outcome instead of an event-order-dependent error.
               };
             });
 
