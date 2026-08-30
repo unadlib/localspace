@@ -290,4 +290,40 @@ describe('IndexedDB shared context lifecycle', () => {
     await cleanup.dropInstance();
     await cleanup.close();
   });
+
+  it('rejects cross-bucket deletion instead of reusing the current backend', async () => {
+    const restoreBuckets = installStorageBuckets(async () => ({ indexedDB }));
+    const name = uniqueName('bucket-drop-scope');
+    const instance = localspace.createInstance({
+      name,
+      storeName: 'store',
+      bucket: { name: 'selected-bucket' },
+    });
+
+    try {
+      await instance.setDriver([instance.INDEXEDDB]);
+      await instance.setItem('key', 'value');
+
+      await expect(
+        instance.dropInstance({
+          name,
+          bucket: { name: 'different-bucket' },
+        })
+      ).rejects.toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        details: {
+          driver: instance.INDEXEDDB,
+          operation: 'dropInstance',
+          reason: 'bucket-scope-mismatch',
+          currentBucketName: 'selected-bucket',
+          targetBucketName: 'different-bucket',
+        },
+      });
+      await expect(instance.getItem('key')).resolves.toBe('value');
+      await instance.dropInstance();
+    } finally {
+      await instance.close();
+      restoreBuckets();
+    }
+  });
 });

@@ -424,6 +424,11 @@ Deletes a namespace when supported. Without options it targets the current
 the driver. It runs plugin drop observers and rejects early when
 `capabilities().dropInstance` is false.
 
+For IndexedDB, deletion remains inside the instance's selected Storage Bucket.
+To delete from another bucket, construct an instance with that bucket first;
+LocalSpace rejects a cross-bucket `dropInstance()` instead of risking deletion
+through the wrong IndexedDB factory.
+
 ### Custom driver registration
 
 Construction-scoped registration is preferred:

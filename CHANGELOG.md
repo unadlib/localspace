@@ -51,7 +51,8 @@
   through a read-only legacy migration plugin.
 - Made Storage Bucket configuration an explicit placement requirement. Bucket
   unavailability/open failure no longer falls back to default IndexedDB or the
-  next driver.
+  next driver. Invalid bucket shapes reject before selection, and IndexedDB
+  namespace deletion cannot cross the instance's selected bucket boundary.
 - Made React Native AsyncStorage injection mandatory; runtime globals,
   `require`, and dynamic import are no longer probed.
 - Kept the historical default namespace permanently fixed at

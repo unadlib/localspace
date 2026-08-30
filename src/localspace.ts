@@ -1390,13 +1390,16 @@ export class LocalSpace implements LocalSpaceInstance {
     original: RawDriverMethod
   ): RawDriverMethod {
     return async (options?: LocalSpaceConfig) => {
+      const normalizedOptions = options
+        ? (normalizeConfigOptions(options) as LocalSpaceConfig)
+        : undefined;
       await this._ensurePluginsInitialized('dropInstance');
       const context = this._pluginManager.createContext('dropInstance');
-      const optionsSnapshot = options
-        ? createConfigSnapshot({ ...options })
+      const optionsSnapshot = normalizedOptions
+        ? createConfigSnapshot(normalizedOptions)
         : undefined;
       await this._pluginManager.beforeDropInstance(optionsSnapshot, context);
-      await original(options);
+      await original(normalizedOptions);
       await this._pluginManager.afterDropInstance(optionsSnapshot, context);
     };
   }

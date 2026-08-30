@@ -415,6 +415,10 @@ try {
 Do not silently construct a default-backend fallback unless the application is
 prepared for two physically distinct datasets.
 
+Bucket configuration is validated before driver selection. To delete data from
+a bucket, use an instance constructed for that same bucket; passing a different
+`bucket.name` to `dropInstance()` rejects with `INVALID_ARGUMENT`.
+
 ## Migrate iteration
 
 The callback may be async and is awaited sequentially. The return type is

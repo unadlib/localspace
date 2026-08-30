@@ -2012,6 +2012,31 @@ function dropInstance(
     return wrappedInvalid;
   }
 
+  const currentBucketName = currentConfig.bucket?.name;
+  const targetBucketName = effectiveOptions.bucket?.name;
+  if (
+    targetBucketName !== undefined &&
+    targetBucketName !== currentBucketName
+  ) {
+    const promise = Promise.reject(
+      createLocalSpaceError(
+        'INVALID_ARGUMENT',
+        'dropInstance() cannot target a Storage Bucket other than the one selected by this instance.',
+        {
+          driver: DRIVER_NAME,
+          operation: 'dropInstance',
+          reason: 'bucket-scope-mismatch',
+          currentBucketName,
+          targetBucketName,
+        }
+      )
+    );
+    return withIdbErrorContext(promise, 'dropInstance', {
+      name: effectiveOptions.name,
+      storeName: effectiveOptions.storeName,
+    });
+  }
+
   const currentDbInfo = self._dbInfo as DbInfo | undefined;
 
   const dropDbInfo: DbInfo = {

@@ -36,6 +36,23 @@ describe('immutable configuration', () => {
     );
   });
 
+  it.each([
+    [null, 'invalid-bucket'],
+    [[], 'invalid-bucket'],
+    [{}, 'invalid-bucket-name'],
+    [{ name: '' }, 'invalid-bucket-name'],
+    [{ name: 42 }, 'invalid-bucket-name'],
+    [{ name: 'app', durability: 'eventual' }, 'invalid-bucket-durability'],
+    [{ name: 'app', persisted: 'yes' }, 'invalid-bucket-persisted'],
+  ])('rejects invalid Storage Bucket configuration %j', (bucket, reason) => {
+    expect(() => new LocalSpace({ bucket } as never)).toThrowError(
+      expect.objectContaining<Partial<LocalSpaceError>>({
+        code: 'INVALID_CONFIG',
+        details: expect.objectContaining({ configKey: 'bucket', reason }),
+      })
+    );
+  });
+
   it('rejects the removed size option at runtime', () => {
     expect(() => new LocalSpace({ size: 4_980_736 } as never)).toThrowError(
       expect.objectContaining<Partial<LocalSpaceError>>({

@@ -56,6 +56,42 @@ const validateIntegerOption = (
   }
 };
 
+const validateBucketOption = (value: unknown): void => {
+  const invalid = (reason: string, details: Record<string, unknown> = {}) => {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'Configuration option "bucket" must provide a valid Storage Bucket configuration.',
+      { configKey: 'bucket', reason, ...details }
+    );
+  };
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    invalid('invalid-bucket', { providedType: typeof value });
+  }
+
+  const bucket = value as Record<string, unknown>;
+  if (typeof bucket.name !== 'string' || bucket.name.length === 0) {
+    invalid('invalid-bucket-name', { providedType: typeof bucket.name });
+  }
+  if (
+    bucket.durability !== undefined &&
+    bucket.durability !== 'relaxed' &&
+    bucket.durability !== 'strict'
+  ) {
+    invalid('invalid-bucket-durability', {
+      providedValue: bucket.durability,
+    });
+  }
+  if (
+    bucket.persisted !== undefined &&
+    typeof bucket.persisted !== 'boolean'
+  ) {
+    invalid('invalid-bucket-persisted', {
+      providedType: typeof bucket.persisted,
+    });
+  }
+};
+
 export function normalizeConfigOptions(
   options: InternalConfigOptions
 ): InternalConfigOptions {
@@ -128,7 +164,8 @@ export function normalizeConfigOptions(
     normalized.driver = [...options.driver];
   }
 
-  if (options.bucket) {
+  if (options.bucket !== undefined) {
+    validateBucketOption(options.bucket);
     normalized.bucket = { ...options.bucket };
   }
 
