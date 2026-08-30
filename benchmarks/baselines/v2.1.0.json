@@ -29,6 +29,16 @@
       "maxBatchSize": 48,
       "transactionCount": 96
     },
+    "releaseBudgets": {
+      "main.readyMs": { "maxAddedMs": 1 },
+      "main.single.setMs": { "maxRatio": 1.25 },
+      "main.single.getMs": { "maxRatio": 1.25 },
+      "main.single.iterateMs": { "maxAddedMs": 1 },
+      "main.batch.setMs": { "maxRatio": 1.35 },
+      "main.batch.getMs": { "maxRatio": 1.35 },
+      "main.batch.removeMs": { "maxRatio": 1.75 },
+      "main.transactionMs": { "maxRatio": 6 }
+    },
     "legacyFeatureProbes": {
       "concurrencyCount": 80,
       "idleMs": 20,

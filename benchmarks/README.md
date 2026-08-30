@@ -22,11 +22,19 @@ the output records the effective contract. Use `--skip-legacy-probes` after the
 legacy configuration options have been removed.
 
 The harness reports medians, interquartile ranges, and candidate/baseline
-ratios. It has no absolute pass/fail latency threshold: browser scheduling,
-hardware, power state, and filesystem state make a historical millisecond value
-unsuitable as a release gate. A design decision must use an interleaved same-run
-comparison and retain its JSON evidence. Correctness assertions and published
-package identity/integrity checks do fail the run.
+ratios. Release budgets are committed in `baselines/v2.1.0.json` and are
+evaluated against the interleaved baseline median from the same Chromium
+process. Ordinary single and batch operations use ratio limits. Sub-millisecond
+startup and short iteration use absolute millisecond allowances because a
+ratio magnifies timer noise. Transactions have a separate 6x ceiling: 3.0 adds
+scope enforcement, logical plugin transforms, keep-alive handling, and
+serializable coordination that 2.1 did not provide. The ceiling makes that
+intentional cost bounded rather than exempt from review.
+
+Exceeding any budget, failing a correctness assertion, or changing the pinned
+published package identity/integrity fails the command. Historical absolute
+milliseconds remain observations rather than portable gates; a release must
+retain the same-run JSON evidence.
 
 Package size is measured separately from runtime speed. The baseline values are
 from the immutable published tarball, while the candidate is measured with

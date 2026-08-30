@@ -192,6 +192,68 @@ const createRatios = (baselineSummary, candidateSummary) =>
       })
   );
 
+const evaluateReleaseBudgets = (baselineSummary, candidateSummary) => {
+  const budgets = baseline.contract.releaseBudgets;
+  if (!budgets || typeof budgets !== 'object' || Array.isArray(budgets)) {
+    throw new Error('The baseline does not define releaseBudgets.');
+  }
+
+  const mainMetrics = Object.keys(baselineSummary)
+    .filter((name) => name.startsWith('main.'))
+    .sort();
+  const budgetMetrics = Object.keys(budgets).sort();
+  if (JSON.stringify(mainMetrics) !== JSON.stringify(budgetMetrics)) {
+    throw new Error(
+      `Release budgets must cover every main metric exactly. Metrics: ${mainMetrics.join(', ')}; budgets: ${budgetMetrics.join(', ')}.`
+    );
+  }
+
+  const results = Object.fromEntries(
+    budgetMetrics.map((name) => {
+      const budget = budgets[name];
+      const baselineMedian = baselineSummary[name]?.median;
+      const candidateMedian = candidateSummary[name]?.median;
+      if (
+        typeof baselineMedian !== 'number' ||
+        typeof candidateMedian !== 'number'
+      ) {
+        throw new Error(`Release metric ${name} is missing a numeric median.`);
+      }
+
+      const hasRatio =
+        typeof budget?.maxRatio === 'number' && budget.maxRatio > 0;
+      const hasAddedMilliseconds =
+        typeof budget?.maxAddedMs === 'number' && budget.maxAddedMs >= 0;
+      if (hasRatio === hasAddedMilliseconds) {
+        throw new Error(
+          `Release budget ${name} must define exactly one of maxRatio or maxAddedMs.`
+        );
+      }
+
+      const maximumCandidateMs = hasRatio
+        ? baselineMedian * budget.maxRatio
+        : baselineMedian + budget.maxAddedMs;
+      return [
+        name,
+        {
+          ...budget,
+          baselineMedian,
+          candidateMedian,
+          maximumCandidateMs,
+          passed: candidateMedian <= maximumCandidateMs,
+        },
+      ];
+    })
+  );
+
+  return {
+    status: Object.values(results).every(({ passed }) => passed)
+      ? 'passed'
+      : 'failed',
+    metrics: results,
+  };
+};
+
 const contentTypes = new Map([
   ['.html', 'text/html; charset=utf-8'],
   ['.js', 'text/javascript; charset=utf-8'],
@@ -546,6 +608,16 @@ const printComparison = (result) => {
   console.log(
     `  files: ${result.package.candidate.entryCount} / ${result.package.baseline.entryCount}`
   );
+  console.log(`Release performance gate: ${result.releaseGate.status}`);
+  for (const [name, budget] of Object.entries(result.releaseGate.metrics)) {
+    const rule =
+      typeof budget.maxRatio === 'number'
+        ? `max ${budget.maxRatio.toFixed(2)}x`
+        : `max +${budget.maxAddedMs.toFixed(2)}ms`;
+    console.log(
+      `  ${budget.passed ? 'PASS' : 'FAIL'} ${name}: ${budget.candidateMedian.toFixed(2)}ms <= ${budget.maximumCandidateMs.toFixed(2)}ms (${rule})`
+    );
+  }
 };
 
 const temporaryRoot = mkdtempSync(
@@ -606,6 +678,10 @@ try {
   const candidateSummary = summarizeSamples(
     browserResult.measurements.candidate
   );
+  const releaseGate = evaluateReleaseBudgets(
+    baselineSummary,
+    candidateSummary
+  );
   const result = {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
@@ -652,6 +728,7 @@ try {
       raw: browserResult.measurements,
     },
     ratios: createRatios(baselineSummary, candidateSummary),
+    releaseGate,
     package: {
       baseline: summarizePack(publishedPack),
       candidate: summarizePack(candidatePack),
@@ -664,6 +741,14 @@ try {
     mkdirSync(path.dirname(outputPath), { recursive: true });
     writeFileSync(outputPath, `${JSON.stringify(result, null, 2)}\n`);
     console.log(`Full result written to ${outputPath}`);
+  }
+  if (releaseGate.status !== 'passed') {
+    const failedMetrics = Object.entries(releaseGate.metrics)
+      .filter(([, budget]) => !budget.passed)
+      .map(([name]) => name);
+    throw new Error(
+      `Release performance budgets exceeded: ${failedMetrics.join(', ')}.`
+    );
   }
 } finally {
   if (server) await server.close();
