@@ -134,9 +134,7 @@ export const sizeLimitPlugin = (
     name: 'size-limit-example',
     priority: -10,
     beforeSet: async (key, value, context) => {
-      if (!context.operationState.isBatch) {
-        await assertWithinLimit(new Map([[key, value]]), context);
-      }
+      await assertWithinLimit(new Map([[key, value]]), context);
       return value;
     },
     beforeSetItems: async (entries, context) => {

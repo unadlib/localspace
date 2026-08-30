@@ -118,15 +118,7 @@ const createCompressionPlugin = (
   return {
     name: 'compression',
     priority: 5,
-    beforeSet: async <T>(
-      _key: string,
-      value: T,
-      context: PluginContext
-    ): Promise<T> => {
-      // Skip if already processed by batch hook
-      if (context.operationState.isBatch) {
-        return value;
-      }
+    beforeSet: async <T>(_key: string, value: T): Promise<T> => {
       if (value == null) {
         return value;
       }
@@ -158,15 +150,7 @@ const createCompressionPlugin = (
         );
       }
     },
-    afterGet: async <T>(
-      _key: string,
-      value: T | null,
-      context: PluginContext
-    ): Promise<T | null> => {
-      // Skip if already processed by batch hook
-      if (context.operationState.isBatch) {
-        return value;
-      }
+    afterGet: async <T>(_key: string, value: T | null): Promise<T | null> => {
       const payload = parseCompressionPayload(value);
       if (!payload) {
         return value;

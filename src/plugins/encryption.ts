@@ -500,26 +500,14 @@ const createEncryptionPlugin = (
   return {
     name: 'encryption',
     priority: 0,
-    beforeSet: async <T>(
-      _key: string,
-      value: T,
-      context: PluginContext
-    ): Promise<T> => {
-      // Skip if already processed by batch hook
-      if (context.operationState.isBatch) {
-        return value;
-      }
+    beforeSet: async <T>(_key: string, value: T): Promise<T> => {
       return (await encryptValue(value)) as unknown as T;
     },
     afterGet: async <T>(
       _key: string,
       value: T | null,
-      context: PluginContext
+      _context: PluginContext
     ): Promise<T | null> => {
-      // Skip if already processed by batch hook
-      if (context.operationState.isBatch) {
-        return value;
-      }
       const payload = parseEncryptedPayload(value);
       if (!payload) {
         return value;

@@ -12,7 +12,6 @@ import type {
 } from '../types.js';
 import { createLocalSpaceError, LocalSpaceError } from '../errors.js';
 import { normalizeBatchEntries } from '../utils/helpers.js';
-import { warnDeprecation } from '../utils/deprecations.js';
 import {
   getBuiltInStorageTransformKind,
   getPluginBackgroundTaskController,
@@ -48,66 +47,46 @@ type RegisteredPlugin = {
 
 type PluginHookRole = 'all' | 'logical' | 'storage-transform';
 
-type BatchLineageEntry<T> = {
+type PreparedSetItem<T> = {
   key: string;
-  physicalValue: T;
+  value: T;
   logicalValue: T;
+  context: PluginContext;
 };
 
 type PreparedSetItems<T> = {
-  entries: BatchItems<T>;
+  entries: Array<{ key: string; value: T }>;
   logicalEntries: Array<{ key: string; value: T }>;
-  hasStorageTransforms: boolean;
+  items: PreparedSetItem<T>[];
 };
 
-const createBatchLineage = <T>(
-  entries: BatchItems<T>
-): BatchLineageEntry<T>[] =>
-  normalizeBatchEntries(entries).map(({ key, value }) => ({
-    key,
-    physicalValue: value,
-    logicalValue: value,
-  }));
+type PreparedKeyItem = {
+  requestedKey: string;
+  targetKey: string;
+  context: PluginContext;
+};
 
-const updateBatchLineage = <T>(
-  previous: BatchLineageEntry<T>[],
-  entries: BatchItems<T>,
-  preserveLogicalValues: boolean
-): BatchLineageEntry<T>[] => {
-  const previousByKey = new Map<string, BatchLineageEntry<T>[]>();
-  for (const entry of previous) {
-    const matches = previousByKey.get(entry.key) ?? [];
-    matches.push(entry);
-    previousByKey.set(entry.key, matches);
-  }
+type PreparedKeys = {
+  keys: string[];
+  items: PreparedKeyItem[];
+};
 
-  return normalizeBatchEntries(entries).map(({ key, value }) => {
-    const matches = previousByKey.get(key);
-    const previousEntry = matches?.shift();
-    // Built-in transforms only change the physical representation. Custom
-    // hooks retain lineage for pass-through entries, while a replacement or
-    // newly introduced key establishes its own logical value.
-    const logicalValue =
-      previousEntry &&
-      (preserveLogicalValues || Object.is(value, previousEntry.physicalValue))
-        ? previousEntry.logicalValue
-        : value;
+type PreparedBatchResponse<T> = {
+  entries: BatchResponse<T>;
+  items: PreparedKeyItem[];
+};
 
-    return { key, physicalValue: value, logicalValue };
-  });
+type BeforeSetItemsOptions<T> = {
+  role?: PluginHookRole;
+  preserveLogicalValues?: boolean;
+  prepareBatchOutput?: (
+    entries: BatchItems<T>,
+    plugin: LocalSpacePlugin
+  ) => BatchItems<T>;
+  prepareValueOutput?: (value: T, plugin: LocalSpacePlugin, key: string) => T;
 };
 
 const sharedMetadataFor = (): Record<string, unknown> => Object.create(null);
-const COMBINED_PLUGIN_HOOK_PAIRS: Array<
-  [keyof LocalSpacePlugin, keyof LocalSpacePlugin]
-> = [
-  ['beforeSetItems', 'beforeSet'],
-  ['afterSetItems', 'afterSet'],
-  ['beforeGetItems', 'beforeGet'],
-  ['afterGetItems', 'afterGet'],
-  ['beforeRemoveItems', 'beforeRemove'],
-  ['afterRemoveItems', 'afterRemove'],
-];
 
 /**
  * Plugin combination warnings to help users avoid problematic configurations.
@@ -272,19 +251,6 @@ export class PluginManager {
 
     for (const plugin of plugins) {
       if (!plugin) continue;
-      if (
-        getBuiltInStorageTransformKind(plugin) === null &&
-        COMBINED_PLUGIN_HOOK_PAIRS.some(
-          ([batchHook, singleHook]) =>
-            typeof plugin[batchHook] === 'function' &&
-            typeof plugin[singleHook] === 'function'
-        )
-      ) {
-        warnDeprecation(
-          'combined-plugin-hooks',
-          `plugin "${plugin.name}" defines matching batch and single hooks; define one form per phase before 3.0.`
-        );
-      }
       this.pluginRegistry.push({ plugin, order: this.orderCounter++ });
     }
     this.sortPlugins();
@@ -531,140 +497,412 @@ export class PluginManager {
   async beforeSetItems<T>(
     entries: BatchItems<T>,
     context: PluginContext,
-    prepareOutput?: (
-      entries: BatchItems<T>,
-      plugin: LocalSpacePlugin
-    ) => BatchItems<T>,
-    role: PluginHookRole = 'all'
+    options: BeforeSetItemsOptions<T> = {}
   ): Promise<PreparedSetItems<T>> {
-    let current = entries;
-    let lineage = createBatchLineage(entries);
-    let hasStorageTransforms = false;
-    for (const plugin of this.getActivePlugins({ role })) {
-      const isStorageTransform =
-        getBuiltInStorageTransformKind(plugin) !== null;
-      hasStorageTransforms ||= isStorageTransform;
-      if (!plugin.beforeSetItems) continue;
-      current = await this.invokeValueHook(
-        plugin,
-        () => plugin.beforeSetItems!(current, context),
-        'before',
-        'setItems',
-        undefined,
-        context,
-        current
-      );
-      if (prepareOutput) {
-        current = prepareOutput(current, plugin);
+    const role = options.role ?? 'all';
+    const preserveLogicalValues = options.preserveLogicalValues ?? false;
+    const createItem = (
+      key: string,
+      value: T,
+      logicalValue: T = value
+    ): PreparedSetItem<T> => {
+      const entryContext = this.createContext('setItem');
+      entryContext.operationState.isBatch = true;
+      entryContext.operationState.originalValue = logicalValue;
+      return { key, value, logicalValue, context: entryContext };
+    };
+    let current = normalizeBatchEntries(entries).map(({ key, value }) =>
+      createItem(key, value)
+    );
+
+    const updateBatchSize = (): void => {
+      context.operationState.batchSize = current.length;
+      for (const item of current) {
+        item.context.operationState.batchSize = current.length;
       }
-      lineage = updateBatchLineage(lineage, current, isStorageTransform);
+    };
+    updateBatchSize();
+
+    for (const plugin of this.getActivePlugins({ role })) {
+      if (plugin.beforeSetItems) {
+        const input = current.map(({ key, value }) => ({ key, value }));
+        let output = await this.invokeValueHook(
+          plugin,
+          () => plugin.beforeSetItems!(input, context),
+          'before',
+          'setItems',
+          undefined,
+          context,
+          input
+        );
+        if (options.prepareBatchOutput) {
+          output = options.prepareBatchOutput(output, plugin);
+        }
+
+        const previousByKey = new Map<string, PreparedSetItem<T>[]>();
+        for (const item of current) {
+          const matches = previousByKey.get(item.key) ?? [];
+          matches.push(item);
+          previousByKey.set(item.key, matches);
+        }
+        current = normalizeBatchEntries(output).map(({ key, value }) => {
+          const previous = previousByKey.get(key)?.shift();
+          if (!previous) {
+            return createItem(key, value);
+          }
+          const logicalValue =
+            preserveLogicalValues || Object.is(value, previous.value)
+              ? previous.logicalValue
+              : value;
+          previous.key = key;
+          previous.value = value;
+          previous.logicalValue = logicalValue;
+          previous.context.operationState.originalValue = logicalValue;
+          return previous;
+        });
+        if (options.prepareValueOutput) {
+          for (const item of current) {
+            const pluginValue = item.value;
+            const preparedValue = options.prepareValueOutput(
+              pluginValue,
+              plugin,
+              item.key
+            );
+            item.value = preparedValue;
+            if (Object.is(item.logicalValue, pluginValue)) {
+              item.logicalValue = preparedValue;
+              item.context.operationState.originalValue = preparedValue;
+            }
+          }
+        }
+        updateBatchSize();
+        continue;
+      }
+
+      if (!plugin.beforeSet) continue;
+      for (const item of current) {
+        let value = (await this.invokeValueHook(
+          plugin,
+          () => plugin.beforeSet!(item.key, item.value, item.context),
+          'before',
+          'setItems',
+          item.key,
+          item.context,
+          item.value
+        )) as T;
+        if (options.prepareValueOutput) {
+          value = options.prepareValueOutput(value, plugin, item.key);
+        }
+        item.value = value;
+      }
     }
+
     return {
-      entries: current,
-      logicalEntries: lineage.map(({ key, logicalValue }) => ({
+      entries: current.map(({ key, value }) => ({ key, value })),
+      logicalEntries: current.map(({ key, logicalValue }) => ({
         key,
         value: logicalValue,
       })),
-      hasStorageTransforms,
+      items: current,
     };
   }
 
   async afterSetItems<T>(
     entries: BatchResponse<T>,
     context: PluginContext,
+    preparedItems: PreparedSetItem<T>[],
     role: PluginHookRole = 'all'
   ): Promise<BatchResponse<T>> {
     let current = entries;
+    let items = preparedItems.slice();
+
+    const reconcileItems = (): void => {
+      const previousByKey = new Map<string, PreparedSetItem<T>[]>();
+      for (const item of items) {
+        const matches = previousByKey.get(item.key) ?? [];
+        matches.push(item);
+        previousByKey.set(item.key, matches);
+      }
+      items = current.map(({ key, value }) => {
+        const previous = previousByKey.get(key)?.shift();
+        if (previous) {
+          previous.key = key;
+          return previous;
+        }
+        const entryContext = this.createContext('setItem');
+        entryContext.operationState.isBatch = true;
+        entryContext.operationState.originalValue = value;
+        return {
+          key,
+          value: value as T,
+          logicalValue: value as T,
+          context: entryContext,
+        };
+      });
+      context.operationState.batchSize = current.length;
+      for (const item of items) {
+        item.context.operationState.batchSize = current.length;
+      }
+    };
+    reconcileItems();
+
     for (const plugin of this.getActivePlugins({ reverse: true, role })) {
-      if (!plugin.afterSetItems) continue;
-      current = await this.invokeValueHook(
-        plugin,
-        () => plugin.afterSetItems!(current, context),
-        'after',
-        'setItems',
-        undefined,
-        context,
-        current
-      );
+      if (plugin.afterSetItems) {
+        current = await this.invokeValueHook(
+          plugin,
+          () => plugin.afterSetItems!(current, context),
+          'after',
+          'setItems',
+          undefined,
+          context,
+          current
+        );
+        reconcileItems();
+        continue;
+      }
+
+      if (!plugin.afterSet) continue;
+      for (let index = 0; index < current.length; index++) {
+        const entry = current[index];
+        const item = items[index];
+        await this.invokeVoidHook(
+          plugin,
+          () => plugin.afterSet!(entry.key, entry.value as T, item.context),
+          'after',
+          'setItems',
+          entry.key,
+          item.context
+        );
+      }
     }
-    return current;
+
+    return current.map((entry, index) => {
+      const operationState = items[index]?.context.operationState;
+      const hasReturnValue =
+        !!operationState &&
+        Object.prototype.hasOwnProperty.call(operationState, 'returnValue');
+      return {
+        key: entry.key,
+        value: hasReturnValue
+          ? (operationState.returnValue as T | null)
+          : entry.value,
+      };
+    });
+  }
+
+  private createPreparedKeyItem(
+    key: string,
+    operation: 'getItem' | 'removeItem'
+  ): PreparedKeyItem {
+    const context = this.createContext(operation);
+    context.operationState.isBatch = true;
+    return { requestedKey: key, targetKey: key, context };
+  }
+
+  private updateBatchContexts(
+    items: PreparedKeyItem[],
+    context: PluginContext
+  ): void {
+    context.operationState.batchSize = items.length;
+    for (const item of items) {
+      item.context.operationState.isBatch = true;
+      item.context.operationState.batchSize = items.length;
+    }
+  }
+
+  private reconcilePreparedKeyItems(
+    previousItems: PreparedKeyItem[],
+    keys: string[],
+    operation: 'getItem' | 'removeItem'
+  ): PreparedKeyItem[] {
+    const previousByKey = new Map<string, PreparedKeyItem[]>();
+    for (const item of previousItems) {
+      const matches = previousByKey.get(item.targetKey) ?? [];
+      matches.push(item);
+      previousByKey.set(item.targetKey, matches);
+    }
+    return keys.map((targetKey) => {
+      const previous = previousByKey.get(targetKey)?.shift();
+      if (previous) {
+        previous.targetKey = targetKey;
+        return previous;
+      }
+      return this.createPreparedKeyItem(targetKey, operation);
+    });
+  }
+
+  private async beforeKeyItems(
+    keys: string[],
+    context: PluginContext,
+    operation: 'getItems' | 'removeItems'
+  ): Promise<PreparedKeys> {
+    const itemOperation = operation === 'getItems' ? 'getItem' : 'removeItem';
+    let items = keys.map((key) =>
+      this.createPreparedKeyItem(key, itemOperation)
+    );
+    this.updateBatchContexts(items, context);
+
+    for (const plugin of this.getActivePlugins()) {
+      const hasBatchHook =
+        operation === 'getItems'
+          ? typeof plugin.beforeGetItems === 'function'
+          : typeof plugin.beforeRemoveItems === 'function';
+      if (hasBatchHook) {
+        const input = items.map(({ targetKey }) => targetKey);
+        const output = await this.invokeValueHook(
+          plugin,
+          () =>
+            operation === 'getItems'
+              ? plugin.beforeGetItems!(input, context)
+              : plugin.beforeRemoveItems!(input, context),
+          'before',
+          operation,
+          undefined,
+          context,
+          input
+        );
+        items = this.reconcilePreparedKeyItems(items, output, itemOperation);
+        this.updateBatchContexts(items, context);
+        continue;
+      }
+
+      const hasSingleHook =
+        operation === 'getItems'
+          ? typeof plugin.beforeGet === 'function'
+          : typeof plugin.beforeRemove === 'function';
+      if (!hasSingleHook) continue;
+      for (const item of items) {
+        item.targetKey = await this.invokeValueHook(
+          plugin,
+          () =>
+            operation === 'getItems'
+              ? plugin.beforeGet!(item.targetKey, item.context)
+              : plugin.beforeRemove!(item.targetKey, item.context),
+          'before',
+          operation,
+          item.targetKey,
+          item.context,
+          item.targetKey
+        );
+      }
+    }
+
+    return {
+      keys: items.map(({ targetKey }) => targetKey),
+      items,
+    };
   }
 
   async beforeGetItems(
     keys: string[],
     context: PluginContext
-  ): Promise<string[]> {
-    let currentKeys = keys;
-    for (const plugin of this.getActivePlugins()) {
-      if (!plugin.beforeGetItems) continue;
-      currentKeys = await this.invokeValueHook(
-        plugin,
-        () => plugin.beforeGetItems!(currentKeys, context),
-        'before',
-        'getItems',
-        undefined,
-        context,
-        currentKeys
-      );
-    }
-    return currentKeys;
+  ): Promise<PreparedKeys> {
+    return this.beforeKeyItems(keys, context, 'getItems');
   }
 
   async afterGetItems<T>(
     entries: BatchResponse<T>,
     context: PluginContext,
+    preparedItems: PreparedKeyItem[],
     role: PluginHookRole = 'all'
-  ): Promise<BatchResponse<T>> {
+  ): Promise<PreparedBatchResponse<T>> {
     let current = entries;
-    for (const plugin of this.getActivePlugins({ reverse: true, role })) {
-      if (!plugin.afterGetItems) continue;
-      current = await this.invokeValueHook(
-        plugin,
-        () => plugin.afterGetItems!(current, context),
-        'after',
-        'getItems',
-        undefined,
-        context,
-        current
+    let items = preparedItems.slice();
+
+    const reconcileItems = (): void => {
+      items = this.reconcilePreparedKeyItems(
+        items,
+        current.map(({ key }) => key),
+        'getItem'
       );
+      this.updateBatchContexts(items, context);
+    };
+    reconcileItems();
+
+    for (const plugin of this.getActivePlugins({ reverse: true, role })) {
+      if (plugin.afterGetItems) {
+        current = await this.invokeValueHook(
+          plugin,
+          () => plugin.afterGetItems!(current, context),
+          'after',
+          'getItems',
+          undefined,
+          context,
+          current
+        );
+        reconcileItems();
+        continue;
+      }
+
+      if (!plugin.afterGet) continue;
+      const mapped: BatchResponse<T> = [];
+      for (let index = 0; index < current.length; index++) {
+        const entry = current[index];
+        mapped.push({
+          key: entry.key,
+          value: await this.invokeValueHook(
+            plugin,
+            () =>
+              plugin.afterGet!(entry.key, entry.value, items[index].context),
+            'after',
+            'getItems',
+            entry.key,
+            items[index].context,
+            entry.value
+          ),
+        });
+      }
+      current = mapped;
     }
-    return current;
+    return { entries: current, items };
   }
 
   async beforeRemoveItems(
     keys: string[],
     context: PluginContext
-  ): Promise<string[]> {
-    let currentKeys = keys;
-    for (const plugin of this.getActivePlugins()) {
-      if (!plugin.beforeRemoveItems) continue;
-      currentKeys = await this.invokeValueHook(
-        plugin,
-        () => plugin.beforeRemoveItems!(currentKeys, context),
-        'before',
-        'removeItems',
-        undefined,
-        context,
-        currentKeys
-      );
-    }
-    return currentKeys;
+  ): Promise<PreparedKeys> {
+    return this.beforeKeyItems(keys, context, 'removeItems');
   }
 
   async afterRemoveItems(
     keys: string[],
-    context: PluginContext
+    context: PluginContext,
+    preparedItems: PreparedKeyItem[]
   ): Promise<void> {
+    const items = preparedItems.slice();
+    context.operationState.batchSize = keys.length;
     for (const plugin of this.getActivePlugins({ reverse: true })) {
-      if (!plugin.afterRemoveItems) continue;
-      await this.invokeVoidHook(
-        plugin,
-        () => plugin.afterRemoveItems!(keys, context),
-        'after',
-        'removeItems',
-        undefined,
-        context
-      );
+      if (plugin.afterRemoveItems) {
+        await this.invokeVoidHook(
+          plugin,
+          () => plugin.afterRemoveItems!(keys, context),
+          'after',
+          'removeItems',
+          undefined,
+          context
+        );
+        continue;
+      }
+
+      if (!plugin.afterRemove) continue;
+      for (let index = 0; index < keys.length; index++) {
+        const key = keys[index];
+        const item = items[index] ?? {
+          requestedKey: key,
+          targetKey: key,
+          context: this.createContext('removeItem'),
+        };
+        item.context.operationState.isBatch = true;
+        item.context.operationState.batchSize = keys.length;
+        await this.invokeVoidHook(
+          plugin,
+          () => plugin.afterRemove!(key, item.context),
+          'after',
+          'removeItems',
+          key,
+          item.context
+        );
+      }
     }
   }
 
@@ -754,10 +992,6 @@ export class PluginManager {
       this.destroyPromises.set(plugin, destroyPromise);
       await destroyPromise;
     }
-  }
-
-  normalizeBatch<T>(items: BatchItems<T>): Array<{ key: string; value: T }> {
-    return normalizeBatchEntries(items);
   }
 
   private shouldPropagate(

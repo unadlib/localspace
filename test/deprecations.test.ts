@@ -79,7 +79,7 @@ describe('migration deprecation warnings', () => {
     );
   });
 
-  it('warns once for matching batch and single hooks on custom plugins', () => {
+  it('accepts matching batch and single hooks without a migration warning', () => {
     const plugin: LocalSpacePlugin = {
       name: 'ttl',
       beforeSet: (_key, value) => value,
@@ -89,9 +89,7 @@ describe('migration deprecation warnings', () => {
     new LocalSpace({ plugins: [plugin] });
     new LocalSpace({ plugins: [plugin] });
 
-    expect(warnings()).toEqual([
-      '[localspace] Deprecation: plugin "ttl" defines matching batch and single hooks; define one form per phase before 3.0.',
-    ]);
+    expect(warnings()).toEqual([]);
   });
 
   it('warns once for AES-CBC and AES-CTR migration readers', () => {
@@ -154,22 +152,14 @@ describe('migration deprecation warnings', () => {
 
   it('can disable all deprecation warnings', async () => {
     setDeprecationWarnings(false);
-    new LocalSpace({
-      plugins: [
-        {
-          name: 'silent-combined-hooks',
-          beforeSet: (_key, value) => value,
-          beforeSetItems: (entries) => entries,
-        },
-      ],
-    });
+    warnDeprecation('weak-memory-transaction', 'must stay silent');
 
     expect(warnings()).toEqual([]);
   });
 
   it('does not emit deprecation warnings in production', () => {
     vi.stubEnv('NODE_ENV', 'production');
-    warnDeprecation('combined-plugin-hooks', 'must stay silent');
+    warnDeprecation('weak-memory-transaction', 'must stay silent');
 
     expect(warnings()).toEqual([]);
   });
@@ -179,7 +169,7 @@ describe('migration deprecation warnings', () => {
     delete process.env.NODE_ENV;
 
     try {
-      warnDeprecation('combined-plugin-hooks', 'must remain visible');
+      warnDeprecation('weak-memory-transaction', 'must remain visible');
     } finally {
       if (originalNodeEnv === undefined) {
         delete process.env.NODE_ENV;

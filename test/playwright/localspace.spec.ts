@@ -77,18 +77,10 @@ test.describe('localspace browser interoperability', () => {
       try {
         const moduleUrl = `/dist/index.esm.js?empty-process-env=${Date.now()}`;
         const localspaceModule = await import(moduleUrl);
-        const instance = localspaceModule.default.createInstance({
-          name: 'empty-process-env-warning-check',
-          plugins: [
-            {
-              name: 'empty-process-env-combined-hooks',
-              beforeSet: (_key: string, value: unknown) => value,
-              beforeSetItems: (entries: unknown) => entries,
-            },
-          ],
+        localspaceModule.encryptionPlugin({
+          key: '0123456789abcdef0123456789abcdef',
+          algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
         });
-        instance.config();
-        await instance.close();
         return {
           hasDefaultExport:
             typeof localspaceModule.default?.createInstance === 'function',
@@ -116,16 +108,10 @@ test.describe('localspace browser interoperability', () => {
       };
       try {
         const instance = localspace.createInstance({
-          name: 'production-warning-check',
-          plugins: [
-            {
-              name: 'production-combined-hooks',
-              beforeSet: (_key: string, value: unknown) => value,
-              beforeSetItems: (entries: unknown) => entries,
-            },
-          ],
+          name: `production-warning-check-${Date.now()}`,
         });
-        instance.config();
+        await instance.setDriver([instance.MEMORY]);
+        await instance.runTransaction('readonly', (scope: any) => scope.keys());
         await instance.close();
       } finally {
         console.warn = originalWarn;

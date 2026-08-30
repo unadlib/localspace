@@ -335,15 +335,7 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
     stopCleanupTimer(metadata);
     await metadata.cleanupPromise?.catch(() => undefined);
   },
-  beforeSet: async <T>(
-    key: string,
-    value: T,
-    context: PluginContext
-  ): Promise<T> => {
-    // Skip if already processed by batch hook
-    if (context.operationState.isBatch) {
-      return value;
-    }
+  beforeSet: async <T>(key: string, value: T): Promise<T> => {
     const ttlMs = resolveTtl(key, options);
     if (!ttlMs || ttlMs <= 0 || !Number.isFinite(ttlMs)) {
       return value;
@@ -359,10 +351,6 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
     value: T | null,
     context: PluginContext
   ): Promise<T | null> => {
-    // Skip if already processed by batch hook
-    if (context.operationState.isBatch) {
-      return value;
-    }
     const payload = parseTtlPayload(value);
     if (!payload) {
       return value;

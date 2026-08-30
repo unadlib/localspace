@@ -10,7 +10,6 @@ import type {
   BatchResponse,
   TransactionMode,
   TransactionScope,
-  PluginContext,
   PluginOperation,
   LocalSpaceCapabilities,
   LocalSpaceConfigSnapshot,
@@ -100,14 +99,14 @@ const prepareStorageValueWrite = (
 
 const validatePluginStorageValueBatch = (
   entries: BatchItems<StorageValue>,
-  context: { plugin: string }
+  plugin: LocalSpacePlugin
 ): BatchItems<StorageValue> => {
   for (const entry of normalizeBatchEntries(entries)) {
     acceptStorageValueWrite(entry.value, {
       operation: 'setItems',
       key: entry.key,
       valueSource: 'plugin-output',
-      plugin: context.plugin,
+      plugin: plugin.name,
     });
   }
   return entries;
@@ -1113,117 +1112,56 @@ export class LocalSpace implements LocalSpaceInstance {
       await this._ensurePluginsInitialized('setItems');
       const batchContext = this._pluginManager.createContext('setItems');
       batchContext.operationState.isBatch = true;
-      const { entries: logicalBatch } =
-        await this._pluginManager.beforeSetItems(
-          canonicalEntries,
-          batchContext,
-          (pluginEntries, plugin) =>
-            validatePluginStorageValueBatch(pluginEntries, {
-              plugin: plugin.name,
-            }),
-          'logical'
-        );
-      const normalizedLogical = this._pluginManager.normalizeBatch(logicalBatch);
-      batchContext.operationState.batchSize = normalizedLogical.length;
-      const logicalEntries: Array<{
-        key: string;
-        value: StorageValue;
-        originalValue: StorageValue;
-        context: PluginContext;
-      }> = [];
-
-      for (const entry of normalizedLogical) {
-        const entryContext = this._pluginManager.createContext('setItem');
-        entryContext.operationState.originalValue = entry.value;
-        entryContext.operationState.isBatch = true;
-        entryContext.operationState.batchSize = normalizedLogical.length;
-        const pluginValue = await this._pluginManager.beforeSet(
-          entry.key,
-          entry.value,
-          entryContext,
-          (value, plugin) =>
-            acceptStorageValueWrite(value, {
-              operation: 'setItems',
-              key: entry.key,
-              valueSource: 'plugin-output',
-              plugin: plugin.name,
-            }),
-          'logical'
-        );
-        logicalEntries.push({
-          key: entry.key,
-          value: canonicalizeStorageValue(pluginValue),
-          originalValue: entry.value,
-          context: entryContext,
-        });
-      }
-
-      const recordEntries = logicalEntries.map(({ key, value }) => ({
+      const logicalPrepared = await this._pluginManager.beforeSetItems(
+        canonicalEntries,
+        batchContext,
+        {
+          role: 'logical',
+          prepareBatchOutput: (pluginEntries, plugin) =>
+            validatePluginStorageValueBatch(pluginEntries, plugin),
+          prepareValueOutput: (value, plugin, key) =>
+            canonicalizeStorageValue(
+              acceptStorageValueWrite(value, {
+                operation: 'setItems',
+                key,
+                valueSource: 'plugin-output',
+                plugin: plugin.name,
+              })
+            ),
+        }
+      );
+      const recordEntries = logicalPrepared.entries.map(({ key, value }) => ({
         key,
         value: encodeStorageValueRecord(value),
       }));
-      const { entries: storageBatch } =
-        await this._pluginManager.beforeSetItems(
-          recordEntries,
-          batchContext,
-          (pluginEntries, plugin) =>
-            validatePluginStorageValueBatch(pluginEntries, {
-              plugin: plugin.name,
-            }),
-          'storage-transform'
-        );
-      const normalizedStorage = this._pluginManager.normalizeBatch(storageBatch);
-      const logicalEntriesByKey = new Map<
-        string,
-        Array<(typeof logicalEntries)[number]>
-      >();
-      for (const entry of logicalEntries) {
-        const matchingEntries = logicalEntriesByKey.get(entry.key) ?? [];
-        matchingEntries.push(entry);
-        logicalEntriesByKey.set(entry.key, matchingEntries);
-      }
-
-      const processedEntries: Array<{
-        key: string;
-        value: StorageValue;
-        logical: (typeof logicalEntries)[number];
-      }> = [];
-      for (const entry of normalizedStorage) {
-        const logical = logicalEntriesByKey.get(entry.key)?.shift();
-        if (!logical) {
-          throw createLocalSpaceError(
-            'OPERATION_FAILED',
-            'A storage transform changed the batch key set.',
-            {
-              operation: 'setItems',
-              key: entry.key,
-              reason: 'storage-transform-key-mismatch',
-            }
-          );
+      const storagePrepared = await this._pluginManager.beforeSetItems(
+        recordEntries,
+        batchContext,
+        {
+          role: 'storage-transform',
+          preserveLogicalValues: true,
+          prepareBatchOutput: (pluginEntries, plugin) =>
+            validatePluginStorageValueBatch(pluginEntries, plugin),
+          prepareValueOutput: (value, plugin, key) =>
+            canonicalizeStorageValue(
+              acceptStorageValueWrite(value, {
+                operation: 'setItems',
+                key,
+                valueSource: 'plugin-output',
+                plugin: plugin.name,
+              })
+            ),
         }
-        const pluginValue = await this._pluginManager.beforeSet(
-          entry.key,
-          entry.value,
-          logical.context,
-          (value, plugin) =>
-            acceptStorageValueWrite(value, {
-              operation: 'setItems',
-              key: entry.key,
-              valueSource: 'plugin-output',
-              plugin: plugin.name,
-            }),
-          'storage-transform'
-        );
-        processedEntries.push({
-          key: entry.key,
-          value: canonicalizeStorageValue(pluginValue),
-          logical,
-        });
-      }
-      if ([...logicalEntriesByKey.values()].some((values) => values.length)) {
+      );
+      if (
+        storagePrepared.entries.length !== logicalPrepared.entries.length ||
+        storagePrepared.entries.some(
+          (entry, index) => entry.key !== logicalPrepared.entries[index]?.key
+        )
+      ) {
         throw createLocalSpaceError(
           'OPERATION_FAILED',
-          'A storage transform removed entries from the batch.',
+          'A storage transform changed the batch key order or set.',
           {
             operation: 'setItems',
             reason: 'storage-transform-key-mismatch',
@@ -1232,54 +1170,23 @@ export class LocalSpace implements LocalSpaceInstance {
       }
 
       const driverResponse = (await original(
-        processedEntries.map(({ key, value }) => ({ key, value }))
+        storagePrepared.entries
       )) as BatchResponse<StorageValue>;
       await this._pluginManager.afterSetItems(
         driverResponse,
         batchContext,
+        storagePrepared.items,
         'storage-transform'
       );
-
-      for (const entry of processedEntries) {
-        await this._pluginManager.afterSet(
-          entry.key,
-          entry.value,
-          entry.logical.context,
-          'storage-transform'
-        );
-        await this._pluginManager.afterSet(
-          entry.key,
-          entry.logical.value,
-          entry.logical.context,
-          'logical'
-        );
-      }
-
-      const logicalResponse: BatchResponse<StorageValue> = logicalEntries.map(
-        (entry) => ({ key: entry.key, value: entry.originalValue })
-      );
-      const finalized = await this._pluginManager.afterSetItems(
-        logicalResponse,
+      return this._pluginManager.afterSetItems(
+        logicalPrepared.logicalEntries.map(({ key, value }) => ({
+          key,
+          value,
+        })),
         batchContext,
+        logicalPrepared.items,
         'logical'
       );
-      const contextsByKey = new Map<
-        string,
-        Array<(typeof logicalEntries)[number]>
-      >();
-      for (const entry of logicalEntries) {
-        const matchingEntries = contextsByKey.get(entry.key) ?? [];
-        matchingEntries.push(entry);
-        contextsByKey.set(entry.key, matchingEntries);
-      }
-      return finalized.map((entry) => {
-        const logical = contextsByKey.get(entry.key)?.shift();
-        return {
-          key: entry.key,
-          value:
-            logical?.context.operationState.returnValue ?? entry.value ?? null,
-        };
-      });
     }) as typeof this.setItems;
   }
 
@@ -1308,89 +1215,38 @@ export class LocalSpace implements LocalSpaceInstance {
       markPluginInternalOperation(batchContext, internalOperation);
       batchContext.operationState.isBatch = true;
       batchContext.operationState.batchSize = keys.length;
-      const requestedKeys = await this._pluginManager.beforeGetItems(
+      const prepared = await this._pluginManager.beforeGetItems(
         keys,
         batchContext
       );
-      const entryContexts: Array<{
-        requestedKey: string;
-        targetKey: string;
-        context: PluginContext;
-      }> = [];
-      const targetToRequested = new Map<string, string>();
-
-      for (const key of requestedKeys) {
-        const entryContext = this._pluginManager.createContext('getItem');
-        entryContext.operationState.isBatch = true;
-        entryContext.operationState.batchSize = requestedKeys.length;
-        const targetKey = await this._pluginManager.beforeGet(
-          key,
-          entryContext
-        );
-        targetToRequested.set(targetKey, key);
-        entryContexts.push({
-          requestedKey: key,
-          targetKey,
-          context: entryContext,
-        });
+      for (const item of prepared.items) {
+        markPluginInternalOperation(item.context, internalOperation);
       }
-
-      const targetKeys = entryContexts.map((entry) => entry.targetKey);
       const driverResponse = (await original(
-        targetKeys
+        prepared.keys
       )) as BatchResponse<unknown>;
-      const storageEntries: BatchResponse<unknown> = [];
-
-      for (let i = 0; i < driverResponse.length; i++) {
-        const entry = driverResponse[i];
-        const context =
-          entryContexts[i]?.context ??
-          entryContexts.find((candidate) => candidate.targetKey === entry.key)
-            ?.context ??
-          this._pluginManager.createContext('getItem');
-        context.operationState.isBatch = true;
-        context.operationState.batchSize = requestedKeys.length;
-        const processedValue = await this._pluginManager.afterGet(
-          entry.key,
-          entry.value,
-          context,
-          'storage-transform'
-        );
-        storageEntries.push({ key: entry.key, value: processedValue });
-      }
-
-      const storedRecords = await this._pluginManager.afterGetItems(
-        storageEntries,
+      const storageResult = await this._pluginManager.afterGetItems(
+        driverResponse,
         batchContext,
+        prepared.items,
         'storage-transform'
       );
-      const logicalEntries: BatchResponse<unknown> = [];
-      for (const entry of storedRecords) {
-        const context =
-          entryContexts.find((candidate) => candidate.targetKey === entry.key)
-            ?.context ?? this._pluginManager.createContext('getItem');
-        context.operationState.isBatch = true;
-        context.operationState.batchSize = requestedKeys.length;
-        const logicalValue = await this._pluginManager.afterGet(
-          entry.key,
-          decodeStoredRecordValue(entry.value),
-          context,
-          'logical'
-        );
-        logicalEntries.push({ key: entry.key, value: logicalValue });
+      for (const item of storageResult.items) {
+        markPluginInternalOperation(item.context, internalOperation);
       }
-      const finalEntries = await this._pluginManager.afterGetItems(
-        logicalEntries,
+      const logicalResult = await this._pluginManager.afterGetItems(
+        storageResult.entries.map(({ key, value }) => ({
+          key,
+          value: decodeStoredRecordValue(value),
+        })),
         batchContext,
+        storageResult.items,
         'logical'
       );
-      return finalEntries.map((entry) => {
-        const requestedKey = targetToRequested.get(entry.key) ?? entry.key;
-        return {
-          key: requestedKey,
-          value: entry.value,
-        };
-      });
+      return logicalResult.entries.map((entry, index) => ({
+        key: logicalResult.items[index]?.requestedKey ?? entry.key,
+        value: entry.value,
+      }));
     }) as typeof this.getItems;
   }
 
@@ -1412,30 +1268,16 @@ export class LocalSpace implements LocalSpaceInstance {
       const batchContext = this._pluginManager.createContext('removeItems');
       batchContext.operationState.isBatch = true;
       batchContext.operationState.batchSize = keys.length;
-      const requestedKeys = await this._pluginManager.beforeRemoveItems(
+      const prepared = await this._pluginManager.beforeRemoveItems(
         keys,
         batchContext
       );
-      const processedKeys: Array<{ key: string; context: PluginContext }> = [];
-
-      for (const key of requestedKeys) {
-        const entryContext = this._pluginManager.createContext('removeItem');
-        entryContext.operationState.isBatch = true;
-        entryContext.operationState.batchSize = requestedKeys.length;
-        const processedKey = await this._pluginManager.beforeRemove(
-          key,
-          entryContext
-        );
-        processedKeys.push({ key: processedKey, context: entryContext });
-      }
-
-      const keyList = processedKeys.map((entry) => entry.key);
-      await original(keyList);
-      await this._pluginManager.afterRemoveItems(keyList, batchContext);
-
-      for (const entry of processedKeys) {
-        await this._pluginManager.afterRemove(entry.key, entry.context);
-      }
+      await original(prepared.keys);
+      await this._pluginManager.afterRemoveItems(
+        prepared.keys,
+        batchContext,
+        prepared.items
+      );
     }) as typeof this.removeItems;
   }
 

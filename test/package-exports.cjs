@@ -8,18 +8,17 @@ const packageJson = require('../package.json');
 function probeUnsetNodeEnv(moduleKind) {
   const loadLocalSpace =
     moduleKind === 'esm'
-      ? "const { LocalSpace } = await import('localspace');"
-      : "const { LocalSpace } = require('localspace');";
+      ? "const { encryptionPlugin } = await import('localspace');"
+      : "const { encryptionPlugin } = require('localspace');";
   const source = `
 const warnings = [];
 console.warn = (message) => warnings.push(String(message));
 delete process.env.NODE_ENV;
 ${loadLocalSpace}
-new LocalSpace({ plugins: [{
-  name: 'combined-probe',
-  beforeSet: (_key, value) => value,
-  beforeSetItems: (entries) => entries,
-}] });
+encryptionPlugin({
+  key: '0123456789abcdef0123456789abcdef',
+  algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
+});
 process.stdout.write(JSON.stringify(warnings));`;
   const env = { ...process.env };
   delete env.NODE_ENV;
@@ -69,16 +68,10 @@ async function main() {
   console.warn = (message) => productionWarnings.push(String(message));
   try {
     process.env.NODE_ENV = 'production';
-    const productionInstance = new cjs.LocalSpace({
-      plugins: [
-        {
-          name: 'production-combined',
-          beforeSet: (_key, value) => value,
-          beforeSetItems: (entries) => entries,
-        },
-      ],
+    cjs.encryptionPlugin({
+      key: '0123456789abcdef0123456789abcdef',
+      algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
     });
-    productionInstance.config();
   } finally {
     if (originalNodeEnv === undefined) {
       delete process.env.NODE_ENV;
@@ -93,14 +86,9 @@ async function main() {
   console.warn = (message) => developmentWarnings.push(String(message));
   try {
     process.env.NODE_ENV = 'development';
-    new cjs.LocalSpace({
-      plugins: [
-        {
-          name: 'development-combined',
-          beforeSet: (_key, value) => value,
-          beforeSetItems: (entries) => entries,
-        },
-      ],
+    cjs.encryptionPlugin({
+      key: '0123456789abcdef0123456789abcdef',
+      algorithm: { name: 'AES-CBC', iv: new Uint8Array(16) },
     });
   } finally {
     if (originalNodeEnv === undefined) {
@@ -110,14 +98,11 @@ async function main() {
     }
     console.warn = originalWarn;
   }
-  assert.deepEqual(developmentWarnings, [
-    '[localspace] Deprecation: plugin "development-combined" defines matching batch and single hooks; define one form per phase before 3.0.',
-  ]);
-
-  const unsetNodeEnvWarning =
-    '[localspace] Deprecation: plugin "combined-probe" defines matching batch and single hooks; define one form per phase before 3.0.';
-  assert.deepEqual(probeUnsetNodeEnv('cjs'), [unsetNodeEnvWarning]);
-  assert.deepEqual(probeUnsetNodeEnv('esm'), [unsetNodeEnvWarning]);
+  const legacyEncryptionWarning =
+    '[localspace] Deprecation: AES-CBC encryption is deprecated and read-only; migrate data to AES-GCM.';
+  assert.deepEqual(developmentWarnings, [legacyEncryptionWarning]);
+  assert.deepEqual(probeUnsetNodeEnv('cjs'), [legacyEncryptionWarning]);
+  assert.deepEqual(probeUnsetNodeEnv('esm'), [legacyEncryptionWarning]);
 
   const cjsReactNative = require('localspace/react-native');
   assert.equal(typeof cjsReactNative.createReactNativeInstance, 'function');
@@ -193,14 +178,13 @@ async function main() {
   console.warn = (message) => duplicateWarnings.push(String(message));
   try {
     process.env.NODE_ENV = 'development';
-    new esm.LocalSpace({
-      plugins: [
-        {
-          name: 'esm-combined',
-          beforeSet: (_key, value) => value,
-          beforeSetItems: (entries) => entries,
-        },
-      ],
+    esm.encryptionPlugin({
+      key: '0123456789abcdef0123456789abcdef',
+      algorithm: {
+        name: 'AES-CTR',
+        counter: new Uint8Array(16),
+        length: 64,
+      },
     });
   } finally {
     if (originalNodeEnv === undefined) {

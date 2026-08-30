@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { broadcastNotificationPlugin } from '../examples/broadcast-notification-plugin';
-import type { PluginContext } from '../src';
+import localspace, { type PluginContext } from '../src';
 
 class BroadcastChannelMock {
   static instances: BroadcastChannelMock[] = [];
@@ -142,6 +142,30 @@ describe('broadcast notification plugin example', () => {
         operation: 'set',
       }),
     ]);
+  });
+
+  it('maps notification hooks over batch set and remove operations', async () => {
+    vi.stubGlobal('BroadcastChannel', BroadcastChannelMock);
+    const store = localspace.createInstance({
+      name: `broadcast-batch-${Math.random().toString(36).slice(2)}`,
+      storeName: 'notifications',
+      plugins: [broadcastNotificationPlugin()],
+    });
+    await store.setDriver([store.MEMORY]);
+
+    await store.setItems([
+      { key: 'a', value: 1 },
+      { key: 'b', value: 2 },
+    ]);
+    await store.removeItems(['a', 'b']);
+
+    expect(BroadcastChannelMock.instances[0].messages).toEqual([
+      expect.objectContaining({ key: 'a', operation: 'set' }),
+      expect.objectContaining({ key: 'b', operation: 'set' }),
+      expect.objectContaining({ key: 'a', operation: 'remove' }),
+      expect.objectContaining({ key: 'b', operation: 'remove' }),
+    ]);
+    await store.close();
   });
 
   it('does not fail plugin initialization when channel creation fails', async () => {

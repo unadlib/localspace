@@ -519,7 +519,7 @@ export type PluginOperation =
   | 'removeItems'
   | 'lifecycle';
 
-export type PluginStage = 'init' | 'before' | 'after' | 'destroy' | 'error';
+export type PluginStage = 'init' | 'before' | 'after' | 'destroy';
 
 export interface PluginContext {
   /** The public LocalSpace instance. Its identity is stable across all hooks. */
@@ -575,14 +575,11 @@ export interface LocalSpacePlugin {
   afterRemove?(key: string, context: PluginContext): Promise<void> | void;
 
   /**
-   * Batch hooks. A batch call (e.g. `setItems`) runs BOTH the batch hook and
-   * the per-entry single hook (with `context.operationState.isBatch === true`).
-   * If a plugin implements both forms, guard the single form with
-   * `if (context.operationState.isBatch) return value;` so entries are not
-   * processed twice. See docs/plugins.md "Batch vs single hooks".
-   *
-   * Combining a batch hook with its matching single hook is deprecated in
-   * 2.1. Define one form per phase when authoring new plugins.
+   * Batch hooks are optimized forms of their matching single hooks. For each
+   * plugin and phase, a batch call invokes the batch hook once when present;
+   * otherwise LocalSpace maps the single hook over the entries. A plugin that
+   * defines both forms is therefore never invoked twice for one phase.
+   * Priority ordering is global across both hook forms.
    */
   beforeSetItems?<T>(
     entries: BatchItems<T>,

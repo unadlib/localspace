@@ -184,14 +184,10 @@ export const broadcastNotificationPlugin = (
       }
     },
     afterSet: (key, _value, context) => {
-      if (!context.operationState.isBatch) {
-        send(context, key, 'set');
-      }
+      send(context, key, 'set');
     },
     afterRemove: (key, context) => {
-      if (!context.operationState.isBatch) {
-        send(context, key, 'remove');
-      }
+      send(context, key, 'remove');
     },
   };
 };
