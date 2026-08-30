@@ -64,11 +64,16 @@ const issue = (
 const hasPlainObjectPrototype = (value: object): boolean => {
   const prototype = Object.getPrototypeOf(value);
   if (prototype === null) return true;
+  const constructorDescriptor = Object.getOwnPropertyDescriptor(
+    prototype,
+    'constructor'
+  );
   return (
     Object.getPrototypeOf(prototype) === null &&
-    hasOwn.call(prototype, 'constructor') &&
-    typeof prototype.constructor === 'function' &&
-    prototype.constructor.name === 'Object'
+    !!constructorDescriptor &&
+    'value' in constructorDescriptor &&
+    typeof constructorDescriptor.value === 'function' &&
+    constructorDescriptor.value.name === 'Object'
   );
 };
 

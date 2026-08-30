@@ -277,6 +277,22 @@ describe('3.0 StorageValue contract', () => {
     expect(getter).not.toHaveBeenCalled();
   });
 
+  it('does not invoke an inherited constructor accessor while rejecting a custom prototype', () => {
+    const constructorGetter = vi.fn(() => Object);
+    const prototype = Object.create(null);
+    Object.defineProperty(prototype, 'constructor', {
+      configurable: true,
+      get: constructorGetter,
+    });
+    const value = Object.create(prototype);
+
+    expect(inspectStorageValue(value)).toMatchObject({
+      path: '$',
+      reason: 'only plain objects are supported',
+    });
+    expect(constructorGetter).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['non-finite number', Number.NaN, 'numbers must be finite'],
     ['sparse array', Array(1), 'sparse arrays are not supported'],
@@ -355,9 +371,7 @@ describe('3.0 StorageValue contract', () => {
   it.each(['strictValues', 'strictTransactions'] as const)(
     'rejects the removed %s migration option at construction',
     (configKey) => {
-      expect(
-        () => new LocalSpace({ [configKey]: true } as never)
-      ).toThrowError(
+      expect(() => new LocalSpace({ [configKey]: true } as never)).toThrowError(
         expect.objectContaining({
           code: 'INVALID_CONFIG',
           details: { configKey, reason: 'removed-option' },
