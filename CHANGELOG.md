@@ -37,6 +37,8 @@
   IndexedDB, localStorage, memory, and React Native AsyncStorage.
 - Applied the same complete corpus to TTL, compression, encryption, and their
   combined transform pipeline.
+- Added real-engine IndexedDB/localStorage StorageValue contract coverage to
+  every locked Playwright project.
 
 ### Changed
 

@@ -887,6 +887,149 @@ test.describe('localspace browser interoperability', () => {
 });
 
 test.describe('localspace data type handling', () => {
+  test('keeps the StorageValue contract identical across browser drivers', async ({
+    page,
+  }) => {
+    await ensureFixtureReady(page);
+
+    const drivers = await page.evaluate(async (namespace) => {
+      const localspace = (window as any).localspace;
+      const tested: string[] = [];
+      const assert = (condition: unknown, message: string): void => {
+        if (!condition) throw new Error(message);
+      };
+
+      for (const driver of [localspace.INDEXEDDB, localspace.LOCALSTORAGE]) {
+        const instance = localspace.createInstance({
+          name: `${namespace}-${driver}`,
+          storeName: 'store',
+        });
+        await instance.setDriver([driver]);
+        await instance.ready();
+        await instance.clear();
+
+        for (const [label, invalid] of [
+          ['date', new Date()],
+          ['map', new Map([['key', 'value']])],
+          ['set', new Set(['value'])],
+          ['regexp', /value/gu],
+        ] as const) {
+          let code: string | null = null;
+          try {
+            await instance.setItem(`invalid-${label}`, invalid);
+          } catch (error) {
+            code = (error as { code?: string }).code ?? null;
+          }
+          assert(
+            code === 'SERIALIZATION_FAILED',
+            `${driver} accepted ${label}`
+          );
+        }
+        assert(
+          (await instance.keys()).length === 0,
+          `${driver} wrote invalid data`
+        );
+
+        const sourceBytes = new Uint8Array([9, 1, 2, 8]);
+        const binaries: Array<{
+          value: ArrayBuffer | ArrayBufferView;
+          expected: readonly (number | bigint)[];
+        }> = [
+          {
+            value: new Uint8Array([0, 1, 254, 255]).buffer,
+            expected: [0, 1, 254, 255],
+          },
+          { value: new Int8Array([-128, 127]), expected: [-128, 127] },
+          { value: sourceBytes.subarray(1, 3), expected: [1, 2] },
+          { value: new Uint8ClampedArray([-1, 260]), expected: [0, 255] },
+          {
+            value: new Int16Array([-32_768, 32_767]),
+            expected: [-32_768, 32_767],
+          },
+          { value: new Uint16Array([0, 65_535]), expected: [0, 65_535] },
+          {
+            value: new Int32Array([-2_147_483_648, 2_147_483_647]),
+            expected: [-2_147_483_648, 2_147_483_647],
+          },
+          {
+            value: new Uint32Array([0, 4_294_967_295]),
+            expected: [0, 4_294_967_295],
+          },
+          { value: new Float32Array([1.5, -2.25]), expected: [1.5, -2.25] },
+          { value: new Float64Array([Math.PI]), expected: [Math.PI] },
+        ];
+        if (typeof BigInt64Array !== 'undefined') {
+          binaries.push({
+            value: new BigInt64Array([-1n, 2n]),
+            expected: [-1n, 2n],
+          });
+        }
+        if (typeof BigUint64Array !== 'undefined') {
+          binaries.push({
+            value: new BigUint64Array([0n, 2n ** 64n - 1n]),
+            expected: [0n, 2n ** 64n - 1n],
+          });
+        }
+
+        const nullPrototype = Object.create(null);
+        nullPrototype.z = 'last';
+        nullPrototype.a = [1, true];
+        await instance.setItem('contract', {
+          primitives: [null, false, true, -0, 1.25, 'text'],
+          nested: [{ z: 'last', a: 1 }, ['x', false]],
+          nullPrototype,
+          binaries: binaries.map(({ value }) => value),
+        });
+
+        const result = await instance.getItem('contract');
+        assert(
+          JSON.stringify(result.primitives) ===
+            JSON.stringify([null, false, true, 0, 1.25, 'text']),
+          `${driver} changed primitives`
+        );
+        assert(!Object.is(result.primitives[3], -0), `${driver} retained -0`);
+        assert(
+          Object.getPrototypeOf(result.nullPrototype) === null,
+          `${driver} changed null prototype`
+        );
+        assert(
+          JSON.stringify(Object.keys(result.nullPrototype)) ===
+            JSON.stringify(['a', 'z']),
+          `${driver} changed canonical object order`
+        );
+        assert(
+          result.binaries.length === binaries.length,
+          `${driver} lost binary values`
+        );
+        for (let index = 0; index < binaries.length; index++) {
+          const actual = result.binaries[index];
+          const expected = binaries[index];
+          assert(
+            Object.prototype.toString.call(actual) ===
+              Object.prototype.toString.call(expected.value),
+            `${driver} changed binary kind ${index}`
+          );
+          const actualValues =
+            actual instanceof ArrayBuffer
+              ? Array.from(new Uint8Array(actual))
+              : Array.from(actual as ArrayLike<number | bigint>);
+          assert(
+            actualValues.map(String).join(',') ===
+              expected.expected.map(String).join(','),
+            `${driver} changed binary value ${index}`
+          );
+        }
+
+        await instance.dropInstance();
+        await instance.close();
+        tested.push(driver);
+      }
+      return tested;
+    }, randomStoreName('storage-value-contract'));
+
+    expect(drivers).toEqual(['asyncStorage', 'localStorageWrapper']);
+  });
+
   test('saves and retrieves string values', async ({ page }) => {
     await ensureFixtureReady(page);
 
