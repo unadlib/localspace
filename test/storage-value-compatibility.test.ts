@@ -43,8 +43,6 @@ afterEach(() => {
 
 describe('2.1 StorageValue migration contract', () => {
   it('exports and accepts the supported recursive value type', async () => {
-    const nullPrototype = Object.create(null) as Record<string, StorageValue>;
-    nullPrototype.enabled = true;
     const values: StorageValue[] = [
       null,
       false,
@@ -52,7 +50,6 @@ describe('2.1 StorageValue migration contract', () => {
       -0,
       'value',
       [1, { nested: 'value' }],
-      nullPrototype,
       new ArrayBuffer(4),
       new Uint16Array([1, 2]),
     ];
@@ -110,6 +107,28 @@ describe('2.1 StorageValue migration contract', () => {
 
     const reader = await createMemoryInstance({ name }, false);
     await expect(reader.getItem('profile')).resolves.toBeNull();
+  });
+
+  it('previews the reserved 3.0 plugin-envelope namespace', async () => {
+    const instance = await createMemoryInstance({ strictValues: true });
+
+    await expect(
+      instance.setItem('collision', {
+        __localspace__: {
+          namespace: 'localspace.plugin',
+          kind: 'ttl',
+          version: 1,
+        },
+        payload: { data: 'application', expiresAt: Date.now() + 60_000 },
+      })
+    ).rejects.toMatchObject({
+      code: 'SERIALIZATION_FAILED',
+      details: {
+        key: 'collision',
+        valuePath: '$',
+        valueReason: expect.stringContaining('reserved'),
+      },
+    });
   });
 
   it.each(['MEMORY', 'INDEXEDDB', 'LOCALSTORAGE'] as const)(
@@ -223,6 +242,11 @@ describe('2.1 StorageValue migration contract', () => {
     [
       'class instance',
       new (class Value {})(),
+      'only plain objects are supported',
+    ],
+    [
+      'null-prototype object',
+      Object.create(null),
       'only plain objects are supported',
     ],
   ])('identifies %s deterministically', (_name, value, reason) => {

@@ -85,11 +85,11 @@ an unknown version or malformed matching payload with
 `DESERIALIZATION_FAILED`; objects that merely resemble a legacy marker are
 left as user values.
 
-The 3.0 storage pipeline places these transform envelopes around one core
-`localspace.record` v1 value. On rollback, 2.1 first removes the configured
-transform envelopes and then decodes that core record. An application object is
-encoded inside the core record rather than inspected as an envelope, including
-when it exactly matches one of the reserved marker shapes.
+The 3.0 storage pipeline applies these envelopes directly to the logical value;
+untransformed JSON is not wrapped. On rollback, 2.1 removes the configured
+transform envelopes and returns the logical value. Top-level application values
+in the `localspace.plugin` namespace are reserved and rejected by the 3.0
+contract, avoiding ambiguity without imposing an envelope on every write.
 
 ### TTL Plugin
 

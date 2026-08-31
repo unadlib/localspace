@@ -40,7 +40,6 @@ import {
   type PluginInternalOperation,
 } from './core/plugin-capabilities.js';
 import { validateStorageValueWrite } from './core/storage-value.js';
-import { decodeStoredRecordValue } from './core/stored-record.js';
 
 // Shared drivers across all instances
 const DefinedDrivers: DefinedDriversMap = {};
@@ -1022,14 +1021,14 @@ export class LocalSpace implements LocalSpaceInstance {
           implementation = this._createRunTransactionWrapper(original);
           break;
         case 'getItem':
-          implementation = hasPlugins
-            ? this._createGetItemWrapper(original)
-            : this._createStoredRecordGetItemWrapper(original);
+          if (hasPlugins) {
+            implementation = this._createGetItemWrapper(original);
+          }
           break;
         case 'getItems':
-          implementation = hasPlugins
-            ? this._createGetItemsWrapper(original)
-            : this._createStoredRecordGetItemsWrapper(original);
+          if (hasPlugins) {
+            implementation = this._createGetItemsWrapper(original);
+          }
           break;
         case 'removeItem':
           if (hasPlugins) {
@@ -1042,10 +1041,9 @@ export class LocalSpace implements LocalSpaceInstance {
           }
           break;
         case 'iterate': {
-          const recordAware = this._createStoredRecordIterateWrapper(original);
           implementation = hasPlugins
-            ? this._createStorageTransformGuard(recordAware, method)
-            : recordAware;
+            ? this._createStorageTransformGuard(original, method)
+            : original;
           break;
         }
       }
@@ -1183,15 +1181,8 @@ export class LocalSpace implements LocalSpaceInstance {
         driverValue as unknown,
         context
       );
-      return decodeStoredRecordValue(finalValue);
+      return finalValue;
     }) as typeof this.getItem;
-  }
-
-  private _createStoredRecordGetItemWrapper(
-    original: RawDriverMethod
-  ): RawDriverMethod {
-    return async (...args: unknown[]) =>
-      decodeStoredRecordValue(await original(...args));
   }
 
   private _createRemoveItemWrapper(original: RawDriverMethod) {
@@ -1406,22 +1397,10 @@ export class LocalSpace implements LocalSpaceInstance {
         const requestedKey = targetToRequested.get(entry.key) ?? entry.key;
         return {
           key: requestedKey,
-          value: decodeStoredRecordValue(entry.value),
+          value: entry.value,
         };
       });
     }) as typeof this.getItems;
-  }
-
-  private _createStoredRecordGetItemsWrapper(
-    original: RawDriverMethod
-  ): RawDriverMethod {
-    return async (...args: unknown[]) => {
-      const entries = (await original(...args)) as BatchResponse<unknown>;
-      return entries.map((entry) => ({
-        key: entry.key,
-        value: decodeStoredRecordValue(entry.value),
-      }));
-    };
   }
 
   private _createRemoveItemsWrapper(original: RawDriverMethod) {
@@ -1468,26 +1447,6 @@ export class LocalSpace implements LocalSpaceInstance {
     };
   }
 
-  private _createStoredRecordIterateWrapper(
-    original: RawDriverMethod
-  ): RawDriverMethod {
-    return (
-      iterator: (
-        value: unknown,
-        key: string,
-        iterationNumber: number
-      ) => unknown
-    ) =>
-      original(
-        (value: unknown, key: string, iterationNumber: number) =>
-          iterator(
-            decodeStoredRecordValue(value),
-            key,
-            iterationNumber
-          )
-      );
-  }
-
   private _createRunTransactionWrapper(
     original: RawDriverMethod
   ): RawDriverMethod {
@@ -1501,8 +1460,7 @@ export class LocalSpace implements LocalSpaceInstance {
       return original(mode, async (scope: TransactionScope) => {
         const validatingScope: TransactionScope = {
           ...scope,
-          get: async <T>(key: string) =>
-            decodeStoredRecordValue(await scope.get<T>(key)) as T | null,
+          get: async <T>(key: string) => scope.get<T>(key),
           set: <T>(key: string, value: T) => {
             validateStorageValueWrite(value, {
               strict: this._config.strictValues === true,
@@ -1515,11 +1473,7 @@ export class LocalSpace implements LocalSpaceInstance {
             iterator: (value: T, key: string, iterationNumber: number) => U
           ) =>
             scope.iterate<T, U>((value, key, iterationNumber) =>
-              iterator(
-                decodeStoredRecordValue(value) as T,
-                key,
-                iterationNumber
-              )
+              iterator(value, key, iterationNumber)
             ),
         };
         this._activeTransactionRunners++;

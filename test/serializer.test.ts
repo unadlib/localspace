@@ -17,7 +17,9 @@ describe('serializer round-trip behaviour', () => {
 
     const decoded = serializer.deserialize(encoded);
     expect(decoded).toBeInstanceOf(ArrayBuffer);
-    expect(new Uint8Array(decoded as ArrayBuffer)).toEqual(new Uint8Array(buffer));
+    expect(new Uint8Array(decoded as ArrayBuffer)).toEqual(
+      new Uint8Array(buffer)
+    );
   });
 
   it('supports typed arrays by preserving the underlying data type', async () => {
@@ -27,6 +29,25 @@ describe('serializer round-trip behaviour', () => {
 
     expect(decoded).toBeInstanceOf(Int16Array);
     expect(Array.from(decoded as Int16Array)).toEqual(Array.from(view));
+  });
+
+  it('forward-decodes the 3.0 selective portable codec', () => {
+    const encoded =
+      '__lsv__:1:["o",[["source","3.0"],["bytes",["b","ui08","AwEE"]]]]';
+    const decoded = serializer.deserialize(encoded) as {
+      source: string;
+      bytes: Uint8Array;
+    };
+
+    expect(decoded.source).toBe('3.0');
+    expect(decoded.bytes).toBeInstanceOf(Uint8Array);
+    expect(Array.from(decoded.bytes)).toEqual([3, 1, 4]);
+  });
+
+  it('rejects unknown portable codec versions', () => {
+    expect(() => serializer.deserialize('__lsv__:99:["a",[]]')).toThrowError(
+      expect.objectContaining({ code: 'DESERIALIZATION_FAILED' })
+    );
   });
 
   const supportsBlobArrayBuffer =
@@ -79,7 +100,9 @@ describe('serializer round-trip behaviour', () => {
       const decoded = serializer.deserialize(encoded);
 
       expect(decoded).toBeInstanceOf(Uint8ClampedArray);
-      expect(Array.from(decoded as Uint8ClampedArray)).toEqual(Array.from(view));
+      expect(Array.from(decoded as Uint8ClampedArray)).toEqual(
+        Array.from(view)
+      );
     });
 
     it('handles Uint16Array', async () => {
@@ -157,9 +180,7 @@ describe('serializer round-trip behaviour', () => {
         const decoded = serializer.deserialize(encoded);
 
         expect(decoded).toBeInstanceOf(BigUint64Array);
-        expect(Array.from(decoded as BigUint64Array)).toEqual(
-          Array.from(view)
-        );
+        expect(Array.from(decoded as BigUint64Array)).toEqual(Array.from(view));
       }
     );
 

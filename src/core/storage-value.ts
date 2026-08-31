@@ -1,5 +1,9 @@
 import { createLocalSpaceError } from '../errors.js';
 import { warnDeprecation } from '../utils/deprecations.js';
+import {
+  PLUGIN_ENVELOPE_NAMESPACE,
+  PLUGIN_ENVELOPE_PROPERTY,
+} from './plugin-envelope.js';
 
 const objectToString = Object.prototype.toString;
 const hasOwn = Object.prototype.hasOwnProperty;
@@ -56,9 +60,27 @@ const issue = (
   valueType: describeType(value),
 });
 
+const hasReservedPluginEnvelopeHeader = (value: unknown): boolean => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const header = Object.getOwnPropertyDescriptor(
+    value,
+    PLUGIN_ENVELOPE_PROPERTY
+  );
+  if (!header || !('value' in header) || !header.value) return false;
+  if (typeof header.value !== 'object' || Array.isArray(header.value)) {
+    return false;
+  }
+  const namespace = Object.getOwnPropertyDescriptor(header.value, 'namespace');
+  return (
+    !!namespace &&
+    'value' in namespace &&
+    namespace.value === PLUGIN_ENVELOPE_NAMESPACE
+  );
+};
+
 const hasPlainObjectPrototype = (value: object): boolean => {
   const prototype = Object.getPrototypeOf(value);
-  if (prototype === null) return true;
+  if (prototype === null) return false;
   return (
     Object.getPrototypeOf(prototype) === null &&
     hasOwn.call(prototype, 'constructor') &&
@@ -212,7 +234,15 @@ export const validateStorageValueWrite = (
   value: unknown,
   context: StorageValueWriteContext
 ): void => {
-  const valueIssue = inspectStorageValue(value);
+  const valueIssue =
+    inspectStorageValue(value) ??
+    (hasReservedPluginEnvelopeHeader(value)
+      ? issue(
+          '$',
+          'top-level localspace.plugin envelopes are reserved for internal storage transforms',
+          value
+        )
+      : null);
   if (!valueIssue) return;
 
   const details = {

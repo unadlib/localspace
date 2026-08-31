@@ -650,21 +650,22 @@ interface LocalSpaceConfig {
 current driver-specific behavior. When enabled, item, batch, and transaction
 writes reject with `SERIALIZATION_FAILED` before a storage side effect if the
 value is outside the 3.0 cross-driver contract. Supported values are `null`,
-booleans, finite numbers, strings, dense arrays, plain objects, `ArrayBuffer`,
-and typed arrays. Date, Map, Set, RegExp, `undefined`, scalar BigInt, cyclic
-values, accessors, and class instances are rejected. 3.0 makes this validation
-unconditional.
+booleans, finite numbers, strings, dense arrays, ordinary objects,
+`ArrayBuffer`, and typed arrays. Date, Map, Set, RegExp, `undefined`, scalar
+BigInt, cyclic values, accessors, null-prototype objects, class instances, and
+top-level objects in the reserved `localspace.plugin` namespace are rejected.
+3.0 makes this validation unconditional.
 
 `strictTransactions` also defaults to `false` in 2.1. When enabled, ordinary
 instance storage calls made while a `runTransaction()` runner is active reject
 with `TRANSACTION_SCOPE_REQUIRED` before side effects. This previews the 3.0
 rule that runner storage work must use only its supplied transaction scope.
 
-The 2.1 read path recognizes the frozen 3.0 `StoredRecord` v1 representation
-after configured storage transforms have been removed. This applies to item,
-batch, iteration, and transaction-scope reads. 2.1 does not switch ordinary
-writes to the new representation; it remains a rollback bridge until the 3.0
-writer is enabled.
+The 2.1 serializer forward-decodes the versioned `__lsv__:1:` representation
+used by 3.0 only when nested binary must cross a string-backed driver or a
+compression/encryption boundary. Ordinary JSON stays ordinary JSON, and
+IndexedDB values continue using native structured clone. The bridge does not
+change ordinary 2.1 writes.
 
 When the requested Storage Bucket cannot be opened, IndexedDB falls back to
 the default storage backend. Instances that resolve to that same backend share

@@ -172,13 +172,11 @@ legacy format in 2.1. This makes a data-layer rollback possible after a 3.0
 writer has been introduced, while unknown envelope versions fail explicitly
 instead of being exposed as plaintext or ordinary application objects.
 
-The 2.1 forward reader also understands the frozen core `StoredRecord` v1
-format on item, batch, iteration, and transaction-scope reads. The record uses
-the `localspace.record` namespace and a canonical `localspace.storage-value`
-payload. A 3.0 writer encodes the logical value into this record before TTL,
-compression, or encryption wraps it. The bridge release continues emitting
-legacy core and plugin representations; its new codec is a reader and fixture
-generator until the 3.0 write path is enabled.
+Ordinary 3.0 JSON and native IndexedDB values remain directly readable by 2.1.
+When nested binary crosses localStorage, React Native AsyncStorage, compression,
+or encryption, 3.0 uses the selective versioned `__lsv__:1:` codec. The 2.1
+bridge forward-decodes that representation while retaining legacy writes. No
+core envelope is added to ordinary values.
 
 ## Upgrade From 1.x To 2.0
 

@@ -16,9 +16,9 @@
 - Added 3.0 migration warnings and type/documentation previews for the config
   setter, instance driver registration, IndexedDB tuning options, Storage Bucket
   fallback, weak Memory transactions, and the `iterate()` undefined result.
-- Added the frozen `StoredRecord` v1 codec and a 2.1 forward reader across item,
-  batch, iteration, and transaction reads. Generated writer fixtures cover the
-  core format inside each frozen plugin envelope while 2.1 writes stay legacy.
+- Added a forward reader for the selective 3.0 portable-value codec used only
+  when string-backed storage or a byte transform must preserve nested binary.
+  Ordinary JSON and native IndexedDB values remain unwrapped.
 - Pinned the published 2.1.0 package/performance baseline and added an
   integrity-checked, same-Chromium comparison harness with distributions and
   relative results instead of machine-specific latency thresholds.

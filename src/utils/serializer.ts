@@ -10,6 +10,10 @@ const BLOB_TYPE_PREFIX_REGEX = /^~~local_forage_type~([^~]+)~/;
 
 const SERIALIZED_MARKER = '__lfsc__:';
 const SERIALIZED_MARKER_LENGTH = SERIALIZED_MARKER.length;
+const PORTABLE_CODEC_MARKER = '__lsv__:';
+const PORTABLE_CODEC_VERSION = 1;
+const PORTABLE_CODEC_PREFIX =
+  PORTABLE_CODEC_MARKER + PORTABLE_CODEC_VERSION + ':';
 
 // Type markers
 const TYPE_ARRAYBUFFER = 'arbf';
@@ -163,7 +167,161 @@ async function serialize(value: unknown): Promise<string> {
   }
 }
 
+const decodePortableBinary = (type: string, data: string): unknown => {
+  const buffer = stringToBuffer(data);
+  if (bufferToString(buffer) !== data) {
+    throw createLocalSpaceError(
+      'DESERIALIZATION_FAILED',
+      'Nested binary data is not canonical base64.',
+      { operation: 'deserialize', type }
+    );
+  }
+
+  const scope = getGlobalScope();
+  switch (type) {
+    case TYPE_ARRAYBUFFER:
+      return buffer;
+    case TYPE_INT8ARRAY:
+      return new scope.Int8Array(buffer);
+    case TYPE_UINT8ARRAY:
+      return new scope.Uint8Array(buffer);
+    case TYPE_UINT8CLAMPEDARRAY:
+      return new scope.Uint8ClampedArray(buffer);
+    case TYPE_INT16ARRAY:
+      return new scope.Int16Array(buffer);
+    case TYPE_UINT16ARRAY:
+      return new scope.Uint16Array(buffer);
+    case TYPE_INT32ARRAY:
+      return new scope.Int32Array(buffer);
+    case TYPE_UINT32ARRAY:
+      return new scope.Uint32Array(buffer);
+    case TYPE_FLOAT32ARRAY:
+      return new scope.Float32Array(buffer);
+    case TYPE_FLOAT64ARRAY:
+      return new scope.Float64Array(buffer);
+    case TYPE_BIGINT64ARRAY:
+      if (typeof scope.BigInt64Array !== 'undefined') {
+        return new scope.BigInt64Array(buffer);
+      }
+      break;
+    case TYPE_BIGUINT64ARRAY:
+      if (typeof scope.BigUint64Array !== 'undefined') {
+        return new scope.BigUint64Array(buffer);
+      }
+      break;
+  }
+  throw createLocalSpaceError(
+    'DESERIALIZATION_FAILED',
+    'Unknown or unavailable nested binary type: ' + type,
+    { operation: 'deserialize', type }
+  );
+};
+
+const decodePortableNode = (node: unknown): unknown => {
+  if (node === null || typeof node === 'string' || typeof node === 'boolean') {
+    return node;
+  }
+  if (typeof node === 'number') {
+    if (!Number.isFinite(node)) {
+      throw createLocalSpaceError(
+        'DESERIALIZATION_FAILED',
+        'Portable value numbers must be finite.'
+      );
+    }
+    return Object.is(node, -0) ? 0 : node;
+  }
+  if (!Array.isArray(node)) {
+    throw createLocalSpaceError(
+      'DESERIALIZATION_FAILED',
+      'Portable value node has an invalid shape.'
+    );
+  }
+
+  const kind = node[0];
+  if (kind === 'a' && node.length === 2 && Array.isArray(node[1])) {
+    return node[1].map((item) => decodePortableNode(item));
+  }
+  if (kind === 'o' && node.length === 2 && Array.isArray(node[1])) {
+    const result: Record<string, unknown> = {};
+    const seen = new Set<string>();
+    for (const entry of node[1]) {
+      if (
+        !Array.isArray(entry) ||
+        entry.length !== 2 ||
+        typeof entry[0] !== 'string' ||
+        seen.has(entry[0])
+      ) {
+        throw createLocalSpaceError(
+          'DESERIALIZATION_FAILED',
+          'Portable object entry has an invalid shape.'
+        );
+      }
+      seen.add(entry[0]);
+      Object.defineProperty(result, entry[0], {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: decodePortableNode(entry[1]),
+      });
+    }
+    return result;
+  }
+  if (
+    kind === 'b' &&
+    node.length === 3 &&
+    typeof node[1] === 'string' &&
+    typeof node[2] === 'string'
+  ) {
+    return decodePortableBinary(node[1], node[2]);
+  }
+
+  throw createLocalSpaceError(
+    'DESERIALIZATION_FAILED',
+    'Portable value node has an invalid discriminator.'
+  );
+};
+
 function deserialize(value: string): unknown {
+  if (
+    value.substring(0, PORTABLE_CODEC_MARKER.length) === PORTABLE_CODEC_MARKER
+  ) {
+    if (
+      value.substring(0, PORTABLE_CODEC_PREFIX.length) !== PORTABLE_CODEC_PREFIX
+    ) {
+      const version = value
+        .substring(PORTABLE_CODEC_MARKER.length)
+        .split(':', 1)[0];
+      throw createLocalSpaceError(
+        'DESERIALIZATION_FAILED',
+        'Unsupported LocalSpace portable value version.',
+        {
+          operation: 'deserialize',
+          valueVersion: version,
+          supportedValueVersions: [PORTABLE_CODEC_VERSION],
+        }
+      );
+    }
+    try {
+      return decodePortableNode(
+        JSON.parse(value.substring(PORTABLE_CODEC_PREFIX.length))
+      );
+    } catch (error) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        error.code === 'DESERIALIZATION_FAILED'
+      ) {
+        throw error;
+      }
+      throw createLocalSpaceError(
+        'DESERIALIZATION_FAILED',
+        'Invalid LocalSpace portable value payload.',
+        { operation: 'deserialize' }
+      );
+    }
+  }
+
   // If not specially serialized, parse as JSON
   if (value.substring(0, SERIALIZED_MARKER_LENGTH) !== SERIALIZED_MARKER) {
     return JSON.parse(value);
