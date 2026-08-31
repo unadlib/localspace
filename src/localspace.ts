@@ -34,12 +34,10 @@ import {
   type PluginBackgroundTaskPause,
   type PluginInternalOperation,
 } from './core/plugin-capabilities.js';
-import { validateStorageValueWrite } from './core/storage-value.js';
 import {
-  canonicalizeStorageValue,
-  createStoredRecord,
-  decodeStoredRecordValue,
-} from './core/stored-record.js';
+  normalizeStorageValue,
+  validateStorageValueWrite,
+} from './core/storage-value.js';
 import {
   DriverRegistry,
   globalDriverRegistry,
@@ -83,6 +81,7 @@ type StorageValueWriteDetails = {
   key?: string;
   valueSource?: 'application' | 'plugin-output';
   plugin?: string;
+  allowReservedPluginEnvelope?: boolean;
 };
 
 const acceptStorageValueWrite = (
@@ -97,11 +96,12 @@ const prepareStorageValueWrite = (
   value: unknown,
   context: StorageValueWriteDetails
 ): StorageValue =>
-  canonicalizeStorageValue(acceptStorageValueWrite(value, context));
+  normalizeStorageValue(acceptStorageValueWrite(value, context));
 
 const validatePluginStorageValueBatch = (
   entries: BatchItems<StorageValue>,
-  plugin: LocalSpacePlugin
+  plugin: LocalSpacePlugin,
+  allowReservedPluginEnvelope: boolean = false
 ): BatchItems<StorageValue> => {
   for (const entry of normalizeBatchEntries(entries)) {
     acceptStorageValueWrite(entry.value, {
@@ -109,6 +109,7 @@ const validatePluginStorageValueBatch = (
       key: entry.key,
       valueSource: 'plugin-output',
       plugin: plugin.name,
+      allowReservedPluginEnvelope,
     });
   }
   return entries;
@@ -131,12 +132,9 @@ const prepareStorageValueBatch = (
   }
   return normalized.map(({ key, value }) => ({
     key,
-    value: canonicalizeStorageValue(value as StorageValue),
+    value: normalizeStorageValue(value as StorageValue),
   }));
 };
-
-const encodeStorageValueRecord = (value: StorageValue): StorageValue =>
-  createStoredRecord(value) as unknown as StorageValue;
 
 type LifecycleCallback =
   | 'plugin-init'
@@ -960,14 +958,14 @@ export class LocalSpace implements LocalSpaceInstance {
           }
           break;
         case 'getItem':
-          implementation = hasPlugins
-            ? this._createGetItemWrapper(original)
-            : this._createStoredRecordGetItemWrapper(original);
+          if (hasPlugins) {
+            implementation = this._createGetItemWrapper(original);
+          }
           break;
         case 'getItems':
-          implementation = hasPlugins
-            ? this._createGetItemsWrapper(original)
-            : this._createStoredRecordGetItemsWrapper(original);
+          if (hasPlugins) {
+            implementation = this._createGetItemsWrapper(original);
+          }
           break;
         case 'removeItem':
           if (hasPlugins) {
@@ -1114,7 +1112,7 @@ export class LocalSpace implements LocalSpaceInstance {
       );
       const processedValue = await this._pluginManager.beforeSet(
         key,
-        encodeStorageValueRecord(processedLogicalValue),
+        processedLogicalValue,
         context,
         (pluginValue, plugin) =>
           acceptStorageValueWrite(pluginValue, {
@@ -1122,10 +1120,11 @@ export class LocalSpace implements LocalSpaceInstance {
             key,
             valueSource: 'plugin-output',
             plugin: plugin.name,
+            allowReservedPluginEnvelope: true,
           }),
         'storage-transform'
       );
-      const storedValue = canonicalizeStorageValue(processedValue);
+      const storedValue = normalizeStorageValue(processedValue);
       await original(key, storedValue);
       await this._pluginManager.afterSet(
         key,
@@ -1151,7 +1150,7 @@ export class LocalSpace implements LocalSpaceInstance {
         operation: 'setItem',
         key,
       });
-      await original(key, encodeStorageValueRecord(canonicalValue));
+      await original(key, canonicalValue);
       return canonicalValue;
     };
   }
@@ -1173,13 +1172,12 @@ export class LocalSpace implements LocalSpaceInstance {
       markPluginInternalOperation(context, internalOperation);
       const targetKey = await this._pluginManager.beforeGet(key, context);
       const driverValue = await original(targetKey);
-      const storedRecord = await this._pluginManager.afterGet(
+      const logicalValue = await this._pluginManager.afterGet(
         targetKey,
         driverValue as unknown,
         context,
         'storage-transform'
       );
-      const logicalValue = decodeStoredRecordValue(storedRecord);
       return this._pluginManager.afterGet(
         targetKey,
         logicalValue,
@@ -1187,13 +1185,6 @@ export class LocalSpace implements LocalSpaceInstance {
         'logical'
       );
     }) as typeof this.getItem;
-  }
-
-  private _createStoredRecordGetItemWrapper(
-    original: RawDriverMethod
-  ): RawDriverMethod {
-    return async (...args: unknown[]) =>
-      decodeStoredRecordValue(await original(...args));
   }
 
   private _createRemoveItemWrapper(
@@ -1227,7 +1218,7 @@ export class LocalSpace implements LocalSpaceInstance {
           prepareBatchOutput: (pluginEntries, plugin) =>
             validatePluginStorageValueBatch(pluginEntries, plugin),
           prepareValueOutput: (value, plugin, key) =>
-            canonicalizeStorageValue(
+            normalizeStorageValue(
               acceptStorageValueWrite(value, {
                 operation: 'setItems',
                 key,
@@ -1237,25 +1228,22 @@ export class LocalSpace implements LocalSpaceInstance {
             ),
         }
       );
-      const recordEntries = logicalPrepared.entries.map(({ key, value }) => ({
-        key,
-        value: encodeStorageValueRecord(value),
-      }));
       const storagePrepared = await this._pluginManager.beforeSetItems(
-        recordEntries,
+        logicalPrepared.entries,
         batchContext,
         {
           role: 'storage-transform',
           preserveLogicalValues: true,
           prepareBatchOutput: (pluginEntries, plugin) =>
-            validatePluginStorageValueBatch(pluginEntries, plugin),
+            validatePluginStorageValueBatch(pluginEntries, plugin, true),
           prepareValueOutput: (value, plugin, key) =>
-            canonicalizeStorageValue(
+            normalizeStorageValue(
               acceptStorageValueWrite(value, {
                 operation: 'setItems',
                 key,
                 valueSource: 'plugin-output',
                 plugin: plugin.name,
+                allowReservedPluginEnvelope: true,
               })
             ),
         }
@@ -1302,12 +1290,7 @@ export class LocalSpace implements LocalSpaceInstance {
   ): RawDriverMethod {
     return async (entries: BatchItems<unknown>) => {
       const logicalEntries = prepareStorageValueBatch(entries);
-      await original(
-        logicalEntries.map(({ key, value }) => ({
-          key,
-          value: encodeStorageValueRecord(value),
-        }))
-      );
+      await original(logicalEntries);
       return logicalEntries;
     };
   }
@@ -1342,10 +1325,7 @@ export class LocalSpace implements LocalSpaceInstance {
         markPluginInternalOperation(item.context, internalOperation);
       }
       const logicalResult = await this._pluginManager.afterGetItems(
-        storageResult.entries.map(({ key, value }) => ({
-          key,
-          value: decodeStoredRecordValue(value),
-        })),
+        storageResult.entries,
         batchContext,
         storageResult.items,
         'logical'
@@ -1355,18 +1335,6 @@ export class LocalSpace implements LocalSpaceInstance {
         value: entry.value,
       }));
     }) as typeof this.getItems;
-  }
-
-  private _createStoredRecordGetItemsWrapper(
-    original: RawDriverMethod
-  ): RawDriverMethod {
-    return async (...args: unknown[]) => {
-      const entries = (await original(...args)) as BatchResponse<unknown>;
-      return entries.map((entry) => ({
-        key: entry.key,
-        value: decodeStoredRecordValue(entry.value),
-      }));
-    };
   }
 
   private _createRemoveItemsWrapper(original: RawDriverMethod) {
@@ -1435,10 +1403,7 @@ export class LocalSpace implements LocalSpaceInstance {
     });
 
     if (!context) {
-      return storedEntries.map(({ key, value }) => ({
-        key,
-        value: decodeStoredRecordValue(value),
-      }));
+      return storedEntries;
     }
 
     const readContext = this._pluginManager.createContext(
@@ -1463,10 +1428,7 @@ export class LocalSpace implements LocalSpaceInstance {
       operation
     );
     const logicalResult = await this._pluginManager.afterGetItems(
-      storageResult.entries.map(({ key, value }) => ({
-        key,
-        value: decodeStoredRecordValue(value),
-      })),
+      storageResult.entries,
       readContext,
       storageResult.items,
       'logical',
@@ -1654,7 +1616,7 @@ export class LocalSpace implements LocalSpaceInstance {
 
         const getOperation = hasPlugins
           ? this._createGetItemWrapper(rawGet, validatingScope)
-          : this._createStoredRecordGetItemWrapper(rawGet);
+          : rawGet;
         const setOperation = hasPlugins
           ? this._createSetItemWrapper(rawSet, validatingScope)
           : this._createSetItemValueValidationWrapper(rawSet);

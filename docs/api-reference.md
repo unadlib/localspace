@@ -56,29 +56,29 @@ The runtime accepts only:
 - `null`, booleans, finite numbers, and strings;
 - non-detached `ArrayBuffer` values and the typed arrays listed above;
 - dense arrays containing supported values and no custom/symbol properties;
-- ordinary or null-prototype objects with enumerable own data properties whose
-  values are supported.
+- ordinary plain objects with enumerable own data properties whose values are
+  supported.
 
 The runtime rejects `undefined`, `bigint`, symbols, functions, non-finite
 numbers, sparse arrays, accessors, non-enumerable properties, symbol keys,
 cycles, `SharedArrayBuffer`, shared-memory views, `DataView`, `Blob`, `Date`,
-`Map`, `Set`, `RegExp`, and class instances with `SERIALIZATION_FAILED`.
-Accepted values are copied and normalized before persistence; for example,
-negative zero is read back as zero.
+`Map`, `Set`, `RegExp`, null-prototype objects, and class instances with
+`SERIALIZATION_FAILED`. The exact top-level `localspace.plugin` envelope
+namespace is reserved for built-in storage transforms and is rejected when
+supplied by application or logical-plugin output. Accepted values are copied
+and normalized before persistence; for example, negative zero is read back as
+zero.
 
-LocalSpace encodes every accepted 3.0 logical write in a versioned
-StoredRecord. It still reads unwrapped 2.x values. A 3.0-written user object
-with a `__localspace__` property—even one exactly shaped like a valid record—is
-wrapped as payload and therefore cannot collide with the outer marker. Unknown
-LocalSpace record versions fail with `DESERIALIZATION_FAILED` instead of being
-guessed.
+Ordinary JSON-compatible values and top-level native binary values are stored
+without a universal core wrapper. String-backed drivers and byte transforms
+use the versioned `__lsv__:1:` representation only when binary is nested inside
+an array or object; ordinary JSON serialization is unchanged. The historical
+top-level localForage binary marker remains the representation for top-level
+binary values on string-backed drivers.
 
-A raw value written before 3.0 that is already _exactly_ identical to the full
-reserved StoredRecord grammar is inherently ambiguous because 2.x did not
-escape that future marker. Marker-like objects with another namespace/shape
-remain ordinary values. Audit this exceptional exact-shape case before deploying
-the bridge forward reader; no reader can infer the original intent from the
-persisted bytes alone.
+The abandoned `localspace.record` namespace has no special meaning and values
+using it are returned as application data. Objects that merely contain a
+`__localspace__` property or another namespace are also ordinary values.
 
 ## Creating instances
 
@@ -137,7 +137,7 @@ const profile = await store.getItem<{
 
 Validates, copies, transforms, and stores one value. Validation happens before
 plugin or driver side effects. The returned value is the logical write result,
-not an internal StoredRecord or plugin envelope.
+not a plugin envelope or serialized representation.
 
 ```ts
 const saved = await store.setItem('profile', {

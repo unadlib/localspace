@@ -4,7 +4,6 @@ import {
   createPluginEnvelope,
   readPluginEnvelope,
 } from '../src/core/plugin-envelope';
-import { readStoredRecord } from '../src/core/stored-record';
 import { getRawMemoryValue, setRawMemoryValue } from './utils/raw-memory';
 
 const uniqueName = (label: string) =>
@@ -67,7 +66,7 @@ describe('compression bytes contract', () => {
     expect(decompress).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the StoredRecord when envelope overhead erases byte savings', async () => {
+  it('keeps the raw value when envelope overhead erases byte savings', async () => {
     let sourceBytes: Uint8Array | undefined;
     const decompress = vi.fn(() => sourceBytes!.slice());
     const codec: CompressionCodec = {
@@ -89,7 +88,7 @@ describe('compression bytes contract', () => {
     expect(readPluginEnvelope(physical, 'compression')).toEqual({
       matched: false,
     });
-    expect(readStoredRecord(physical)).toEqual({ matched: true, value: 0 });
+    expect(physical).toBe(0);
     await expect(store.getItem('value')).resolves.toBe(0);
     expect(decompress).not.toHaveBeenCalled();
   });

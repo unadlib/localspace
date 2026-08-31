@@ -8,7 +8,7 @@
     "npm": "localspace@2.1.0"
   },
   "candidate": {
-    "gitCommit": "21211bd617784202e03da8981e73020f3360fb38",
+    "gitCommit": "6009585280ddbddc161c264210427d388921ed0f",
     "dirty": true,
     "packageVersion": "2.1.0"
   },

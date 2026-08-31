@@ -26,9 +26,11 @@ ratios. Release budgets are committed in `baselines/v2.1.0.json` and are
 evaluated against the interleaved baseline median from the same Chromium
 process. Ordinary single and batch operations use ratio limits. Sub-millisecond
 startup and short iteration use absolute millisecond allowances because a
-ratio magnifies timer noise. Transactions have a separate 6x ceiling: 3.0 adds
-scope enforcement, logical plugin transforms, keep-alive handling, and
-serializable coordination that 2.1 did not provide. The ceiling makes that
+ratio magnifies timer noise. Transactions have a separate 5.5x ceiling: 3.0
+adds scope enforcement, logical plugin transforms, keep-alive handling, and
+serializable coordination that 2.1 did not provide. Repeated same-run evidence
+peaked below 5x, so the 5.5x limit retains roughly 10% environmental headroom
+without leaving the earlier 6x allowance in place. The ceiling makes that
 intentional cost bounded rather than exempt from review.
 
 Exceeding any budget, failing a correctness assertion, or changing the pinned

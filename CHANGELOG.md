@@ -10,10 +10,14 @@
   IndexedDB, localStorage, memory, and React Native AsyncStorage. Every item,
   batch, plugin-output, and transaction-scope write is validated before storage
   side effects, including detached binary buffers/views.
-- Added collision-safe StoredRecord v1 encoding for every new logical value,
-  while retaining readers for unwrapped 2.x values and legacy built-in-plugin
-  payloads. Unknown versions and non-canonical envelope/payload shapes fail
-  explicitly without invoking persisted accessors.
+- Added raw-by-default StorageValue persistence: ordinary JSON-compatible and
+  native binary values are not wrapped in a universal core record. A selective
+  versioned codec preserves binary nested inside arrays or objects only across
+  string/byte serialization boundaries, while retaining legacy 2.x readers.
+- Reserved the exact top-level `localspace.plugin` namespace for built-in
+  transforms. Unknown versions and non-canonical envelope/payload shapes fail
+  explicitly without invoking persisted accessors; the abandoned
+  `localspace.record` namespace has no special read semantics.
 - Added immutable construction-scoped driver definitions, private per-selection
   driver sessions, and the explicit realm-wide `registerDriver()` API.
 - Added frozen post-readiness driver capabilities for transactions, atomic
@@ -124,18 +128,19 @@
   TypeScript `sourcesContent`.
 - Added isolated ESM, CommonJS, React Native, declaration, forbidden-deep-import,
   bundled-compression, and mapped-stack consumer checks.
-- Reduced the certified artifact from 138 to 63 files, from 756,538 to 446,246
-  packed bytes, and from 3,387,413 to 2,004,009 unpacked bytes. Final budgets
+- Reduced the certified artifact from 138 to 61 files, from 756,538 to 454,659
+  packed bytes, and from 3,387,413 to 2,036,351 unpacked bytes. Final budgets
   are enforced mechanically.
 
 ### Migration
 
-- The final 2.1.x bridge is required for a data rollback after 3.0 writes.
-  Published `localspace@2.1.0` can read plugin envelope v1 but cannot read the
-  final core StoredRecord v1; do not use it as the rollback target.
+- The final 2.1.x bridge is required for a complete data rollback after 3.0
+  writes. Published `localspace@2.1.0` can read plugin envelope v1 and ordinary
+  raw values, but cannot decode the selective nested-binary codec; do not use it
+  as the general rollback target.
 - Convert rich values such as `Date`, `Map`, `Set`, `RegExp`, scalar `bigint`,
-  accessors, cycles, sparse arrays, and class instances into explicit plain
-  data before writing.
+  null-prototype objects, accessors, cycles, sparse arrays, and class instances
+  into explicit plain data before writing.
 - See `docs/migration-guide.md` for transaction-scope, plugin hook, React
   Native, Storage Bucket, custom-driver, encryption, package, and rollback
   migrations.

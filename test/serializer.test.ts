@@ -43,6 +43,51 @@ describe('serializer round-trip behaviour', () => {
     expect(Array.from(decoded as Int16Array)).toEqual(Array.from(view));
   });
 
+  it('uses the portable codec only when binary is nested', async () => {
+    const backing = new Uint8Array([9, 1, 2, 8]);
+    const payload = {
+      label: 'nested',
+      bytes: backing.subarray(1, 3),
+      values: [new Int16Array([-2, 3])],
+    };
+
+    const encoded = await serializer.serialize(payload);
+    const decoded = serializer.deserialize(encoded) as typeof payload;
+
+    expect(encoded.startsWith('__lsv__:1:')).toBe(true);
+    expect(decoded.label).toBe('nested');
+    expect(decoded.bytes).toBeInstanceOf(Uint8Array);
+    expect(Array.from(decoded.bytes)).toEqual([1, 2]);
+    expect(decoded.values[0]).toBeInstanceOf(Int16Array);
+    expect(Array.from(decoded.values[0])).toEqual([-2, 3]);
+  });
+
+  it('does not reinterpret portable-looking ordinary JSON', async () => {
+    const payload = ['b', 'ui08', 'AQI='];
+    const encoded = await serializer.serialize(payload);
+
+    expect(encoded).toBe(JSON.stringify(payload));
+    expect(serializer.deserialize(encoded)).toEqual(payload);
+  });
+
+  it('rejects unknown portable codec versions', () => {
+    expect(() => serializer.deserialize('__lsv__:99:["a",[]]')).toThrowError(
+      expect.objectContaining({ code: 'DESERIALIZATION_FAILED' })
+    );
+  });
+
+  it.each([
+    '__lsv__:1:["o",[["duplicate",1],["duplicate",2]]]',
+    '__lsv__:1:["b","ui08","not-base64"]',
+    '__lsv__:1:["b","blob","AQI="]',
+    '__lsv__:1:["b","unknown","AQI="]',
+    '__lsv__:1:["missing-node"]',
+  ])('rejects malformed portable payload %s', (encoded) => {
+    expect(() => serializer.deserialize(encoded)).toThrowError(
+      expect.objectContaining({ code: 'DESERIALIZATION_FAILED' })
+    );
+  });
+
   it('uses intrinsic typed-array slots instead of an overridden type tag', async () => {
     const tagGetter = vi.fn(() => 'Blob');
     const view = new Uint8Array([1, 2, 3]);

@@ -48,15 +48,10 @@ export function createStorageValueContractFixture(): StorageValueContractFixture
     add(new BigUint64Array([0n, 2n ** 64n - 1n]), [0n, 2n ** 64n - 1n]);
   }
 
-  const nullPrototype = Object.create(null) as Record<string, StorageValue>;
-  nullPrototype.z = 'last';
-  nullPrototype.a = [1, true];
-
   return {
     value: {
       primitives: [null, false, true, -0, 1.25, 'text'],
       nested: [{ z: 'last', a: 1 }, ['x', false]],
-      nullPrototype,
       binaries,
     },
     binaries: expectations,
@@ -70,35 +65,24 @@ export function expectStorageValueContract(
   expect(actual).not.toBeNull();
   const record = actual as Record<string, StorageValue>;
   expect(Object.getPrototypeOf(record)).toBe(Object.prototype);
-  expect(Object.keys(record)).toEqual([
-    'binaries',
-    'nested',
-    'nullPrototype',
-    'primitives',
-  ]);
+  expect(Object.keys(record)).toEqual(['primitives', 'nested', 'binaries']);
 
   expect(record.primitives).toEqual([null, false, true, 0, 1.25, 'text']);
   expect(Object.is((record.primitives as StorageValue[])[3], -0)).toBe(false);
-  expect(record.nested).toEqual([{ a: 1, z: 'last' }, ['x', false]]);
+  expect(record.nested).toEqual([{ z: 'last', a: 1 }, ['x', false]]);
   expect(Object.keys((record.nested as StorageValue[])[0] as object)).toEqual([
-    'a',
     'z',
+    'a',
   ]);
-
-  const nullPrototype = record.nullPrototype as Record<string, StorageValue>;
-  expect(Object.getPrototypeOf(nullPrototype)).toBeNull();
-  expect(Object.keys(nullPrototype)).toEqual(['a', 'z']);
-  expect(nullPrototype).toEqual({ a: [1, true], z: 'last' });
 
   const binaries = record.binaries as StorageBinary[];
   expect(binaries).toHaveLength(fixture.binaries.length);
   for (const [index, expected] of fixture.binaries.entries()) {
     const binary = binaries[index];
-    expect(Object.prototype.toString.call(binary)).toBe(
-      `[object ${expected.constructorName}]`
-    );
+    const binaryTag = Object.prototype.toString.call(binary);
+    expect(binaryTag).toBe(`[object ${expected.constructorName}]`);
     const values =
-      binary instanceof ArrayBuffer
+      binaryTag === '[object ArrayBuffer]'
         ? Array.from(new Uint8Array(binary))
         : Array.from(binary as ArrayLike<number | bigint>);
     expect(values).toEqual(expected.values);

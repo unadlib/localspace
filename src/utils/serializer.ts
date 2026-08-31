@@ -16,6 +16,10 @@ const BLOB_TYPE_PREFIX_REGEX = /^~~local_forage_type~([^~]+)~/;
 
 const SERIALIZED_MARKER = '__lfsc__:';
 const SERIALIZED_MARKER_LENGTH = SERIALIZED_MARKER.length;
+const PORTABLE_CODEC_MARKER = '__lsv__:';
+const PORTABLE_CODEC_VERSION = 1;
+const PORTABLE_CODEC_PREFIX =
+  PORTABLE_CODEC_MARKER + PORTABLE_CODEC_VERSION + ':';
 
 // Type markers
 const TYPE_ARRAYBUFFER = 'arbf';
@@ -115,6 +119,218 @@ const typedArrayTagMap: Record<string, string> = {
   '[object BigUint64Array]': TYPE_BIGUINT64ARRAY,
 };
 
+type PortableNode =
+  | null
+  | boolean
+  | number
+  | string
+  | ['a', PortableNode[]]
+  | ['o', Array<[string, PortableNode]>]
+  | ['b', string, string];
+
+const encodePortableNode = (
+  value: unknown,
+  ancestors: WeakSet<object>
+): PortableNode | undefined => {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return Object.is(value, -0) ? 0 : value;
+  }
+
+  const binaryTag = getStorageBinaryTag(value);
+  if (binaryTag) {
+    const type =
+      binaryTag === '[object ArrayBuffer]'
+        ? TYPE_ARRAYBUFFER
+        : typedArrayTagMap[binaryTag];
+    const bytes = copyBufferSourceBytes(value);
+    if (!type || !bytes) {
+      throw createLocalSpaceError(
+        'SERIALIZATION_FAILED',
+        'Failed to encode nested binary value.',
+        { valueType: binaryTag }
+      );
+    }
+    return ['b', type, bufferToString(bytes.buffer as ArrayBuffer)];
+  }
+
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  if (ancestors.has(value)) {
+    return undefined;
+  }
+
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      const items: PortableNode[] = [];
+      for (const item of value) {
+        const encoded = encodePortableNode(item, ancestors);
+        if (encoded === undefined) return undefined;
+        items.push(encoded);
+      }
+      return ['a', items];
+    }
+
+    const entries: Array<[string, PortableNode]> = [];
+    for (const key of Object.keys(value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !('value' in descriptor)) return undefined;
+      const encoded = encodePortableNode(descriptor.value, ancestors);
+      if (encoded === undefined) return undefined;
+      entries.push([key, encoded]);
+    }
+    return ['o', entries];
+  } finally {
+    ancestors.delete(value);
+  }
+};
+
+const decodeBinaryBuffer = (
+  type: string,
+  buffer: ArrayBuffer,
+  blobType?: string
+): unknown => {
+  const scope = getGlobalScope();
+  switch (type) {
+    case TYPE_ARRAYBUFFER:
+      return buffer;
+    case TYPE_BLOB:
+      return createBlob([buffer], { type: blobType });
+    case TYPE_INT8ARRAY:
+      return new scope.Int8Array(buffer);
+    case TYPE_UINT8ARRAY:
+      return new scope.Uint8Array(buffer);
+    case TYPE_UINT8CLAMPEDARRAY:
+      return new scope.Uint8ClampedArray(buffer);
+    case TYPE_INT16ARRAY:
+      return new scope.Int16Array(buffer);
+    case TYPE_UINT16ARRAY:
+      return new scope.Uint16Array(buffer);
+    case TYPE_INT32ARRAY:
+      return new scope.Int32Array(buffer);
+    case TYPE_UINT32ARRAY:
+      return new scope.Uint32Array(buffer);
+    case TYPE_FLOAT32ARRAY:
+      return new scope.Float32Array(buffer);
+    case TYPE_FLOAT64ARRAY:
+      return new scope.Float64Array(buffer);
+    case TYPE_BIGINT64ARRAY:
+      if (typeof scope.BigInt64Array !== 'undefined') {
+        return new scope.BigInt64Array(buffer);
+      }
+      break;
+    case TYPE_BIGUINT64ARRAY:
+      if (typeof scope.BigUint64Array !== 'undefined') {
+        return new scope.BigUint64Array(buffer);
+      }
+      break;
+  }
+  if (type === TYPE_BIGINT64ARRAY || type === TYPE_BIGUINT64ARRAY) {
+    throw createLocalSpaceError(
+      'DESERIALIZATION_FAILED',
+      `${type === TYPE_BIGINT64ARRAY ? 'BigInt64Array' : 'BigUint64Array'} is not supported in this environment`,
+      { operation: 'deserialize', type }
+    );
+  }
+  throw createLocalSpaceError(
+    'DESERIALIZATION_FAILED',
+    'Unknown type: ' + type,
+    { operation: 'deserialize', type }
+  );
+};
+
+const decodePortableBinary = (type: string, data: string): unknown => {
+  if (type === TYPE_BLOB) {
+    throw createLocalSpaceError(
+      'DESERIALIZATION_FAILED',
+      'Blob is not a supported nested binary type.',
+      { operation: 'deserialize', type }
+    );
+  }
+  const buffer = stringToBuffer(data);
+  if (bufferToString(buffer) !== data) {
+    throw createLocalSpaceError(
+      'DESERIALIZATION_FAILED',
+      'Nested binary data is not canonical base64.',
+      { operation: 'deserialize', type }
+    );
+  }
+
+  return decodeBinaryBuffer(type, buffer);
+};
+
+const decodePortableNode = (node: unknown): unknown => {
+  if (node === null || typeof node === 'string' || typeof node === 'boolean') {
+    return node;
+  }
+  if (typeof node === 'number') {
+    if (!Number.isFinite(node)) {
+      throw createLocalSpaceError(
+        'DESERIALIZATION_FAILED',
+        'Portable value numbers must be finite.'
+      );
+    }
+    return Object.is(node, -0) ? 0 : node;
+  }
+  if (!Array.isArray(node)) {
+    throw createLocalSpaceError(
+      'DESERIALIZATION_FAILED',
+      'Portable value node has an invalid shape.'
+    );
+  }
+
+  const kind = node[0];
+  if (kind === 'a' && node.length === 2 && Array.isArray(node[1])) {
+    return node[1].map((item) => decodePortableNode(item));
+  }
+  if (kind === 'o' && node.length === 2 && Array.isArray(node[1])) {
+    const result: Record<string, unknown> = {};
+    const seen = new Set<string>();
+    for (const entry of node[1]) {
+      if (
+        !Array.isArray(entry) ||
+        entry.length !== 2 ||
+        typeof entry[0] !== 'string' ||
+        seen.has(entry[0])
+      ) {
+        throw createLocalSpaceError(
+          'DESERIALIZATION_FAILED',
+          'Portable object entry has an invalid shape.'
+        );
+      }
+      seen.add(entry[0]);
+      Object.defineProperty(result, entry[0], {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: decodePortableNode(entry[1]),
+      });
+    }
+    return result;
+  }
+  if (
+    kind === 'b' &&
+    node.length === 3 &&
+    typeof node[1] === 'string' &&
+    typeof node[2] === 'string'
+  ) {
+    return decodePortableBinary(node[1], node[2]);
+  }
+
+  throw createLocalSpaceError(
+    'DESERIALIZATION_FAILED',
+    'Portable value node has an invalid discriminator.'
+  );
+};
+
 async function serialize(value: unknown): Promise<string> {
   const valueType = getStorageBinaryTag(value);
 
@@ -165,7 +381,25 @@ async function serialize(value: unknown): Promise<string> {
   }
 
   try {
-    return JSON.stringify(value);
+    let containsNestedBinary = false;
+    const json = JSON.stringify(value, (_key, nestedValue) => {
+      if (getStorageBinaryTag(nestedValue)) {
+        containsNestedBinary = true;
+        return null;
+      }
+      return nestedValue;
+    });
+    if (!containsNestedBinary) {
+      return json;
+    }
+    const portable = encodePortableNode(value, new WeakSet());
+    if (portable === undefined) {
+      throw createLocalSpaceError(
+        'SERIALIZATION_FAILED',
+        'Failed to encode a nested binary value.'
+      );
+    }
+    return PORTABLE_CODEC_PREFIX + JSON.stringify(portable);
   } catch (error) {
     console.error("Couldn't convert value into a JSON string: ", value);
     throw error;
@@ -173,6 +407,46 @@ async function serialize(value: unknown): Promise<string> {
 }
 
 function deserialize(value: string): unknown {
+  if (
+    value.substring(0, PORTABLE_CODEC_MARKER.length) === PORTABLE_CODEC_MARKER
+  ) {
+    if (
+      value.substring(0, PORTABLE_CODEC_PREFIX.length) !== PORTABLE_CODEC_PREFIX
+    ) {
+      const version = value
+        .substring(PORTABLE_CODEC_MARKER.length)
+        .split(':', 1)[0];
+      throw createLocalSpaceError(
+        'DESERIALIZATION_FAILED',
+        'Unsupported LocalSpace portable value version.',
+        {
+          operation: 'deserialize',
+          valueVersion: version,
+          supportedValueVersions: [PORTABLE_CODEC_VERSION],
+        }
+      );
+    }
+    try {
+      return decodePortableNode(
+        JSON.parse(value.substring(PORTABLE_CODEC_PREFIX.length))
+      );
+    } catch (error) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        error.code === 'DESERIALIZATION_FAILED'
+      ) {
+        throw error;
+      }
+      throw createLocalSpaceError(
+        'DESERIALIZATION_FAILED',
+        'Invalid LocalSpace portable value payload.',
+        { operation: 'deserialize' }
+      );
+    }
+  }
+
   // If not specially serialized, parse as JSON
   if (value.substring(0, SERIALIZED_MARKER_LENGTH) !== SERIALIZED_MARKER) {
     return JSON.parse(value);
@@ -198,59 +472,7 @@ function deserialize(value: string): unknown {
 
   const buffer = stringToBuffer(actualSerializedString);
 
-  // Return the right type based on the marker
-  const scope = getGlobalScope();
-  switch (type) {
-    case TYPE_ARRAYBUFFER:
-      return buffer;
-    case TYPE_BLOB:
-      return createBlob([buffer], { type: blobType });
-    case TYPE_INT8ARRAY:
-      return new scope.Int8Array(buffer);
-    case TYPE_UINT8ARRAY:
-      return new scope.Uint8Array(buffer);
-    case TYPE_UINT8CLAMPEDARRAY:
-      return new scope.Uint8ClampedArray(buffer);
-    case TYPE_INT16ARRAY:
-      return new scope.Int16Array(buffer);
-    case TYPE_UINT16ARRAY:
-      return new scope.Uint16Array(buffer);
-    case TYPE_INT32ARRAY:
-      return new scope.Int32Array(buffer);
-    case TYPE_UINT32ARRAY:
-      return new scope.Uint32Array(buffer);
-    case TYPE_FLOAT32ARRAY:
-      return new scope.Float32Array(buffer);
-    case TYPE_FLOAT64ARRAY:
-      return new scope.Float64Array(buffer);
-    case TYPE_BIGINT64ARRAY:
-      if (typeof scope.BigInt64Array === 'undefined') {
-        throw createLocalSpaceError(
-          'DESERIALIZATION_FAILED',
-          'BigInt64Array is not supported in this environment',
-          { operation: 'deserialize', type }
-        );
-      }
-      return new scope.BigInt64Array(buffer);
-    case TYPE_BIGUINT64ARRAY:
-      if (typeof scope.BigUint64Array === 'undefined') {
-        throw createLocalSpaceError(
-          'DESERIALIZATION_FAILED',
-          'BigUint64Array is not supported in this environment',
-          { operation: 'deserialize', type }
-        );
-      }
-      return new scope.BigUint64Array(buffer);
-    default:
-      throw createLocalSpaceError(
-        'DESERIALIZATION_FAILED',
-        'Unknown type: ' + type,
-        {
-          operation: 'deserialize',
-          type,
-        }
-      );
-  }
+  return decodeBinaryBuffer(type, buffer, blobType);
 }
 
 const localspaceSerializer: Serializer = {

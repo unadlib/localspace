@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "bridge": {
-    "sourceCommit": "51bc26d5ec68d0280e1eff3121ac2602e11f3894",
+    "sourceCommit": "7027bf7d102f4399c4abaf296d4c7e30e9942de6",
     "sourcePackageVersion": "2.1.1",
     "requiredPublishedVersion": "2.1.1",
     "publishedVersion": null,
@@ -11,6 +11,7 @@
   "fixture": {
     "databaseName": "localspace-3-release-rollback",
     "coreStoreName": "rollback-core",
-    "pluginStoreName": "rollback-plugins"
+    "pluginStoreName": "rollback-plugins",
+    "portableStoreName": "rollback-portable"
   }
 }

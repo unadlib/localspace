@@ -31,7 +31,7 @@ export const setRawMemoryValue = async (
   await memoryDriver.setItem.call(receiver as never, key, value as never);
 };
 
-/** Inspect the physical Memory-driver value without decoding core records. */
+/** Inspect the physical Memory-driver value without running facade plugins. */
 export const getRawMemoryValue = async (
   config: LocalSpaceConfig,
   key: string

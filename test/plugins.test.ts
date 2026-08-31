@@ -10,7 +10,6 @@ import {
   createPluginEnvelope,
   readPluginEnvelope,
 } from '../src/core/plugin-envelope';
-import { readStoredRecord } from '../src/core/stored-record';
 import { setRawMemoryValue } from './utils/raw-memory';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -463,10 +462,8 @@ describe('Plugin batch operations', () => {
       },
     });
     expect(
-      readStoredRecord(
-        (rawA as { payload?: { data?: unknown } } | null)?.payload?.data
-      )
-    ).toEqual({ matched: true, value: 'val-a' });
+      (rawA as { payload?: { data?: unknown } } | null)?.payload?.data
+    ).toBe('val-a');
 
     // Batch get with TTL plugin should unwrap
     const result = await store.getItems(['a', 'b']);
@@ -643,10 +640,7 @@ describe('Plugin batch operations', () => {
         version: 1,
       },
     });
-    expect(readStoredRecord(rawValue?.payload?.data)).toEqual({
-      matched: true,
-      value: 'value',
-    });
+    expect(rawValue?.payload?.data).toBe('value');
   });
 
   it('tracks logical values when a batch hook adds and reorders entries', async () => {
@@ -704,10 +698,7 @@ describe('Plugin batch operations', () => {
         version: 1,
       },
     });
-    expect(readStoredRecord(rawAdded?.payload?.data)).toEqual({
-      matched: true,
-      value: 9,
-    });
+    expect(rawAdded?.payload?.data).toBe(9);
   });
 });
 
@@ -788,6 +779,7 @@ describe('Plugin edge cases and combinations', () => {
   });
 
   it('handles mixed batch with some items below compression threshold', async () => {
+    const largeValue = 'x'.repeat(2_000);
     const store = localspace.createInstance({
       name: 'mixed-compress-db',
       storeName: 'mixed-compress-store',
@@ -796,7 +788,7 @@ describe('Plugin edge cases and combinations', () => {
 
     await store.setItems([
       { key: 'small', value: 'tiny' }, // below threshold
-      { key: 'large', value: 'x'.repeat(200) }, // above threshold
+      { key: 'large', value: largeValue }, // above threshold
     ]);
 
     const rawReader = localspace.createInstance({
@@ -819,7 +811,7 @@ describe('Plugin edge cases and combinations', () => {
     // Both should read correctly
     const result = await store.getItems<string>(['small', 'large']);
     expect(result[0].value).toBe('tiny');
-    expect(result[1].value).toBe('x'.repeat(200));
+    expect(result[1].value).toBe(largeValue);
   });
 
   it('handles empty batch operations gracefully', async () => {

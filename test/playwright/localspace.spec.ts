@@ -913,6 +913,7 @@ test.describe('localspace data type handling', () => {
           ['map', new Map([['key', 'value']])],
           ['set', new Set(['value'])],
           ['regexp', /value/gu],
+          ['null-prototype', Object.create(null)],
         ] as const) {
           let code: string | null = null;
           try {
@@ -971,13 +972,9 @@ test.describe('localspace data type handling', () => {
           });
         }
 
-        const nullPrototype = Object.create(null);
-        nullPrototype.z = 'last';
-        nullPrototype.a = [1, true];
         await instance.setItem('contract', {
           primitives: [null, false, true, -0, 1.25, 'text'],
           nested: [{ z: 'last', a: 1 }, ['x', false]],
-          nullPrototype,
           binaries: binaries.map(({ value }) => value),
         });
 
@@ -989,13 +986,9 @@ test.describe('localspace data type handling', () => {
         );
         assert(!Object.is(result.primitives[3], -0), `${driver} retained -0`);
         assert(
-          Object.getPrototypeOf(result.nullPrototype) === null,
-          `${driver} changed null prototype`
-        );
-        assert(
-          JSON.stringify(Object.keys(result.nullPrototype)) ===
-            JSON.stringify(['a', 'z']),
-          `${driver} changed canonical object order`
+          JSON.stringify(Object.keys(result.nested[0])) ===
+            JSON.stringify(['z', 'a']),
+          `${driver} changed object insertion order`
         );
         assert(
           result.binaries.length === binaries.length,

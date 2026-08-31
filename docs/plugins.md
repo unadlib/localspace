@@ -357,21 +357,7 @@ const rejectReservedKeys: LocalSpacePlugin = {
 
 ## Frozen persisted formats
 
-LocalSpace 3.0 writes a core StoredRecord v1 for every logical value:
-
-```ts
-{
-  __localspace__: {
-    namespace: 'localspace.record',
-    version: 1,
-  },
-  payload: {
-    codec: 'localspace.storage-value',
-    data: encodedStorageValue,
-  },
-}
-```
-
+LocalSpace stores ordinary logical values without a universal core wrapper.
 Built-in transform plugins use the plugin envelope frozen during 2.1:
 
 ```ts
@@ -385,11 +371,20 @@ Built-in transform plugins use the plugin envelope frozen during 2.1:
 }
 ```
 
-With built-in transforms, the StoredRecord is nested inside the transform
-pipeline; it is not replaced. Readers also accept each built-in plugin's 2.x
-marker-based legacy payload. A matching namespace/kind with an unknown version
-throws `DESERIALIZATION_FAILED`. Writers never guess or silently downgrade an
-unknown format.
+Transforms wrap the raw logical value in pipeline order. Readers also accept
+each built-in plugin's 2.x marker-based legacy payload. A matching
+namespace/kind with an unknown version throws `DESERIALIZATION_FAILED`. Writers
+never guess or silently downgrade an unknown format.
+
+The exact top-level `localspace.plugin` namespace is reserved for storage
+transform output. Application writes and ordinary logical-plugin output cannot
+claim it. Partial marker lookalikes, other namespaces, and the abandoned
+`localspace.record` namespace remain ordinary application data.
+
+When a string-backed driver or a byte transform must serialize binary nested in
+an array or object, the serializer uses the selective `__lsv__:1:` codec. It is
+not emitted for ordinary JSON-compatible values or top-level binary values. The
+final 2.1.x bridge includes a forward reader for this representation.
 
 The envelope property, namespace, version, kinds, and outer shape are frozen
 for 3.0. Payloads must remain within the validators understood by the 2.1

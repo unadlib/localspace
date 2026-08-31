@@ -37,7 +37,7 @@
       "main.batch.setMs": { "maxRatio": 1.35 },
       "main.batch.getMs": { "maxRatio": 1.35 },
       "main.batch.removeMs": { "maxRatio": 1.75 },
-      "main.transactionMs": { "maxRatio": 6 }
+      "main.transactionMs": { "maxRatio": 5.5 }
     },
     "legacyFeatureProbes": {
       "concurrencyCount": 80,

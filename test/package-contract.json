@@ -1,19 +1,19 @@
 {
   "schemaVersion": 1,
   "baseline": {
-    "capturedAt": "2026-08-31",
-    "entryCount": 63,
-    "packedBytes": 432120,
-    "unpackedBytes": 1929372
+    "capturedAt": "2026-09-01",
+    "entryCount": 61,
+    "packedBytes": 454659,
+    "unpackedBytes": 2036351
   },
   "budgets": {
-    "entryCount": 63,
+    "entryCount": 61,
     "packedBytes": 470000,
     "unpackedBytes": 2050000,
     "mainBundleBytes": 120000,
     "reactNativeBundleBytes": 20000,
     "mainSourceMapBytes": 470000,
-    "reactNativeSourceMapBytes": 70000
+    "reactNativeSourceMapBytes": 80000
   },
   "files": [
     "LICENSE",
@@ -34,8 +34,6 @@
     "dist/core/plugin-manager.d.ts",
     "dist/core/storage-value.d.cts",
     "dist/core/storage-value.d.ts",
-    "dist/core/stored-record.d.cts",
-    "dist/core/stored-record.d.ts",
     "dist/core/transaction-scope.d.cts",
     "dist/core/transaction-scope.d.ts",
     "dist/drivers/indexeddb.d.cts",

@@ -377,7 +377,7 @@ const candidateReadAndWrite = async (page, fixture) =>
             data: 'application-value',
           },
         },
-        '3.0 mistook an unrelated legacy marker-like value for a core record.'
+        '3.0 changed an unrelated legacy marker-like application value.'
       );
       if ((await core.getItem('legacy-null')) !== null) {
         fail('3.0 could not read the bridge null value.');
@@ -413,6 +413,19 @@ const candidateReadAndWrite = async (page, fixture) =>
       ]);
       await core.setItem('v3-bytes', new Uint16Array([1, 256, 65535]));
       await core.close();
+
+      const portable = new api.LocalSpace({
+        name: phaseFixture.databaseName,
+        storeName: phaseFixture.portableStoreName,
+        driver: api.localStorageDriver._driver,
+        pluginErrorPolicy: 'strict',
+      });
+      await portable.ready();
+      await portable.setItem('v3-nested-bytes', {
+        source: '3.0-candidate',
+        bytes: new Uint8Array([3, 1, 4]),
+      });
+      await portable.close();
 
       const defaultNamespace = new api.LocalSpace({
         driver: api.indexedDBDriver._driver,
@@ -461,16 +474,25 @@ const candidateReadAndWrite = async (page, fixture) =>
         source: '3.0-candidate',
         message: 'candidate-plugin-value',
         compressible: 'candidate-compressible-'.repeat(256),
+        nestedBytes: new Uint8Array([2, 7, 1, 8]),
       };
       await plugins.setItem('v3-plugin', candidatePluginValue);
+      const candidatePluginRead = await plugins.getItem('v3-plugin');
       same(
-        await plugins.getItem('v3-plugin'),
+        candidatePluginRead,
         candidatePluginValue,
         '3.0 could not read its plugin write.'
       );
+      if (
+        Object.prototype.toString.call(candidatePluginRead?.nestedBytes) !==
+          '[object Uint8Array]' ||
+        [...candidatePluginRead.nestedBytes].join(',') !== '2,7,1,8'
+      ) {
+        fail('3.0 plugin pipeline did not preserve nested binary.');
+      }
       await plugins.close();
 
-      const unknownRecord = {
+      const abandonedRecordShape = {
         __localspace__: {
           namespace: 'localspace.record',
           version: 999,
@@ -491,7 +513,7 @@ const candidateReadAndWrite = async (page, fixture) =>
           );
           transaction
             .objectStore(phaseFixture.coreStoreName)
-            .put(unknownRecord, 'unknown-version');
+            .put(abandonedRecordShape, 'abandoned-record-shape');
           transaction.oncomplete = () => {
             database.close();
             resolve();
@@ -506,9 +528,10 @@ const candidateReadAndWrite = async (page, fixture) =>
         legacyDefaultNamespaceRead: 1,
         legacyPluginRead: 1,
         candidateCoreWritten: 4,
+        candidatePortableWritten: 1,
         candidateDefaultNamespaceWritten: 1,
         candidatePluginWritten: 1,
-        unknownVersionInjected: true,
+        abandonedRecordShapeInjected: true,
       };
     },
     { fixture }
@@ -551,7 +574,7 @@ const bridgeReadCandidate = async (page, fixture) =>
             const request = database
               .transaction(phaseFixture.coreStoreName, 'readonly')
               .objectStore(phaseFixture.coreStoreName)
-              .get('unknown-version');
+              .get('abandoned-record-shape');
             request.onsuccess = () => {
               const value = request.result;
               database.close();
@@ -574,7 +597,7 @@ const bridgeReadCandidate = async (page, fixture) =>
           source: '3.0-candidate',
           nested: [null, false, 84, 'candidate'],
         },
-        'Bridge could not read the 3.0 core record.'
+        'Bridge could not read the raw 3.0 core value.'
       );
       same(
         await core.getItem('v3-marker'),
@@ -591,7 +614,7 @@ const bridgeReadCandidate = async (page, fixture) =>
         'Bridge did not preserve the nested marker-shaped application value.'
       );
       if ((await core.getItem('v3-null')) !== null) {
-        fail('Bridge could not read the 3.0 null record.');
+        fail('Bridge could not read the 3.0 null value.');
       }
       const candidateBytes = await core.getItem('v3-bytes');
       if (
@@ -599,32 +622,40 @@ const bridgeReadCandidate = async (page, fixture) =>
           '[object Uint16Array]' ||
         [...candidateBytes].join(',') !== '1,256,65535'
       ) {
-        fail('Bridge could not read the 3.0 typed-array record.');
+        fail('Bridge could not read the 3.0 typed-array value.');
       }
 
       const rawBefore = await readRaw();
-      let unknownError;
-      try {
-        await core.getItem('unknown-version');
-      } catch (error) {
-        unknownError = {
-          code: error?.code,
-          recordVersion: error?.details?.recordVersion,
-        };
-      }
-      if (
-        unknownError?.code !== 'DESERIALIZATION_FAILED' ||
-        unknownError.recordVersion !== 999
-      ) {
-        fail('Bridge did not reject the unknown core record version.');
-      }
+      same(
+        await core.getItem('abandoned-record-shape'),
+        rawBefore,
+        'Bridge reinterpreted the abandoned core-record namespace.'
+      );
       const rawAfter = await readRaw();
       same(
         rawAfter,
         rawBefore,
-        'Bridge mutated the unknown-version record after a failed read.'
+        'Bridge mutated the abandoned record-shaped application value.'
       );
       await core.close();
+
+      const portable = new api.LocalSpace({
+        name: phaseFixture.databaseName,
+        storeName: phaseFixture.portableStoreName,
+        driver: api.localStorageDriver._driver,
+        pluginErrorPolicy: 'strict',
+      });
+      await portable.ready();
+      const portableValue = await portable.getItem('v3-nested-bytes');
+      if (
+        portableValue?.source !== '3.0-candidate' ||
+        Object.prototype.toString.call(portableValue?.bytes) !==
+          '[object Uint8Array]' ||
+        [...portableValue.bytes].join(',') !== '3,1,4'
+      ) {
+        fail('Bridge could not read the 3.0 selective portable codec.');
+      }
+      await portable.close();
 
       const defaultNamespace = new api.LocalSpace({
         driver: api.indexedDBDriver._driver,
@@ -659,20 +690,31 @@ const bridgeReadCandidate = async (page, fixture) =>
         source: '3.0-candidate',
         message: 'candidate-plugin-value',
         compressible: 'candidate-compressible-'.repeat(256),
+        nestedBytes: new Uint8Array([2, 7, 1, 8]),
       };
+      const candidatePluginRead = await plugins.getItem('v3-plugin');
       same(
-        await plugins.getItem('v3-plugin'),
+        candidatePluginRead,
         expectedCandidatePlugin,
-        'Bridge could not read the 3.0 StoredRecord through frozen plugin envelopes.'
+        'Bridge could not read the raw 3.0 value through frozen plugin envelopes.'
       );
+      if (
+        Object.prototype.toString.call(candidatePluginRead?.nestedBytes) !==
+          '[object Uint8Array]' ||
+        [...candidatePluginRead.nestedBytes].join(',') !== '2,7,1,8'
+      ) {
+        fail(
+          'Bridge did not decode nested binary through the 3.0 plugin pipeline.'
+        );
+      }
       await plugins.close();
 
       return {
         candidateCoreRead: 4,
+        candidatePortableRead: 1,
         candidateDefaultNamespaceRead: 1,
         candidatePluginRead: 1,
-        unknownVersionRejected: true,
-        unknownVersionPreserved: true,
+        abandonedRecordShapePreserved: true,
       };
     },
     { fixture }

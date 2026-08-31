@@ -64,14 +64,16 @@ contain:
 - `null`, booleans, finite numbers, and strings;
 - `ArrayBuffer` and the standard integer/float typed arrays;
 - dense arrays of supported values;
-- plain objects, including null-prototype objects, whose enumerable data
-  properties contain supported values.
+- ordinary plain objects whose enumerable own data properties contain supported
+  values.
 
 This contract round-trips consistently across IndexedDB, localStorage, memory,
 and React Native AsyncStorage. Values such as `undefined`, `Date`, `Map`, `Set`,
-`RegExp`, `bigint`, `Blob`, `DataView`, `SharedArrayBuffer`, class instances,
-accessors, sparse arrays, symbol properties, cycles, and non-finite numbers are
-rejected with `SERIALIZATION_FAILED`.
+`RegExp`, `bigint`, `Blob`, `DataView`, `SharedArrayBuffer`, null-prototype or
+class instances, accessors, sparse arrays, symbol properties, cycles, and
+non-finite numbers are rejected with `SERIALIZATION_FAILED`. The exact top-level
+`localspace.plugin` envelope namespace is also reserved for built-in storage
+transforms.
 
 Convert richer application values at the boundary:
 
@@ -81,9 +83,11 @@ await cache.setItem('labels', [...new Set(['urgent', 'review'])]);
 await cache.setItem('counters', Object.fromEntries(new Map([['open', 3]])));
 ```
 
-LocalSpace stores accepted values inside a collision-safe, versioned core
-record. Objects that happen to contain a `__localspace__` property remain
-ordinary application data.
+Ordinary JSON-compatible and native binary values are stored without a
+universal wrapper. A compact versioned codec is used only when a string-backed
+driver or byte transform must preserve binary nested inside an array or object.
+Objects that merely contain a `__localspace__` property remain ordinary
+application data unless they claim the exact reserved plugin namespace.
 
 ## Stable facade and configuration
 

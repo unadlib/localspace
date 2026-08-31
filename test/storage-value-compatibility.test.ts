@@ -9,8 +9,10 @@ import localspace, {
   type LocalSpacePlugin,
   type StorageValue,
 } from '../src';
-import { inspectStorageValue } from '../src/core/storage-value';
-import { canonicalizeStorageValue } from '../src/core/stored-record';
+import {
+  inspectStorageValue,
+  normalizeStorageValue,
+} from '../src/core/storage-value';
 import {
   createStorageValueContractFixture,
   expectStorageValueContract,
@@ -37,9 +39,7 @@ async function createMemoryInstance(
 }
 
 describe('3.0 StorageValue contract', () => {
-  it('exports, canonicalizes, and copies the supported recursive value type', async () => {
-    const nullPrototype = Object.create(null) as Record<string, StorageValue>;
-    nullPrototype.enabled = true;
+  it('exports, normalizes, and copies the supported recursive value type', async () => {
     const binary = new Uint16Array([1, 2]);
     const unordered = { z: 1, a: 2 };
     const values: StorageValue[] = [
@@ -49,7 +49,6 @@ describe('3.0 StorageValue contract', () => {
       -0,
       'value',
       [1, { nested: 'value' }],
-      nullPrototype,
       new ArrayBuffer(4),
       binary,
       unordered,
@@ -70,15 +69,13 @@ describe('3.0 StorageValue contract', () => {
     await expect(instance.getItem<number>('3')).resolves.toSatisfy(
       (value) => value === 0 && !Object.is(value, -0)
     );
-    const storedBinary = await instance.getItem<Uint16Array>('8');
+    const storedBinary = await instance.getItem<Uint16Array>('7');
     expect(storedBinary?.constructor.name).toBe('Uint16Array');
     expect(Array.from(storedBinary ?? [])).toEqual([1, 2]);
-    const storedObject = await instance.getItem<Record<string, number>>('9');
-    expect(storedObject).toEqual({ a: 2, z: 1 });
-    expect(Object.keys(storedObject ?? {})).toEqual(['a', 'z']);
-    expect(
-      Object.getPrototypeOf(canonicalizeStorageValue(nullPrototype))
-    ).toBeNull();
+    const storedObject = await instance.getItem<Record<string, number>>('8');
+    expect(storedObject).toEqual({ z: 1, a: 2 });
+    expect(Object.keys(storedObject ?? {})).toEqual(['z', 'a']);
+    expect(normalizeStorageValue({ z: 1, a: 2 })).toEqual({ z: 1, a: 2 });
   });
 
   it.each(['MEMORY', 'INDEXEDDB', 'LOCALSTORAGE'] as const)(
@@ -404,6 +401,11 @@ describe('3.0 StorageValue contract', () => {
     [
       'class instance',
       new (class Value {})(),
+      'only plain objects are supported',
+    ],
+    [
+      'null-prototype object',
+      Object.create(null),
       'only plain objects are supported',
     ],
   ])('identifies %s deterministically', (_name, value, reason) => {

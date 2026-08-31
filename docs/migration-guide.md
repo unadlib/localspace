@@ -128,7 +128,7 @@ The 3.0 `StorageValue` contract consists of:
 - `null`, booleans, finite numbers, and strings;
 - `ArrayBuffer` and standard integer/float typed arrays;
 - dense arrays of supported values;
-- plain or null-prototype objects with enumerable own data properties containing
+- ordinary plain objects with enumerable own data properties containing
   supported values.
 
 Everything else must be encoded by the application. Validation occurs before
@@ -169,8 +169,10 @@ await store.setItem('account', {
 ```
 
 Also remove cycles, accessors, symbol/non-enumerable properties, sparse arrays,
-`Blob`, `DataView`, `SharedArrayBuffer`, shared-memory views, `NaN`, and
-infinities. Detached `ArrayBuffer` values and typed-array views are invalid.
+null-prototype objects, `Blob`, `DataView`, `SharedArrayBuffer`, shared-memory
+views, `NaN`, and infinities. Detached `ArrayBuffer` values and typed-array
+views are invalid. The exact top-level `localspace.plugin` envelope namespace
+is reserved for built-in transforms and cannot be written as application data.
 
 TypeScript read/write generics now extend `StorageValue`. Prefer stored DTO type
 aliases that structurally satisfy the record contract:
@@ -197,25 +199,18 @@ lost during fallback). Use the 2.1 bridge to enumerate representative data,
 convert it to explicit plain DTOs, and write those DTOs before depending on the
 3.0 contract. Reading an old value does not automatically rewrite it.
 
-One collision boundary cannot be automated: 2.x stored application values
-without an outer record. If such a raw value is already exactly identical to
-the complete reserved StoredRecord v1 grammar (`localspace.record`, version 1,
-exact header/payload shape and codec), a forward reader cannot distinguish it
-from a real 3.0 record. Ordinary objects that merely contain `__localspace__`,
-or use another namespace/shape, remain safe. Audit or raw-migrate this rare
-exact-shape value before deploying the bridge reader. Every value written by
-3.0—including that exact application shape—is collision-safe because 3.0 wraps
-it once and decodes exactly one layer.
-
-The same audit applies to raw pre-3.0 application values that exactly match a
+3.0 does not reserve or interpret the abandoned `localspace.record` namespace;
+those objects remain ordinary application data. One older collision boundary
+still cannot be automated: raw pre-3.0 application values that exactly match a
 complete built-in plugin envelope or a legacy marker payload
 (`__ls_ttl`/`__ls_compressed`/`__ls_encrypted` plus that format's full field
 set). A 3.0 reader cannot distinguish such an unwrapped historical value from
 plugin metadata. Partial lookalikes remain application data; recognized but
 malformed or extended metadata fails closed rather than being guessed. Migrate
 any exact collision through raw driver access before enabling the matching
-built-in plugin. New 3.0 application values are protected by the outer core
-StoredRecord.
+built-in plugin. New application and logical-plugin writes that claim the exact
+top-level `localspace.plugin` namespace are rejected so they cannot create new
+ambiguity.
 
 ## Migrate transactions
 
@@ -528,16 +523,19 @@ Source rollback and data rollback are different:
   3.0 reads legacy core values and legacy 2.x TTL, compression, and encryption
   payloads. 3.0 writes:
 
-- collision-safe core StoredRecord v1 (`localspace.record`, version 1);
-- frozen built-in plugin envelope v1 (`localspace.plugin`, version 1);
-- only payload shapes accepted by the bridge validators.
+- ordinary JSON-compatible and native binary values without a universal core
+  wrapper;
+- selective `__lsv__:1:` values only when nested binary crosses a string/byte
+  serialization boundary;
+- frozen built-in plugin envelope v1 (`localspace.plugin`, version 1), using
+  only payload shapes accepted by the bridge validators.
 
-The published `localspace@2.1.0` understands plugin envelope v1 but does **not**
-contain the final core StoredRecord v1 forward reader. It is therefore not a
-safe data rollback target after any 3.0 write. Use only the exact final 2.1.x
-bridge version identified and package-isolated in the 3.0 release evidence. If
-that bridge has not been published and verified, treat downgrade after 3.0
-writes as unsupported.
+The published `localspace@2.1.0` understands plugin envelope v1 and ordinary raw
+values but does **not** contain the selective nested-binary forward reader. It
+is therefore not a safe general data rollback target after 3.0 writes. Use only
+the exact final 2.1.x bridge version identified and package-isolated in the 3.0
+release evidence. If that bridge has not been published and verified, treat
+downgrade after 3.0 writes as unsupported.
 
 Plugin rollback also requires the same application-owned inputs on both sides:
 encryption key/derivation and any non-default AES-GCM parameters, plus the same

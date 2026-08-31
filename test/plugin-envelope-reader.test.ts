@@ -14,7 +14,6 @@ import {
   type PluginEnvelopeKind,
   type PluginEnvelopeV1,
 } from '../src/core/plugin-envelope';
-import { readStoredRecord } from '../src/core/stored-record';
 import { getRawMemoryValue, setRawMemoryValue } from './utils/raw-memory';
 
 const uniqueName = (prefix: string) =>
@@ -129,12 +128,14 @@ describe('versioned plugin envelope reader', () => {
       })
     );
 
-    const extraHeader = envelope('ttl', { data: 'value', expiresAt: 123 }) as
-      PluginEnvelopeV1<unknown> & {
-        __localspace__: PluginEnvelopeV1<unknown>['__localspace__'] & {
-          applicationField: boolean;
-        };
+    const extraHeader = envelope('ttl', {
+      data: 'value',
+      expiresAt: 123,
+    }) as PluginEnvelopeV1<unknown> & {
+      __localspace__: PluginEnvelopeV1<unknown>['__localspace__'] & {
+        applicationField: boolean;
       };
+    };
     extraHeader.__localspace__.applicationField = true;
     expect(() => readPluginEnvelope(extraHeader, 'ttl')).toThrowError(
       expect.objectContaining({ code: 'DESERIALIZATION_FAILED' })
@@ -221,22 +222,21 @@ describe('versioned plugin envelope reader', () => {
         applicationField: true,
       },
     ],
-  ])('rejects an extended %s payload without mutating it', async (
-    label,
-    plugin,
-    malformed
-  ) => {
-    const { store, raw } = await createStorePair(
-      `extended-${String(label).replaceAll(' ', '-')}`,
-      plugin
-    );
-    await raw.setItem('malformed', malformed);
+  ])(
+    'rejects an extended %s payload without mutating it',
+    async (label, plugin, malformed) => {
+      const { store, raw } = await createStorePair(
+        `extended-${String(label).replaceAll(' ', '-')}`,
+        plugin
+      );
+      await raw.setItem('malformed', malformed);
 
-    await expect(store.getItem('malformed')).rejects.toMatchObject({
-      code: 'DESERIALIZATION_FAILED',
-    });
-    await expect(raw.getItem('malformed')).resolves.toEqual(malformed);
-  });
+      await expect(store.getItem('malformed')).rejects.toMatchObject({
+        code: 'DESERIALIZATION_FAILED',
+      });
+      await expect(raw.getItem('malformed')).resolves.toEqual(malformed);
+    }
+  );
 
   it('does not invoke accessors while validating a recognized payload', async () => {
     const expiresAtGetter = vi.fn(() => Date.now() + 60_000);
@@ -275,10 +275,7 @@ describe('versioned plugin envelope reader', () => {
         version: 1,
       },
     });
-    expect(readStoredRecord(physical?.payload.data)).toEqual({
-      matched: true,
-      value: { source: '3.0' },
-    });
+    expect(physical?.payload.data).toEqual({ source: '3.0' });
 
     await raw.setItem('legacy', {
       __ls_ttl: true,
@@ -297,10 +294,7 @@ describe('versioned plugin envelope reader', () => {
 
     await store.setItem('infinite', 'value');
     await expect(store.getItem('infinite')).resolves.toBe('value');
-    expect(readStoredRecord(await raw.getItem('infinite'))).toEqual({
-      matched: true,
-      value: 'value',
-    });
+    await expect(raw.getItem('infinite')).resolves.toBe('value');
 
     await expect(
       plugin.afterGet!(

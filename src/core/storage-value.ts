@@ -1,11 +1,16 @@
 import { createLocalSpaceError } from '../errors.js';
-import type { StorageValue } from '../types.js';
+import type { StorageBinary, StorageValue } from '../types.js';
 import {
+  copyBufferSourceBytes,
   getArrayBufferViewInfo,
   getStorageBinaryTag,
   isBlobValue,
   isSharedArrayBufferValue,
 } from '../utils/binary-brand.js';
+import {
+  PLUGIN_ENVELOPE_NAMESPACE,
+  PLUGIN_ENVELOPE_PROPERTY,
+} from './plugin-envelope.js';
 
 const hasOwn = Object.prototype.hasOwnProperty;
 const functionToString = Function.prototype.toString;
@@ -29,6 +34,7 @@ type StorageValueWriteContext = {
   key?: string;
   valueSource?: 'application' | 'plugin-output';
   plugin?: string;
+  allowReservedPluginEnvelope?: boolean;
 };
 
 const propertyPath = (parent: string, key: string): string =>
@@ -79,9 +85,27 @@ const issue = (
   valueType: describeType(value),
 });
 
+const hasReservedPluginEnvelopeHeader = (value: unknown): boolean => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const header = Object.getOwnPropertyDescriptor(
+    value,
+    PLUGIN_ENVELOPE_PROPERTY
+  );
+  if (!header || !('value' in header) || !header.value) return false;
+  if (typeof header.value !== 'object' || Array.isArray(header.value)) {
+    return false;
+  }
+  const namespace = Object.getOwnPropertyDescriptor(header.value, 'namespace');
+  return (
+    !!namespace &&
+    'value' in namespace &&
+    namespace.value === PLUGIN_ENVELOPE_NAMESPACE
+  );
+};
+
 const hasPlainObjectPrototype = (value: object): boolean => {
   const prototype = Object.getPrototypeOf(value);
-  if (prototype === null) return true;
+  if (prototype === null) return false;
   const constructorDescriptor = Object.getOwnPropertyDescriptor(
     prototype,
     'constructor'
@@ -248,7 +272,16 @@ export const validateStorageValueWrite: (
   value: unknown,
   context: StorageValueWriteContext
 ) => asserts value is StorageValue = (value, context) => {
-  const valueIssue = inspectStorageValue(value);
+  const valueIssue =
+    inspectStorageValue(value) ??
+    (!context.allowReservedPluginEnvelope &&
+    hasReservedPluginEnvelopeHeader(value)
+      ? issue(
+          '$',
+          'top-level localspace.plugin envelopes are reserved for internal storage transforms',
+          value
+        )
+      : null);
   if (!valueIssue) return;
 
   const details = {
@@ -263,4 +296,100 @@ export const validateStorageValueWrite: (
   const message = `Value at ${valueIssue.path} is outside the LocalSpace 3.0 StorageValue contract: ${valueIssue.reason}.`;
 
   throw createLocalSpaceError('SERIALIZATION_FAILED', message, details);
+};
+
+const cloneStorageBinary = (value: StorageBinary): StorageBinary => {
+  const tag = getStorageBinaryTag(value);
+  const bytes = copyBufferSourceBytes(value);
+  if (!tag || !bytes) {
+    throw createLocalSpaceError(
+      'SERIALIZATION_FAILED',
+      'Failed to copy LocalSpace binary value.'
+    );
+  }
+
+  const buffer = bytes.buffer as ArrayBuffer;
+  switch (tag) {
+    case '[object ArrayBuffer]':
+      return buffer;
+    case '[object Int8Array]':
+      return new Int8Array(buffer);
+    case '[object Uint8Array]':
+      return new Uint8Array(buffer);
+    case '[object Uint8ClampedArray]':
+      return new Uint8ClampedArray(buffer);
+    case '[object Int16Array]':
+      return new Int16Array(buffer);
+    case '[object Uint16Array]':
+      return new Uint16Array(buffer);
+    case '[object Int32Array]':
+      return new Int32Array(buffer);
+    case '[object Uint32Array]':
+      return new Uint32Array(buffer);
+    case '[object Float32Array]':
+      return new Float32Array(buffer);
+    case '[object Float64Array]':
+      return new Float64Array(buffer);
+    case '[object BigInt64Array]':
+      if (typeof BigInt64Array === 'undefined') break;
+      return new BigInt64Array(buffer);
+    case '[object BigUint64Array]':
+      if (typeof BigUint64Array === 'undefined') break;
+      return new BigUint64Array(buffer);
+  }
+
+  throw createLocalSpaceError(
+    'SERIALIZATION_FAILED',
+    `Cannot copy ${tag.slice(8, -1)} in this runtime.`
+  );
+};
+
+const normalizeValidatedStorageValue = (value: StorageValue): StorageValue => {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return Object.is(value, -0) ? 0 : value;
+  }
+
+  if (getStorageBinaryTag(value)) {
+    return cloneStorageBinary(value as StorageBinary);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeValidatedStorageValue(item));
+  }
+
+  const result: Record<string, StorageValue> = {};
+  for (const key of Object.keys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    Object.defineProperty(result, key, {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: normalizeValidatedStorageValue(descriptor.value as StorageValue),
+    });
+  }
+  return result;
+};
+
+/** Validate, detach, and normalize a logical value without changing its shape. */
+export const normalizeStorageValue = (value: StorageValue): StorageValue => {
+  const valueIssue = inspectStorageValue(value);
+  if (valueIssue) {
+    throw createLocalSpaceError(
+      'SERIALIZATION_FAILED',
+      `Cannot normalize LocalSpace StorageValue: value at ${valueIssue.path} ${valueIssue.reason}.`,
+      {
+        valuePath: valueIssue.path,
+        valueType: valueIssue.valueType,
+        valueReason: valueIssue.reason,
+      }
+    );
+  }
+  return normalizeValidatedStorageValue(value);
 };
