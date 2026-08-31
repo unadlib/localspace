@@ -30,27 +30,32 @@ themselves.
 
 ### Breaking-change summary
 
-| 2.1.x API or behavior                                                  | 3.0 migration                                                                          |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `config(options)` setter                                               | pass all options to `new LocalSpace()` or `createInstance()`                           |
-| mutable objects returned from `config()`                               | treat the detached, deeply frozen snapshot as readonly                                 |
-| `instance.defineDriver()`                                              | use construction-scoped `drivers` or exported realm-wide `registerDriver()`            |
-| `destroy()`                                                            | use `close()` for disposal, `clear()`/`dropInstance()` for deletion                    |
-| broad arbitrary value generics                                         | store only `StorageValue`; convert rich values explicitly                              |
-| optional `strictValues`                                                | remove it; validation is always enabled                                                |
-| optional `strictTransactions`                                          | remove it; transaction-scope enforcement is always enabled                             |
-| ordinary facade calls inside a transaction runner                      | use only `tx.get/set/remove/keys/iterate/clear`                                        |
-| memory snapshot rollback without isolation                             | rely on the new serialized realm/namespace contract, or remove transaction assumptions |
-| localStorage/RN transaction stubs                                      | check `capabilities().transactions`; unsupported calls reject early                    |
-| `prewarmTransactions`, `connectionIdleMs`, `maxConcurrentTransactions` | remove them; supplying them is `INVALID_CONFIG`                                        |
-| matching single and batch hooks both executing                         | remove `isBatch` dedup guards; 3.0 chooses the batch hook or maps the single hook      |
-| plugins not covering query/iteration/clear/drop                        | adopt dedicated observers and logical views                                            |
-| synchronous-only/always-`U` iterate assumptions                        | callbacks may be async; result is either `U` or `undefined`                            |
-| RN adapter auto-detection                                              | import `localspace/react-native` and inject AsyncStorage explicitly                    |
-| Storage Bucket fallback to default backend                             | handle readiness failure; a requested bucket never falls back                          |
-| AES-CBC/AES-CTR normal encryption config                               | use the read-only legacy migration plugin, then write AES-GCM data elsewhere           |
-| package source/deep imports                                            | import only `localspace`, `localspace/react-native`, or `localspace/package.json`      |
-| prefixed IndexedDB/WebSQL assumptions                                  | require modern unprefixed IndexedDB; migrate WebSQL data first                         |
+| 2.1.x API or behavior                                                  | 3.0 migration                                                                           |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `config(options)` setter                                               | pass all options to `new LocalSpace()` or `createInstance()`                            |
+| mutable objects returned from `config()`                               | treat the detached, deeply frozen snapshot as readonly                                  |
+| `instance.defineDriver()`                                              | use construction-scoped `drivers` or exported realm-wide `registerDriver()`             |
+| `destroy()`                                                            | use `close()` for disposal, `clear()`/`dropInstance()` for deletion                     |
+| broad arbitrary value generics                                         | store only `StorageValue`; convert rich values explicitly                               |
+| optional `strictValues`                                                | remove it; validation is always enabled                                                 |
+| optional `strictTransactions`                                          | remove it; transaction-scope enforcement is always enabled                              |
+| ordinary facade calls inside a transaction runner                      | use only `tx.get/set/remove/keys/iterate/clear`                                         |
+| memory snapshot rollback without isolation                             | rely on the new serialized realm/namespace contract, or remove transaction assumptions  |
+| localStorage/RN transaction stubs                                      | check `capabilities().transactions`; unsupported calls reject early                     |
+| `prewarmTransactions`, `connectionIdleMs`, `maxConcurrentTransactions` | remove them; supplying them is `INVALID_CONFIG`                                         |
+| matching single and batch hooks both executing                         | remove `isBatch` dedup guards; 3.0 chooses the batch hook or maps the single hook       |
+| plugins not covering query/iteration/clear/drop                        | adopt dedicated observers and logical views                                             |
+| text/string custom compression codecs                                  | rewrite both codec methods as `Uint8Array`-to-`Uint8Array` functions                    |
+| both encryption `key` and `keyDerivation`                              | choose exactly one key source                                                           |
+| caller-owned `algorithm.iv`                                            | remove it; use `ivLength`/`ivGenerator` only when overriding writer-owned IV generation |
+| synchronous-only/always-`U` iterate assumptions                        | callbacks may be async; result is either `U` or `undefined`                             |
+| RN adapter auto-detection                                              | import `localspace/react-native` and inject AsyncStorage explicitly                     |
+| `installReactNativeAsyncStorageDriver(instance)`                       | prefer `createReactNativeInstance`; the realm-global installer now takes no argument    |
+| Storage Bucket fallback to default backend                             | handle readiness failure; a requested bucket never falls back                           |
+| AES-CBC/AES-CTR normal encryption config                               | use the read-only legacy migration plugin, then write AES-GCM data elsewhere            |
+| synthetic `PluginStage: 'error'` or exhaustive 2.1 operation switches  | use the actual hook stage and handle all new operation kinds                            |
+| package source/deep imports                                            | import only `localspace`, `localspace/react-native`, or `localspace/package.json`       |
+| prefixed IndexedDB/WebSQL assumptions                                  | require modern unprefixed IndexedDB; migrate WebSQL data first                          |
 
 ## Migrate configuration
 
@@ -377,6 +382,12 @@ const store = localspace.createInstance({
 });
 ```
 
+Supply exactly one of `key` and `keyDerivation`. Remove any caller-owned
+`algorithm.iv`: the 3.0 writer creates a fresh IV for every write. The
+`algorithm` object configures only the remaining AES-GCM parameters;
+`ivLength`, `ivGenerator`, and `randomSource` are the explicit controlled-
+runtime extension points.
+
 For AES-CBC or AES-CTR data, open the old namespace with
 `legacyEncryptionMigrationPlugin`, read each value, and write it into a
 separate AES-GCM instance. The migration reader rejects every write and cannot
@@ -411,9 +422,10 @@ optimizations. A missing adapter produces `DRIVER_UNAVAILABLE`; malformed or
 missing required methods produce `INVALID_CONFIG`. Selecting the RN driver
 never falls through to a web/memory driver after adapter failure.
 
-`installReactNativeAsyncStorageDriver()` remains for deliberate realm-wide
-registration and takes no arguments. Every selected instance must still supply
-the adapter.
+The 2.1 call `installReactNativeAsyncStorageDriver(instance)` becomes the
+no-argument `installReactNativeAsyncStorageDriver()` only for deliberate
+realm-wide registration. Prefer `createReactNativeInstance()` for
+instance-scoped setup. Every selected instance must still supply the adapter.
 
 ## Migrate Storage Buckets
 
