@@ -35,7 +35,10 @@ themselves.
 | `config(options)` setter                                               | pass all options to `new LocalSpace()` or `createInstance()`                            |
 | mutable objects returned from `config()`                               | treat the detached, deeply frozen snapshot as readonly                                  |
 | `instance.defineDriver()`                                              | use construction-scoped `drivers` or exported realm-wide `registerDriver()`             |
+| treating `getDriver()` output or custom-driver inputs as mutable state | treat definitions as readonly; keep mutable state on the selected driver session        |
+| underscored `LocalSpaceInstance` implementation fields                 | stop accessing them; use the supported facade, config, capability, and driver APIs      |
 | `destroy()`                                                            | use `close()` for disposal, `clear()`/`dropInstance()` for deletion                     |
+| `size` configuration                                                   | remove it; built-in drivers never used it as quota enforcement                          |
 | broad arbitrary value generics                                         | store only `StorageValue`; convert rich values explicitly                               |
 | optional `strictValues`                                                | remove it; validation is always enabled                                                 |
 | optional `strictTransactions`                                          | remove it; transaction-scope enforcement is always enabled                              |
@@ -50,12 +53,20 @@ themselves.
 | caller-owned `algorithm.iv`                                            | remove it; use `ivLength`/`ivGenerator` only when overriding writer-owned IV generation |
 | synchronous-only/always-`U` iterate assumptions                        | callbacks may be async; result is either `U` or `undefined`                             |
 | RN adapter auto-detection                                              | import `localspace/react-native` and inject AsyncStorage explicitly                     |
+| explicit RN adapter without `getAllKeys`                               | add `getAllKeys`; selection validates the complete query/namespace capability           |
 | `installReactNativeAsyncStorageDriver(instance)`                       | prefer `createReactNativeInstance`; the realm-global installer now takes no argument    |
 | Storage Bucket fallback to default backend                             | handle readiness failure; a requested bucket never falls back                           |
 | AES-CBC/AES-CTR normal encryption config                               | use the read-only legacy migration plugin, then write AES-GCM data elsewhere            |
 | synthetic `PluginStage: 'error'` or exhaustive 2.1 operation switches  | use the actual hook stage and handle all new operation kinds                            |
 | package source/deep imports                                            | import only `localspace`, `localspace/react-native`, or `localspace/package.json`       |
 | prefixed IndexedDB/WebSQL assumptions                                  | require modern unprefixed IndexedDB; migrate WebSQL data first                          |
+
+The removed 2.1 declaration members are `_initReady`, `_ready`, `_dbInfo`,
+`_driver`, `_driverSet`, `_initDriver`, `_config`, `_defaultConfig`,
+`_initStorage`, `_extend`, `_getSupportedDrivers`, and
+`_wrapLibraryMethodsWithReady`. They were implementation state, not a stable
+extension API. Custom drivers keep mutable state on their selected session
+receiver and declare capabilities instead of patching the public instance.
 
 ## Migrate configuration
 
