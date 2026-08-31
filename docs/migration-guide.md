@@ -61,6 +61,7 @@ setDeprecationWarnings(false);
 | Assuming `iterate()` always returns `U`                                   | Handle `undefined` when no callback invocation terminates iteration early                 |
 | Matching batch and single hooks in one custom plugin                      | Define one hook form per phase; retain the 2.x `isBatch` guard until migrated             |
 | React Native adapter auto-detection                                       | Import `localspace/react-native` and inject `reactNativeAsyncStorage` explicitly          |
+| Explicit React Native adapter without `getAllKeys`                        | Add `getAllKeys`; 3.0 validates the complete query/namespace capability during selection  |
 | Package deep imports                                                      | Import only `localspace` or `localspace/react-native`                                     |
 
 Package deep imports have no executable compatibility entry on which a runtime

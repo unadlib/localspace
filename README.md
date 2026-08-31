@@ -196,6 +196,12 @@ const mobileStore = await createReactNativeInstance(localspace, {
 
 The default `localspace` entry does not bundle the React Native driver; it is included only when importing `localspace/react-native`. Explicit `reactNativeAsyncStorage` injection is recommended.
 
+**3.0 migration preview:** injected adapters will be required to implement
+`getAllKeys` in addition to `getItem`, `setItem`, and `removeItem`, because the
+public `keys`, `key`, `length`, `clear`, and `dropInstance` operations all need
+namespace enumeration. Add it before upgrading; 2.1 retains its current
+runtime behavior.
+
 Advanced usage is still available:
 
 ```ts
