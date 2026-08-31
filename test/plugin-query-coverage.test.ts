@@ -70,8 +70,9 @@ describe('logical query and iteration plugin coverage', () => {
     const summaries: PluginIterateSummary[] = [];
     const observer: LocalSpacePlugin = {
       name: 'iterate-observer',
-      afterIterate: (summary) => {
+      afterIterate: (summary, context) => {
         expect(Object.isFrozen(summary)).toBe(true);
+        expect(Reflect.ownKeys(context.operationState)).toEqual([]);
         summaries.push(summary);
       },
     };

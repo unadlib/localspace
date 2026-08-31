@@ -12,6 +12,29 @@ const createStore = (plugins: LocalSpacePlugin[]) => {
 };
 
 describe('single-pass plugin pipeline', () => {
+  it('keeps operationState plugin-owned apart from documented batch metadata', async () => {
+    const singleStateKeys: PropertyKey[][] = [];
+    const batchStateKeys: PropertyKey[][] = [];
+    const store = await createStore([
+      {
+        name: 'state-observer',
+        afterSet: (_key, _value, context) => {
+          singleStateKeys.push(Reflect.ownKeys(context.operationState));
+        },
+        afterSetItems: (entries, context) => {
+          batchStateKeys.push(Reflect.ownKeys(context.operationState).sort());
+          return entries;
+        },
+      },
+    ]);
+
+    await store.setItem('single', 'value');
+    await store.setItems([{ key: 'batch', value: 'value' }]);
+
+    expect(singleStateKeys).toEqual([[]]);
+    expect(batchStateKeys).toEqual([['batchSize', 'isBatch']]);
+  });
+
   it('uses a batch set hook instead of the matching single hook at its priority', async () => {
     const events: string[] = [];
     const middleSingleBefore = vi.fn(<T>(_key: string, value: T) => value);

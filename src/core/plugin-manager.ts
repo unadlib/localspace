@@ -586,7 +586,6 @@ export class PluginManager {
     ): PreparedSetItem<T> => {
       const entryContext = this.createContext('setItem');
       entryContext.operationState.isBatch = true;
-      entryContext.operationState.originalValue = logicalValue;
       return { key, value, logicalValue, context: entryContext };
     };
     let current = normalizeBatchEntries(entries).map(({ key, value }) =>
@@ -635,7 +634,6 @@ export class PluginManager {
           previous.key = key;
           previous.value = value;
           previous.logicalValue = logicalValue;
-          previous.context.operationState.originalValue = logicalValue;
           return previous;
         });
         if (options.prepareValueOutput) {
@@ -649,7 +647,6 @@ export class PluginManager {
             item.value = preparedValue;
             if (Object.is(item.logicalValue, pluginValue)) {
               item.logicalValue = preparedValue;
-              item.context.operationState.originalValue = preparedValue;
             }
           }
         }
@@ -709,7 +706,6 @@ export class PluginManager {
         }
         const entryContext = this.createContext('setItem');
         entryContext.operationState.isBatch = true;
-        entryContext.operationState.originalValue = value;
         return {
           key,
           value: value as T,

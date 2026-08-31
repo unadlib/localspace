@@ -1099,7 +1099,6 @@ export class LocalSpace implements LocalSpaceInstance {
         undefined,
         transactionScope
       );
-      context.operationState.originalValue = logicalValue;
       const processedLogicalValue = await this._pluginManager.beforeSet(
         key,
         logicalValue,
@@ -1127,8 +1126,7 @@ export class LocalSpace implements LocalSpaceInstance {
         'storage-transform'
       );
       const storedValue = canonicalizeStorageValue(processedValue);
-      const driverResult = await original(key, storedValue);
-      context.operationState.driverResult = driverResult;
+      await original(key, storedValue);
       await this._pluginManager.afterSet(
         key,
         storedValue,
@@ -1443,17 +1441,23 @@ export class LocalSpace implements LocalSpaceInstance {
       }));
     }
 
+    const readContext = this._pluginManager.createContext(
+      context.operation ?? 'getItems',
+      undefined,
+      context.transactionScope
+    );
+    markPluginInternalOperation(readContext, internalOperation);
     const prepared = this._pluginManager.prepareReadItems(
       storedEntries.map(({ key }) => key),
-      context
+      readContext
     );
     for (const item of prepared.items) {
       markPluginInternalOperation(item.context, internalOperation);
     }
-    const operation = context.operation ?? 'getItems';
+    const operation = readContext.operation ?? 'getItems';
     const storageResult = await this._pluginManager.afterGetItems(
       storedEntries,
-      context,
+      readContext,
       prepared.items,
       'storage-transform',
       operation
@@ -1463,7 +1467,7 @@ export class LocalSpace implements LocalSpaceInstance {
         key,
         value: decodeStoredRecordValue(value),
       })),
-      context,
+      readContext,
       storageResult.items,
       'logical',
       operation
@@ -1478,7 +1482,7 @@ export class LocalSpace implements LocalSpaceInstance {
       ].filter((key): key is string => typeof key === 'string');
       return !candidateKeys.some(
         (key) =>
-          isPluginValueHidden(context, key) ||
+          isPluginValueHidden(readContext, key) ||
           (item ? isPluginValueHidden(item.context, key) : false)
       );
     });
@@ -1585,8 +1589,6 @@ export class LocalSpace implements LocalSpaceInstance {
       }
 
       if (context) {
-        context.operationState.iterations = iterations;
-        context.operationState.stopped = stopped;
         await this._pluginManager.afterIterate(
           { iterations, stopped },
           context
