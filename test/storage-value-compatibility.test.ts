@@ -7,6 +7,10 @@ import localspace, {
 } from '../src';
 import { inspectStorageValue } from '../src/core/storage-value';
 import { canonicalizeStorageValue } from '../src/core/stored-record';
+import {
+  createStorageValueContractFixture,
+  expectStorageValueContract,
+} from './utils/storage-value-contract';
 
 const uniqueName = (prefix: string) =>
   `${prefix}-${Math.random().toString(36).slice(2)}`;
@@ -72,6 +76,33 @@ describe('3.0 StorageValue contract', () => {
       Object.getPrototypeOf(canonicalizeStorageValue(nullPrototype))
     ).toBeNull();
   });
+
+  it.each(['MEMORY', 'INDEXEDDB', 'LOCALSTORAGE'] as const)(
+    'round-trips the complete StorageValue corpus through the %s driver',
+    async (driverKey) => {
+      const instance = localspace.createInstance({
+        name: uniqueName(`round-trip-${driverKey.toLowerCase()}`),
+        storeName: 'store',
+      });
+      await instance.setDriver([instance[driverKey]]);
+      await instance.ready();
+      await instance.clear();
+      const fixture = createStorageValueContractFixture();
+
+      await instance.setItem('contract', fixture.value);
+      expectStorageValueContract(await instance.getItem('contract'), fixture);
+
+      await instance.setItems([
+        { key: 'batch-contract', value: fixture.value },
+        { key: 'batch-zero', value: -0 },
+      ]);
+      const batch = await instance.getItems(['batch-contract', 'batch-zero']);
+      expectStorageValueContract(batch[0].value, fixture);
+      expect(batch[1].value).toBe(0);
+      expect(Object.is(batch[1].value, -0)).toBe(false);
+      await instance.close();
+    }
+  );
 
   it('rejects unsupported values by default before plugin initialization or storage', async () => {
     const onInit = vi.fn();

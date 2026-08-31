@@ -33,6 +33,8 @@
   comparison evidence, and exact package allowlist/size budgets.
 - Added executable global coverage floors to the Node 24 coverage job instead
   of recording a prose-only percentage that drifts as tests change.
+- Added one complete recursive and binary StorageValue round-trip corpus across
+  IndexedDB, localStorage, memory, and React Native AsyncStorage.
 
 ### Changed
 

@@ -7,6 +7,10 @@ import {
   installReactNativeAsyncStorageDriver,
   reactNativeAsyncStorageDriver,
 } from '../src/react-native';
+import {
+  createStorageValueContractFixture,
+  expectStorageValueContract,
+} from './utils/storage-value-contract';
 
 class MemoryAsyncStorage implements ReactNativeAsyncStorage {
   private readonly data = new Map<string, string>();
@@ -161,31 +165,16 @@ describe('react native async storage driver', () => {
     await instance.close();
   });
 
-  it('round-trips canonical binary StorageValues through AsyncStorage', async () => {
+  it('round-trips the complete StorageValue corpus through AsyncStorage', async () => {
     const instance = await createReactNativeInstance(localspace, {
       name: 'rn-storage-value-binary',
       storeName: 'rn_storage_value_binary',
       reactNativeAsyncStorage: asyncStorage,
     });
-    const source = new Uint8Array([9, 1, 2, 8]);
+    const fixture = createStorageValueContractFixture();
 
-    await instance.setItem('binary', {
-      buffer: source.buffer,
-      view: source.subarray(1, 3),
-      signed: new Int16Array([-2, 3]),
-    });
-    const result = await instance.getItem<{
-      buffer: ArrayBuffer;
-      view: Uint8Array;
-      signed: Int16Array;
-    }>('binary');
-
-    expect(result?.buffer).toBeInstanceOf(ArrayBuffer);
-    expect([...new Uint8Array(result!.buffer)]).toEqual([9, 1, 2, 8]);
-    expect(result?.view).toBeInstanceOf(Uint8Array);
-    expect([...result!.view]).toEqual([1, 2]);
-    expect(result?.signed).toBeInstanceOf(Int16Array);
-    expect([...result!.signed]).toEqual([-2, 3]);
+    await instance.setItem('contract', fixture.value);
+    expectStorageValueContract(await instance.getItem('contract'), fixture);
     await instance.close();
   });
 
