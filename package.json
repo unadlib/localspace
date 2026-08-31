@@ -50,6 +50,8 @@
   "files": [
     "dist/**/*.d.ts",
     "dist/**/*.d.cts",
+    "!dist/utils/binary-brand.d.ts",
+    "!dist/utils/binary-brand.d.cts",
     "dist/index.cjs",
     "dist/index.cjs.map",
     "dist/index.esm.js",

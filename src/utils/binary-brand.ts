@@ -1,112 +1,71 @@
-export type StorageBinaryTag =
-  | '[object ArrayBuffer]'
-  | '[object Int8Array]'
-  | '[object Uint8Array]'
-  | '[object Uint8ClampedArray]'
-  | '[object Int16Array]'
-  | '[object Uint16Array]'
-  | '[object Int32Array]'
-  | '[object Uint32Array]'
-  | '[object Float32Array]'
-  | '[object Float64Array]'
-  | '[object BigInt64Array]'
-  | '[object BigUint64Array]';
+const storageBinaryNames = [
+  'Int8Array',
+  'Uint8Array',
+  'Uint8ClampedArray',
+  'Int16Array',
+  'Uint16Array',
+  'Int32Array',
+  'Uint32Array',
+  'Float32Array',
+  'Float64Array',
+  'BigInt64Array',
+  'BigUint64Array',
+] as const;
 
+type StorageBinaryName = (typeof storageBinaryNames)[number];
+export type StorageBinaryTag = `[object ${'ArrayBuffer' | StorageBinaryName}]`;
+
+type IntrinsicGetter = (this: unknown) => unknown;
 type ArrayBufferViewInfo = {
   buffer: ArrayBufferLike;
   byteOffset: number;
   byteLength: number;
-  typedArrayName: string | null;
 };
 
-const arrayBufferByteLength = Object.getOwnPropertyDescriptor(
-  ArrayBuffer.prototype,
-  'byteLength'
-)!.get!;
+const getter = (prototype: object, property: PropertyKey): IntrinsicGetter =>
+  Object.getOwnPropertyDescriptor(prototype, property)!.get!;
 
+const arrayBufferByteLength = getter(ArrayBuffer.prototype, 'byteLength');
 const sharedArrayBufferByteLength =
   typeof SharedArrayBuffer === 'undefined'
     ? undefined
-    : Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype, 'byteLength')
-        ?.get;
+    : getter(SharedArrayBuffer.prototype, 'byteLength');
 
 const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype);
-const typedArrayName = Object.getOwnPropertyDescriptor(
-  typedArrayPrototype,
-  Symbol.toStringTag
-)!.get!;
-const typedArrayBuffer = Object.getOwnPropertyDescriptor(
-  typedArrayPrototype,
-  'buffer'
-)!.get!;
-const typedArrayByteOffset = Object.getOwnPropertyDescriptor(
-  typedArrayPrototype,
-  'byteOffset'
-)!.get!;
-const typedArrayByteLength = Object.getOwnPropertyDescriptor(
-  typedArrayPrototype,
-  'byteLength'
-)!.get!;
+const typedArrayName = getter(typedArrayPrototype, Symbol.toStringTag);
+const typedArrayBuffer = getter(typedArrayPrototype, 'buffer');
+const typedArrayByteOffset = getter(typedArrayPrototype, 'byteOffset');
+const typedArrayByteLength = getter(typedArrayPrototype, 'byteLength');
+const dataViewBuffer = getter(DataView.prototype, 'buffer');
+const dataViewByteOffset = getter(DataView.prototype, 'byteOffset');
+const dataViewByteLength = getter(DataView.prototype, 'byteLength');
+const storageBinaryNameSet = new Set<string>(storageBinaryNames);
 
-const dataViewBuffer = Object.getOwnPropertyDescriptor(
-  DataView.prototype,
-  'buffer'
-)!.get!;
-const dataViewByteOffset = Object.getOwnPropertyDescriptor(
-  DataView.prototype,
-  'byteOffset'
-)!.get!;
-const dataViewByteLength = Object.getOwnPropertyDescriptor(
-  DataView.prototype,
-  'byteLength'
-)!.get!;
-
-const storageBinaryTags: Readonly<Record<string, StorageBinaryTag>> = {
-  Int8Array: '[object Int8Array]',
-  Uint8Array: '[object Uint8Array]',
-  Uint8ClampedArray: '[object Uint8ClampedArray]',
-  Int16Array: '[object Int16Array]',
-  Uint16Array: '[object Uint16Array]',
-  Int32Array: '[object Int32Array]',
-  Uint32Array: '[object Uint32Array]',
-  Float32Array: '[object Float32Array]',
-  Float64Array: '[object Float64Array]',
-  BigInt64Array: '[object BigInt64Array]',
-  BigUint64Array: '[object BigUint64Array]',
-};
-
-export const isArrayBufferValue = (value: unknown): value is ArrayBuffer => {
-  if (!value || typeof value !== 'object') return false;
+const matchesGetter = (
+  value: unknown,
+  intrinsic: IntrinsicGetter | undefined
+): value is object => {
+  if (!intrinsic || !value || typeof value !== 'object') return false;
   try {
-    arrayBufferByteLength.call(value);
+    intrinsic.call(value);
     return true;
   } catch {
     return false;
   }
 };
+
+const isArrayBufferValue = (value: unknown): value is ArrayBuffer =>
+  matchesGetter(value, arrayBufferByteLength);
 
 export const isSharedArrayBufferValue = (
   value: unknown
-): value is SharedArrayBuffer => {
-  if (!sharedArrayBufferByteLength || !value || typeof value !== 'object') {
-    return false;
-  }
-  try {
-    sharedArrayBufferByteLength.call(value);
-    return true;
-  } catch {
-    return false;
-  }
-};
+): value is SharedArrayBuffer =>
+  matchesGetter(value, sharedArrayBufferByteLength);
 
 const getTypedArrayName = (value: unknown): string | null => {
   if (!ArrayBuffer.isView(value)) return null;
-  try {
-    const name = typedArrayName.call(value) as unknown;
-    return typeof name === 'string' ? name : null;
-  } catch {
-    return null;
-  }
+  const name = typedArrayName.call(value);
+  return typeof name === 'string' ? name : null;
 };
 
 export const getStorageBinaryTag = (
@@ -114,31 +73,26 @@ export const getStorageBinaryTag = (
 ): StorageBinaryTag | null => {
   if (isArrayBufferValue(value)) return '[object ArrayBuffer]';
   const name = getTypedArrayName(value);
-  return name ? (storageBinaryTags[name] ?? null) : null;
+  return name && storageBinaryNameSet.has(name)
+    ? (`[object ${name}]` as StorageBinaryTag)
+    : null;
 };
 
-export const isUint8ArrayValue = (value: unknown): value is Uint8Array =>
+const isUint8ArrayValue = (value: unknown): value is Uint8Array =>
   getTypedArrayName(value) === 'Uint8Array';
 
 export const getArrayBufferViewInfo = (
   value: unknown
 ): ArrayBufferViewInfo | null => {
   if (!ArrayBuffer.isView(value)) return null;
-  const name = getTypedArrayName(value);
+  const accessors = getTypedArrayName(value)
+    ? [typedArrayBuffer, typedArrayByteOffset, typedArrayByteLength]
+    : [dataViewBuffer, dataViewByteOffset, dataViewByteLength];
   try {
-    if (name) {
-      return {
-        buffer: typedArrayBuffer.call(value) as ArrayBufferLike,
-        byteOffset: typedArrayByteOffset.call(value) as number,
-        byteLength: typedArrayByteLength.call(value) as number,
-        typedArrayName: name,
-      };
-    }
     return {
-      buffer: dataViewBuffer.call(value) as ArrayBufferLike,
-      byteOffset: dataViewByteOffset.call(value) as number,
-      byteLength: dataViewByteLength.call(value) as number,
-      typedArrayName: null,
+      buffer: accessors[0].call(value) as ArrayBufferLike,
+      byteOffset: accessors[1].call(value) as number,
+      byteLength: accessors[2].call(value) as number,
     };
   } catch {
     return null;
@@ -147,22 +101,17 @@ export const getArrayBufferViewInfo = (
 
 export const copyBufferSourceBytes = (value: unknown): Uint8Array | null => {
   try {
-    if (isArrayBufferValue(value)) {
-      const source = new Uint8Array(value);
-      const copy = new Uint8Array(source.byteLength);
-      copy.set(source);
-      return copy;
-    }
-    const info = getArrayBufferViewInfo(value);
-    if (!info) return null;
-    const source = new Uint8Array(
-      info.buffer as ArrayBuffer,
-      info.byteOffset,
-      info.byteLength
-    );
-    const copy = new Uint8Array(source.byteLength);
-    copy.set(source);
-    return copy;
+    const view = getArrayBufferViewInfo(value);
+    const source = isArrayBufferValue(value)
+      ? new Uint8Array(value)
+      : view
+        ? new Uint8Array(
+            view.buffer as ArrayBuffer,
+            view.byteOffset,
+            view.byteLength
+          )
+        : null;
+    return source ? new Uint8Array(source) : null;
   } catch {
     return null;
   }
@@ -172,30 +121,19 @@ export const copyUint8ArrayBytes = (value: unknown): Uint8Array | null =>
   isUint8ArrayValue(value) ? copyBufferSourceBytes(value) : null;
 
 const blobSize =
-  typeof Blob === 'undefined'
-    ? undefined
-    : Object.getOwnPropertyDescriptor(Blob.prototype, 'size')?.get;
+  typeof Blob === 'undefined' ? undefined : getter(Blob.prototype, 'size');
 const blobType =
-  typeof Blob === 'undefined'
-    ? undefined
-    : Object.getOwnPropertyDescriptor(Blob.prototype, 'type')?.get;
+  typeof Blob === 'undefined' ? undefined : getter(Blob.prototype, 'type');
 const blobArrayBuffer =
   typeof Blob === 'undefined' ? undefined : Blob.prototype.arrayBuffer;
 
-export const isBlobValue = (value: unknown): value is Blob => {
-  if (!blobSize || !value || typeof value !== 'object') return false;
-  try {
-    blobSize.call(value);
-    return true;
-  } catch {
-    return false;
-  }
-};
+export const isBlobValue = (value: unknown): value is Blob =>
+  matchesGetter(value, blobSize);
 
 export const readBlobValue = async (
   value: Blob
 ): Promise<{ type: string; buffer: ArrayBuffer }> => {
-  if (!blobType || !blobArrayBuffer || !isBlobValue(value)) {
+  if (!blobType || !blobArrayBuffer) {
     throw new TypeError('Blob arrayBuffer() is not supported in this runtime.');
   }
   return {

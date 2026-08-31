@@ -184,6 +184,7 @@ const runRuntimeProbes = (consumerRoot) => {
     getItem: async (key) => values.get(key) ?? null,
     setItem: async (key, value) => { values.set(key, value); },
     removeItem: async (key) => { values.delete(key); },
+    getAllKeys: async () => [...values.keys()],
   };
   const base = new api.LocalSpace({ driver: api.memoryDriver._driver });
   await base.ready();
