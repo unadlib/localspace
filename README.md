@@ -305,7 +305,8 @@ values into a separate AES-GCM instance.
 For each plugin and phase, a batch call invokes the batch hook once when it is
 defined, otherwise it maps the matching single hook over entries. It never runs
 both forms for the same plugin phase. Query/destructive observers cover
-`iterate`, `keys`, `key`, `length`, `clear`, and `dropInstance`.
+`iterate`, `keys`, `key`, `length`, `clear`, `dropInstance`, and the outer
+`runTransaction` lifecycle.
 
 See [Plugin System](./docs/plugins.md) for ordering, envelopes, policies, and
 custom hook examples. Application-level notification examples live in

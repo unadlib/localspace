@@ -1607,11 +1607,19 @@ export class LocalSpace implements LocalSpaceInstance {
     ) => {
       this._assertOpen('runTransaction');
       const hasPlugins = this._pluginManager.hasPlugins();
-      if (hasPlugins) {
+      const context = hasPlugins
+        ? this._pluginManager.createContext('runTransaction')
+        : undefined;
+      if (context) {
         await this._ensurePluginsInitialized('runTransaction');
+        await this._pluginManager.runTransactionObservers(
+          'before',
+          mode,
+          context
+        );
       }
 
-      return original(mode, (scope: TransactionScope) => {
+      const result = await original(mode, (scope: TransactionScope) => {
         let scopeActive = true;
         const assertScopeActive = (scopeOperation: string): void => {
           if (scopeActive) {
@@ -1726,6 +1734,15 @@ export class LocalSpace implements LocalSpaceInstance {
             this._activeTransactionRunners -= 1;
           });
       });
+
+      if (context) {
+        await this._pluginManager.runTransactionObservers(
+          'after',
+          mode,
+          context
+        );
+      }
+      return result;
     };
   }
 

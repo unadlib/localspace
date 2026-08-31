@@ -105,6 +105,14 @@ const observerPlugin: LocalSpacePlugin = {
   afterDropInstance(options) {
     void options?.name;
   },
+  beforeRunTransaction(transactionMode) {
+    const observedMode: TransactionMode = transactionMode;
+    void observedMode;
+  },
+  afterRunTransaction(transactionMode) {
+    const observedMode: TransactionMode = transactionMode;
+    void observedMode;
+  },
 };
 void instance.runTransaction('readwrite', async (transaction) => {
   await transaction.set('migration', migrationValue);

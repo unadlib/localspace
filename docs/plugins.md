@@ -254,6 +254,15 @@ interface LocalSpacePlugin {
     options: LocalSpaceConfigSnapshot | undefined,
     context: PluginContext
   ): Promise<void> | void;
+
+  beforeRunTransaction?(
+    mode: TransactionMode,
+    context: PluginContext
+  ): Promise<void> | void;
+  afterRunTransaction?(
+    mode: TransactionMode,
+    context: PluginContext
+  ): Promise<void> | void;
 }
 ```
 
@@ -268,6 +277,12 @@ is still an item and remains visible in keys/length.
 
 `clear` and `dropInstance` do not synthesize per-item remove hooks; use their
 dedicated observers for aggregate deletion.
+
+`beforeRunTransaction` runs after capability checks and initialization but
+before the driver creates a transaction. `afterRunTransaction` runs only after
+the driver reports a successful commit. Neither hook receives the runner result
+or an active scope, so it cannot rewrite the result or perform transaction-bound
+work. Scope operations continue to use their normal item/query observers.
 
 ## Transactions
 

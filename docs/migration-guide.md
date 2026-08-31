@@ -44,7 +44,7 @@ themselves.
 | localStorage/RN transaction stubs                                      | check `capabilities().transactions`; unsupported calls reject early                     |
 | `prewarmTransactions`, `connectionIdleMs`, `maxConcurrentTransactions` | remove them; supplying them is `INVALID_CONFIG`                                         |
 | matching single and batch hooks both executing                         | remove `isBatch` dedup guards; 3.0 chooses the batch hook or maps the single hook       |
-| plugins not covering query/iteration/clear/drop                        | adopt dedicated observers and logical views                                             |
+| plugins not covering query/iteration/clear/drop/transaction            | adopt dedicated observers and logical views                                             |
 | text/string custom compression codecs                                  | rewrite both codec methods as `Uint8Array`-to-`Uint8Array` functions                    |
 | both encryption `key` and `keyDerivation`                              | choose exactly one key source                                                           |
 | caller-owned `algorithm.iv`                                            | remove it; use `ivLength`/`ivGenerator` only when overriding writer-owned IV generation |
@@ -306,10 +306,15 @@ as context, but must not use them to deduplicate execution.
 
 - `iterate` (`afterIterate` receives `{ iterations, stopped }`);
 - `keys`, `key`, and `length`;
-- `clear` and `dropInstance`.
+- `clear` and `dropInstance`;
+- the outer `runTransaction` lifecycle (`beforeRunTransaction` and
+  `afterRunTransaction`).
 
 Observer return values are ignored and result arrays/summaries are frozen.
 `clear`/`dropInstance` do not synthesize one remove hook per key.
+The outer transaction hooks do not receive the runner result or an active
+scope; operation hooks inside the runner continue to receive
+`context.transactionScope`.
 
 Query operations now materialize the logical decoded view when transforms can
 affect visibility. With TTL, an expired item is absent from `getItem`,

@@ -18,8 +18,10 @@
   driver sessions, and the explicit realm-wide `registerDriver()` API.
 - Added frozen post-readiness driver capabilities for transactions, atomic
   batches, namespace deletion, persistence, and Storage Buckets.
-- Added query/destructive plugin observers for `iterate`, `keys`, `key`,
-  `length`, `clear`, and `dropInstance`, with a consistent decoded logical view.
+- Added query/destructive/transaction plugin observers for `iterate`, `keys`,
+  `key`, `length`, `clear`, `dropInstance`, and the outer `runTransaction`
+  lifecycle. Query observers receive a consistent decoded logical view, while
+  transaction lifecycle observers never receive the runner result.
 - Added plugin-aware IndexedDB and memory transaction scopes covering logical
   get/set/remove, keys, async iteration, and clear.
 - Added a serializable, realm-and-namespace-scoped scheduler for memory

@@ -265,4 +265,67 @@ describe('logical query and iteration plugin coverage', () => {
     ]);
     await store.close();
   });
+
+  it('observes the outer transaction lifecycle without exposing its result', async () => {
+    const events: string[] = [];
+    const contexts: PluginContext[] = [];
+    const createObserver = (
+      name: string,
+      priority: number
+    ): LocalSpacePlugin => ({
+      name,
+      priority,
+      beforeRunTransaction: (mode, context) => {
+        expect(mode).toBe('readwrite');
+        expect(context.transactionScope).toBeUndefined();
+        events.push(`${name}:before`);
+        contexts.push(context);
+      },
+      afterRunTransaction: (mode, context) => {
+        expect(mode).toBe('readwrite');
+        expect(context.transactionScope).toBeUndefined();
+        events.push(`${name}:after`);
+        contexts.push(context);
+      },
+    });
+    const store = localspace.createInstance({
+      name: uniqueName('transaction-observers'),
+      plugins: [createObserver('low', 0), createObserver('high', 10)],
+    });
+    await store.setDriver([store.MEMORY]);
+
+    await expect(
+      store.runTransaction('readwrite', async (scope) => {
+        events.push('runner');
+        await scope.set('committed', true);
+        return { privateResult: true };
+      })
+    ).resolves.toEqual({ privateResult: true });
+
+    expect(events).toEqual([
+      'high:before',
+      'low:before',
+      'runner',
+      'low:after',
+      'high:after',
+    ]);
+    expect(contexts.map(({ operation }) => operation)).toEqual([
+      'runTransaction',
+      'runTransaction',
+      'runTransaction',
+      'runTransaction',
+    ]);
+
+    events.length = 0;
+    await expect(
+      store.runTransaction('readwrite', async (scope) => {
+        await scope.set('rolled-back', true);
+        throw new Error('expected rollback');
+      })
+    ).rejects.toThrow('expected rollback');
+    expect(events).toEqual(['high:before', 'low:before']);
+    await expect(store.getItem('rolled-back')).resolves.toBeNull();
+
+    await store.close();
+  });
 });

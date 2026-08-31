@@ -268,6 +268,9 @@ Contract:
 - the runner result becomes the `runTransaction()` result;
 - plugin transforms and observers run inside the transaction and receive
   `context.transactionScope`;
+- outer `beforeRunTransaction`/`afterRunTransaction` observers bracket driver
+  execution; the after observer runs only following a successful commit and
+  neither observer receives the runner result;
 - an IndexedDB transaction that becomes natively inactive before settlement
   rejects with `TRANSACTION_INACTIVE`.
 

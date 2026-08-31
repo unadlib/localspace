@@ -189,6 +189,8 @@ describe('driver capability snapshots', () => {
     const runTransaction = vi.fn(async (_mode, runner) => runner({} as never));
     const runner = vi.fn();
     const onInit = vi.fn();
+    const beforeRunTransaction = vi.fn();
+    const afterRunTransaction = vi.fn();
     const driver: Driver = {
       ...memoryDriver,
       _driver: uniqueName('disabled-transactions'),
@@ -198,7 +200,14 @@ describe('driver capability snapshots', () => {
     const instance = new LocalSpace({
       driver: driver._driver,
       drivers: [driver],
-      plugins: [{ name: 'transaction-observer', onInit }],
+      plugins: [
+        {
+          name: 'transaction-observer',
+          onInit,
+          beforeRunTransaction,
+          afterRunTransaction,
+        },
+      ],
     });
     await instance.ready();
 
@@ -216,6 +225,8 @@ describe('driver capability snapshots', () => {
     expect(runTransaction).not.toHaveBeenCalled();
     expect(runner).not.toHaveBeenCalled();
     expect(onInit).not.toHaveBeenCalled();
+    expect(beforeRunTransaction).not.toHaveBeenCalled();
+    expect(afterRunTransaction).not.toHaveBeenCalled();
 
     await instance.close();
   });

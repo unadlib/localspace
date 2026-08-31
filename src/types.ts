@@ -666,4 +666,14 @@ export interface LocalSpacePlugin {
     options: LocalSpaceConfigSnapshot | undefined,
     context: PluginContext
   ): Promise<void> | void;
+
+  /** Observe driver transaction creation and successful commit. */
+  beforeRunTransaction?(
+    mode: TransactionMode,
+    context: PluginContext
+  ): Promise<void> | void;
+  afterRunTransaction?(
+    mode: TransactionMode,
+    context: PluginContext
+  ): Promise<void> | void;
 }

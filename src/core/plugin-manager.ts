@@ -10,6 +10,7 @@ import type {
   PluginIterateSummary,
   PluginOperation,
   PluginStage,
+  TransactionMode,
 } from '../types.js';
 import { createLocalSpaceError, LocalSpaceError } from '../errors.js';
 import { normalizeBatchEntries } from '../utils/helpers.js';
@@ -116,6 +117,8 @@ const PLUGIN_HOOKS = [
   'afterClear',
   'beforeDropInstance',
   'afterDropInstance',
+  'beforeRunTransaction',
+  'afterRunTransaction',
 ] as const satisfies ReadonlyArray<keyof LocalSpacePlugin>;
 
 /**
@@ -1147,6 +1150,28 @@ export class PluginManager {
         plugin.afterDropInstance
           ? () => plugin.afterDropInstance!(options, context)
           : undefined
+    );
+  }
+
+  runTransactionObservers(
+    stage: 'before' | 'after',
+    mode: TransactionMode,
+    context: PluginContext
+  ): Promise<void> {
+    const select = (plugin: LocalSpacePlugin) =>
+      stage === 'before'
+        ? plugin.beforeRunTransaction
+        : plugin.afterRunTransaction;
+    return this.invokeOperationObservers(
+      'runTransaction',
+      stage,
+      context,
+      (plugin) => {
+        const observer = select(plugin);
+        return observer
+          ? () => observer.call(plugin, mode, context)
+          : undefined;
+      }
     );
   }
 
