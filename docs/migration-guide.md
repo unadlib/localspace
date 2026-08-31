@@ -70,6 +70,7 @@ setDeprecationWarnings(false);
 | Reading or writing underscored `LocalSpaceInstance` implementation fields | Stop accessing them; use `config()`, `driver()`, `ready()`, `capabilities()`, or `getDriver()` |
 | Branching on synthetic `PluginStage: 'error'`                             | Remove that branch; `onError` reports the actual `init`/`before`/`after`/`destroy` stage       |
 | Exhaustive switches over the 2.1 `PluginOperation` union                  | Add 3.0 query, destructive, transaction, and lifecycle operations                              |
+| Exhaustive switches over `LocalSpaceErrorCode`                            | Handle `TRANSACTION_SCOPE_REQUIRED` and 3.0 `TRANSACTION_INACTIVE` explicitly                  |
 | Package deep imports                                                      | Import only `localspace` or `localspace/react-native`                                          |
 
 Package deep imports have no executable compatibility entry on which a runtime
