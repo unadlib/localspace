@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   LocalSpace,
   registerDriver,
@@ -266,6 +266,45 @@ describe('driver registry and sessions', () => {
 
     await instance.close();
   });
+
+  it.each(['own', 'inherited'] as const)(
+    'rejects a visible %s accessor without invoking it',
+    (location) => {
+      const driverName = uniqueDriverName(`accessor-${location}`);
+      const driver = createSessionDriver(driverName);
+      const implementation = driver.setItem;
+      const getter = vi.fn(() => implementation);
+      delete (driver as Partial<Driver>).setItem;
+
+      if (location === 'own') {
+        Object.defineProperty(driver, 'setItem', {
+          configurable: true,
+          enumerable: true,
+          get: getter,
+        });
+      } else {
+        const prototype = Object.create(Object.getPrototypeOf(driver), {
+          setItem: {
+            configurable: true,
+            enumerable: true,
+            get: getter,
+          },
+        });
+        Object.setPrototypeOf(driver, prototype);
+      }
+
+      expect(() => new LocalSpace({ drivers: [driver] })).toThrowError(
+        expect.objectContaining({
+          code: 'DRIVER_COMPLIANCE',
+          details: expect.objectContaining({
+            driver: driverName,
+            reason: 'member setItem must be a data property',
+          }),
+        })
+      );
+      expect(getter).not.toHaveBeenCalled();
+    }
+  );
 
   it('gives each instance a private stable receiver for one selected session', async () => {
     const driverName = uniqueDriverName('session-receiver');

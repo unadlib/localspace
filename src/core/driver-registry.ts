@@ -23,49 +23,13 @@ type DriverEntry = {
 
 const complianceError = (driver: unknown, reason: string) =>
   createLocalSpaceError('DRIVER_COMPLIANCE', 'Custom driver not compliant', {
-    driver:
-      driver && typeof driver === 'object' && '_driver' in driver
-        ? String((driver as { _driver?: unknown })._driver)
-        : undefined,
+    driver: typeof driver === 'string' ? driver : undefined,
     reason,
   });
 
 const cloneDriverDefinition = (driver: Driver): Readonly<Driver> => {
   if (!driver || typeof driver !== 'object') {
-    throw complianceError(driver, 'definition must be an object');
-  }
-  const nameDescriptor = Object.getOwnPropertyDescriptor(driver, '_driver');
-  if (
-    !nameDescriptor ||
-    !('value' in nameDescriptor) ||
-    typeof nameDescriptor.value !== 'string' ||
-    nameDescriptor.value.length === 0
-  ) {
-    throw complianceError(
-      driver,
-      '_driver must be an own string data property'
-    );
-  }
-
-  for (const method of REQUIRED_DRIVER_METHODS) {
-    if (typeof driver[method] !== 'function') {
-      throw complianceError(driver, `missing required method ${method}`);
-    }
-  }
-  for (const method of OPTIONAL_DRIVER_METHODS) {
-    if (driver[method] !== undefined && typeof driver[method] !== 'function') {
-      throw complianceError(
-        driver,
-        `optional member ${method} must be a function`
-      );
-    }
-  }
-  if (
-    driver._support !== undefined &&
-    typeof driver._support !== 'boolean' &&
-    typeof driver._support !== 'function'
-  ) {
-    throw complianceError(driver, '_support must be a boolean or function');
+    throw complianceError(undefined, 'definition must be an object');
   }
 
   const prototypeChain: object[] = [];
@@ -96,7 +60,55 @@ const cloneDriverDefinition = (driver: Driver): Readonly<Driver> => {
       });
     }
   }
-  const capabilityDeclaration = snapshotCapabilityDeclaration(driver);
+
+  const nameDescriptor = descriptors._driver;
+  if (
+    !nameDescriptor ||
+    !('value' in nameDescriptor) ||
+    typeof nameDescriptor.value !== 'string' ||
+    nameDescriptor.value.length === 0 ||
+    !Object.prototype.hasOwnProperty.call(driver, '_driver')
+  ) {
+    throw complianceError(
+      undefined,
+      '_driver must be an own string data property'
+    );
+  }
+  const name = nameDescriptor.value;
+
+  for (const property of Reflect.ownKeys(descriptors)) {
+    if (!('value' in descriptors[property])) {
+      throw complianceError(
+        name,
+        `member ${String(property)} must be a data property`
+      );
+    }
+  }
+  for (const method of REQUIRED_DRIVER_METHODS) {
+    if (typeof descriptors[method]?.value !== 'function') {
+      throw complianceError(name, `missing required method ${method}`);
+    }
+  }
+  for (const method of OPTIONAL_DRIVER_METHODS) {
+    const implementation = descriptors[method]?.value;
+    if (implementation !== undefined && typeof implementation !== 'function') {
+      throw complianceError(
+        name,
+        `optional member ${method} must be a function`
+      );
+    }
+  }
+  const support = descriptors._support?.value;
+  if (
+    support !== undefined &&
+    typeof support !== 'boolean' &&
+    typeof support !== 'function'
+  ) {
+    throw complianceError(name, '_support must be a boolean or function');
+  }
+
+  let snapshot = Object.create(null, descriptors) as Driver;
+  const capabilityDeclaration = snapshotCapabilityDeclaration(snapshot);
   if (capabilityDeclaration !== undefined) {
     descriptors._capabilities = {
       configurable: true,
@@ -104,8 +116,8 @@ const cloneDriverDefinition = (driver: Driver): Readonly<Driver> => {
       value: capabilityDeclaration,
       writable: true,
     };
+    snapshot = Object.create(null, descriptors) as Driver;
   }
-  const snapshot = Object.create(null, descriptors) as Driver;
   return Object.freeze(snapshot);
 };
 
