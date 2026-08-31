@@ -60,8 +60,15 @@ setDeprecationWarnings(false);
 | Calling ordinary instance APIs inside a transaction runner                | Use only the runner's supplied transaction scope; audit with `strictTransactions: true`   |
 | Assuming `iterate()` always returns `U`                                   | Handle `undefined` when no callback invocation terminates iteration early                 |
 | Matching batch and single hooks in one custom plugin                      | Define one hook form per phase; retain the 2.x `isBatch` guard until migrated             |
+| Text/string custom compression codecs                                     | Rewrite `compress` and `decompress` as `Uint8Array`-to-`Uint8Array` functions             |
+| Supplying both encryption `key` and `keyDerivation`                       | Choose exactly one key source; 3.0 rejects ambiguous configuration                        |
+| Supplying `algorithm.iv` to AES-GCM                                       | Remove it; 3.0 owns every write IV and accepts only the remaining AES-GCM parameters      |
 | React Native adapter auto-detection                                       | Import `localspace/react-native` and inject `reactNativeAsyncStorage` explicitly          |
 | Explicit React Native adapter without `getAllKeys`                        | Add `getAllKeys`; 3.0 validates the complete query/namespace capability during selection  |
+| `installReactNativeAsyncStorageDriver(instance)`                          | Prefer `createReactNativeInstance`; the 3.0 realm-global installer takes no instance      |
+| Treating `getDriver()` output or custom-driver inputs as mutable state    | Treat definitions as readonly; keep mutable state on the selected driver session receiver |
+| Branching on synthetic `PluginStage: 'error'`                             | Remove that branch; `onError` reports the actual `init`/`before`/`after`/`destroy` stage  |
+| Exhaustive switches over the 2.1 `PluginOperation` union                  | Add 3.0 query, destructive, transaction, and lifecycle operations                         |
 | Package deep imports                                                      | Import only `localspace` or `localspace/react-native`                                     |
 
 Package deep imports have no executable compatibility entry on which a runtime
