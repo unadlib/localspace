@@ -135,6 +135,29 @@ describe('encryption plugin fail-closed behavior', () => {
     await expect(raw.getItem('secret')).resolves.toBeNull();
   });
 
+  it('rejects forged IV output without invoking its type-tag accessor', async () => {
+    const tagGetter = vi.fn(() => 'Uint8Array');
+    const forged = {};
+    Object.defineProperty(forged, Symbol.toStringTag, {
+      configurable: true,
+      get: tagGetter,
+    });
+    const { secure, raw } = await createMemoryStores(
+      'encryption-forged-iv',
+      encryptionPlugin({
+        key: VALID_KEY,
+        ivGenerator: () => forged as unknown as Uint8Array,
+      })
+    );
+
+    await expect(secure.setItem('secret', 'plaintext')).rejects.toMatchObject({
+      code: 'INVALID_CONFIG',
+      message: 'Encryption IV source must return Uint8Array.',
+    });
+    expect(tagGetter).not.toHaveBeenCalled();
+    await expect(raw.getItem('secret')).resolves.toBeNull();
+  });
+
   it('rejects a batch before any entry reaches the driver', async () => {
     const { secure, raw } = await createMemoryStores(
       'encryption-invalid-batch-key',

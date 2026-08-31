@@ -16,6 +16,10 @@ import {
   type PluginEnvelopeV1,
 } from '../core/plugin-envelope.js';
 import { markBuiltInStorageTransformPlugin } from '../core/plugin-capabilities.js';
+import {
+  copyBufferSourceBytes,
+  copyUint8ArrayBytes,
+} from '../utils/binary-brand.js';
 
 type EncryptionKeySource =
   | {
@@ -216,22 +220,20 @@ const fillRandom = (
     generated = crypto.getRandomValues(new Uint8Array(length));
   }
 
-  if (Object.prototype.toString.call(generated) !== '[object Uint8Array]') {
+  const copy = copyUint8ArrayBytes(generated);
+  if (!copy) {
     throw createLocalSpaceError(
       'INVALID_CONFIG',
       'Encryption IV source must return Uint8Array.'
     );
   }
-  const source = generated as Uint8Array;
-  if (source.byteLength !== length) {
+  if (copy.byteLength !== length) {
     throw createLocalSpaceError(
       'INVALID_ARGUMENT',
       `Encryption IV source must return ${length} bytes.`,
-      { expectedIvLength: length, actualIvLength: source.byteLength }
+      { expectedIvLength: length, actualIvLength: copy.byteLength }
     );
   }
-  const copy = new Uint8Array(length);
-  copy.set(source);
   return copy;
 };
 
@@ -398,17 +400,8 @@ const validateKeyOptions = (options: EncryptionKeyOptions): void => {
 };
 
 const copyCounter = (value: unknown): Uint8Array<ArrayBuffer> => {
-  let source: Uint8Array;
-  if (ArrayBuffer.isView(value)) {
-    const view = value as ArrayBufferView;
-    source = new Uint8Array(
-      view.buffer as ArrayBuffer,
-      view.byteOffset,
-      view.byteLength
-    );
-  } else if (Object.prototype.toString.call(value) === '[object ArrayBuffer]') {
-    source = new Uint8Array(value as ArrayBuffer);
-  } else {
+  const source = copyBufferSourceBytes(value);
+  if (!source) {
     throw createLocalSpaceError(
       'INVALID_CONFIG',
       'AES-CTR migration counter must be a BufferSource.'

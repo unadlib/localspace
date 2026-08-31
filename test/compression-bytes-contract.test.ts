@@ -114,6 +114,33 @@ describe('compression bytes contract', () => {
     await expect(getRawMemoryValue(options, 'value')).resolves.toBeNull();
   });
 
+  it('rejects forged byte output without invoking its type-tag accessor', async () => {
+    const tagGetter = vi.fn(() => 'Uint8Array');
+    const forged = {};
+    Object.defineProperty(forged, Symbol.toStringTag, {
+      configurable: true,
+      get: tagGetter,
+    });
+    const codec = {
+      compress: () => forged,
+      decompress: (data: Uint8Array) => data,
+    } as unknown as CompressionCodec;
+    const { store, options } = await createStore(
+      'compression-forged-codec-output',
+      codec,
+      'forged-output'
+    );
+
+    await expect(
+      store.setItem('value', 'x'.repeat(2_000))
+    ).rejects.toMatchObject({
+      code: 'OPERATION_FAILED',
+      message: 'Failed to compress payload',
+    });
+    expect(tagGetter).not.toHaveBeenCalled();
+    await expect(getRawMemoryValue(options, 'value')).resolves.toBeNull();
+  });
+
   it('consumes algorithm and originalSize metadata on every versioned read', async () => {
     const { store, options } = await createStore('compression-metadata');
     const value = { text: 'x'.repeat(2_000) };

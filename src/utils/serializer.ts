@@ -1,6 +1,12 @@
 import { createBlob } from './helpers.js';
 import type { Serializer } from '../types.js';
 import { createLocalSpaceError } from '../errors.js';
+import {
+  copyBufferSourceBytes,
+  getStorageBinaryTag,
+  isBlobValue,
+  readBlobValue,
+} from './binary-brand.js';
 
 const BASE_CHARS =
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -27,8 +33,6 @@ const TYPE_BIGINT64ARRAY = 'bi64';
 const TYPE_BIGUINT64ARRAY = 'bu64';
 const TYPE_SERIALIZED_MARKER_LENGTH =
   SERIALIZED_MARKER_LENGTH + TYPE_ARRAYBUFFER.length;
-
-const toString = Object.prototype.toString;
 
 const getGlobalScope = (): typeof globalThis => {
   // source: https://github.com/Raynos/global/blob/master/window.js
@@ -111,23 +115,26 @@ const typedArrayTagMap: Record<string, string> = {
   '[object BigUint64Array]': TYPE_BIGUINT64ARRAY,
 };
 
-function isTypedArray(value: unknown): value is ArrayBufferView {
-  return ArrayBuffer.isView(value) && !(value instanceof DataView);
-}
-
 async function serialize(value: unknown): Promise<string> {
-  const valueType = value != null ? toString.call(value) : '';
+  const valueType = getStorageBinaryTag(value);
 
   if (valueType === '[object ArrayBuffer]') {
+    const bytes = copyBufferSourceBytes(value);
+    if (!bytes) {
+      throw createLocalSpaceError(
+        'SERIALIZATION_FAILED',
+        'Failed to serialize detached ArrayBuffer.'
+      );
+    }
     return (
       SERIALIZED_MARKER +
       TYPE_ARRAYBUFFER +
-      bufferToString(value as ArrayBuffer)
+      bufferToString(bytes.buffer as ArrayBuffer)
     );
   }
 
-  if (isTypedArray(value)) {
-    const marker = typedArrayTagMap[valueType];
+  if (ArrayBuffer.isView(value)) {
+    const marker = valueType ? typedArrayTagMap[valueType] : undefined;
     if (!marker) {
       throw createLocalSpaceError(
         'SERIALIZATION_FAILED',
@@ -136,22 +143,24 @@ async function serialize(value: unknown): Promise<string> {
       );
     }
 
-    const offset = value.byteOffset;
-    const length = value.byteLength;
-    const sourceBuffer = value.buffer;
-    const normalizedBuffer =
-      sourceBuffer instanceof ArrayBuffer
-        ? sourceBuffer.slice(offset, offset + length)
-        : new Uint8Array(sourceBuffer, offset, length).slice().buffer;
+    const bytes = copyBufferSourceBytes(value);
+    if (!bytes) {
+      throw createLocalSpaceError(
+        'SERIALIZATION_FAILED',
+        'Failed to serialize detached BinaryArray.',
+        { valueType }
+      );
+    }
 
-    return SERIALIZED_MARKER + marker + bufferToString(normalizedBuffer);
+    return (
+      SERIALIZED_MARKER + marker + bufferToString(bytes.buffer as ArrayBuffer)
+    );
   }
 
-  if (valueType === '[object Blob]') {
-    const blob = value as Blob;
-    const arrayBuffer = await blob.arrayBuffer();
+  if (isBlobValue(value)) {
+    const blob = await readBlobValue(value);
     const str =
-      BLOB_TYPE_PREFIX + blob.type + '~' + bufferToString(arrayBuffer);
+      BLOB_TYPE_PREFIX + blob.type + '~' + bufferToString(blob.buffer);
     return SERIALIZED_MARKER + TYPE_BLOB + str;
   }
 

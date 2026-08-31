@@ -1,5 +1,9 @@
 import { createLocalSpaceError } from '../errors.js';
 import type { StorageBinary, StorageValue } from '../types.js';
+import {
+  copyBufferSourceBytes,
+  getStorageBinaryTag,
+} from '../utils/binary-brand.js';
 import serializer from '../utils/serializer.js';
 import { inspectStorageValue } from './storage-value.js';
 
@@ -57,7 +61,6 @@ export type StoredRecordReadResult =
   | { matched: false }
   | { matched: true; value: StorageValue };
 
-const objectToString = Object.prototype.toString;
 const BASE64_PATTERN =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
@@ -134,16 +137,10 @@ const deserializationFailure = (reason: string, path: string): never => {
   );
 };
 
-const binaryBytes = (value: StorageBinary, tag: string): Uint8Array => {
-  if (tag === '[object ArrayBuffer]') {
-    return new Uint8Array(value as ArrayBuffer).slice();
-  }
-  const view = value as ArrayBufferView;
-  return new Uint8Array(
-    view.buffer as ArrayBuffer,
-    view.byteOffset,
-    view.byteLength
-  ).slice();
+const binaryBytes = (value: StorageBinary): Uint8Array => {
+  const bytes = copyBufferSourceBytes(value);
+  if (!bytes) return serializationFailure(value);
+  return bytes;
 };
 
 const encodeValue = (value: StorageValue): EncodedStorageValueV1 => {
@@ -158,10 +155,10 @@ const encodeValue = (value: StorageValue): EncodedStorageValueV1 => {
     return Object.is(value, -0) ? 0 : value;
   }
 
-  const tag = objectToString.call(value);
-  const kind = binaryKinds[tag];
+  const tag = getStorageBinaryTag(value);
+  const kind = tag ? binaryKinds[tag] : undefined;
   if (kind) {
-    const bytes = binaryBytes(value as StorageBinary, tag);
+    const bytes = binaryBytes(value as StorageBinary);
     return {
       type: 'binary',
       kind,

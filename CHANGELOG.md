@@ -52,6 +52,9 @@
 - Made structured and strict plugin teardown failures observable and retryable.
   Other initialized plugins and the active driver still receive cleanup, while
   a later lifecycle call retries only the plugin cleanup that failed.
+- Made binary, Blob, codec-output, and IV/counter recognition use intrinsic
+  internal-slot checks, so user-controlled `Symbol.toStringTag` accessors are
+  never executed during validation or serialization dispatch.
 - Changed batch plugin execution to one hook form per plugin and phase: invoke
   the batch hook once when present, otherwise map the matching single hook.
   Priority ordering is preserved globally across both forms. Single-item

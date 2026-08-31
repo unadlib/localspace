@@ -1,27 +1,22 @@
 import { createLocalSpaceError } from '../errors.js';
 import type { StorageValue } from '../types.js';
+import {
+  getArrayBufferViewInfo,
+  getStorageBinaryTag,
+  isBlobValue,
+  isSharedArrayBufferValue,
+} from '../utils/binary-brand.js';
 
-const objectToString = Object.prototype.toString;
 const hasOwn = Object.prototype.hasOwnProperty;
-const arrayBufferByteLength = Object.getOwnPropertyDescriptor(
-  ArrayBuffer.prototype,
-  'byteLength'
+const functionToString = Function.prototype.toString;
+const nativeObjectSource = functionToString.call(Object);
+const dateGetTime = Date.prototype.getTime;
+const mapSize = Object.getOwnPropertyDescriptor(Map.prototype, 'size')!.get!;
+const setSize = Object.getOwnPropertyDescriptor(Set.prototype, 'size')!.get!;
+const regexpSource = Object.getOwnPropertyDescriptor(
+  RegExp.prototype,
+  'source'
 )!.get!;
-
-const SUPPORTED_BINARY_TAGS = new Set([
-  '[object ArrayBuffer]',
-  '[object Int8Array]',
-  '[object Uint8Array]',
-  '[object Uint8ClampedArray]',
-  '[object Int16Array]',
-  '[object Uint16Array]',
-  '[object Int32Array]',
-  '[object Uint32Array]',
-  '[object Float32Array]',
-  '[object Float64Array]',
-  '[object BigInt64Array]',
-  '[object BigUint64Array]',
-]);
 
 type StorageValueIssue = {
   path: string;
@@ -44,8 +39,31 @@ const propertyPath = (parent: string, key: string): string =>
 const describeType = (value: unknown): string => {
   if (value === null) return 'null';
   if (typeof value !== 'object') return typeof value;
+  const binaryTag = getStorageBinaryTag(value);
+  if (binaryTag) return binaryTag.slice(8, -1);
+  if (isSharedArrayBufferValue(value)) return 'SharedArrayBuffer';
+  if (Array.isArray(value)) return 'Array';
+  if (ArrayBuffer.isView(value)) return 'DataView';
+  if (isBlobValue(value)) return 'Blob';
+
+  const intrinsicBrands: ReadonlyArray<readonly [string, () => unknown]> = [
+    ['Date', () => dateGetTime.call(value)],
+    ['Map', () => mapSize.call(value)],
+    ['Set', () => setSize.call(value)],
+    ['RegExp', () => regexpSource.call(value)],
+  ];
+  for (const [name, check] of intrinsicBrands) {
+    try {
+      check();
+      return name;
+    } catch {
+      // Continue until an intrinsic internal-slot check succeeds.
+    }
+  }
   try {
-    return objectToString.call(value).slice(8, -1);
+    return Object.getPrototypeOf(value) === null
+      ? 'null-prototype Object'
+      : 'Object';
   } catch {
     return 'uninspectable-object';
   }
@@ -73,7 +91,7 @@ const hasPlainObjectPrototype = (value: object): boolean => {
     !!constructorDescriptor &&
     'value' in constructorDescriptor &&
     typeof constructorDescriptor.value === 'function' &&
-    constructorDescriptor.value.name === 'Object'
+    functionToString.call(constructorDescriptor.value) === nativeObjectSource
   );
 };
 
@@ -100,13 +118,9 @@ const findStorageValueIssue = (
     return issue(path, `${typeof value} values are not supported`, value);
   }
 
-  const tag = objectToString.call(value);
+  const tag = getStorageBinaryTag(value);
   if (tag === '[object ArrayBuffer]') {
     try {
-      const byteLength = arrayBufferByteLength.call(value) as number;
-      if (typeof byteLength !== 'number') {
-        return issue(path, 'binary values must expose a byteLength', value);
-      }
       new Uint8Array(value as ArrayBuffer);
       return null;
     } catch {
@@ -114,11 +128,14 @@ const findStorageValueIssue = (
     }
   }
   if (ArrayBuffer.isView(value)) {
-    if (!SUPPORTED_BINARY_TAGS.has(tag) || tag === '[object ArrayBuffer]') {
+    if (!tag) {
       return issue(path, 'only supported typed-array views are allowed', value);
     }
-    const backingBuffer = value.buffer;
-    if (objectToString.call(backingBuffer) === '[object SharedArrayBuffer]') {
+    const view = getArrayBufferViewInfo(value);
+    if (!view) {
+      return issue(path, 'detached binary values are not supported', value);
+    }
+    if (isSharedArrayBufferValue(view.buffer)) {
       return issue(
         path,
         'binary views backed by shared memory are not supported',
@@ -126,8 +143,7 @@ const findStorageValueIssue = (
       );
     }
     try {
-      arrayBufferByteLength.call(backingBuffer);
-      new Uint8Array(backingBuffer as ArrayBuffer);
+      new Uint8Array(view.buffer as ArrayBuffer);
     } catch {
       return issue(path, 'detached binary values are not supported', value);
     }

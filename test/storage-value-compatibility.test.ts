@@ -364,6 +364,39 @@ describe('3.0 StorageValue contract', () => {
     expect(constructorGetter).not.toHaveBeenCalled();
   });
 
+  it('does not invoke an own Symbol.toStringTag accessor while rejecting it', () => {
+    const tagGetter = vi.fn(() => 'Uint8Array');
+    const value = { safe: true };
+    Object.defineProperty(value, Symbol.toStringTag, {
+      configurable: true,
+      get: tagGetter,
+    });
+
+    expect(inspectStorageValue(value)).toMatchObject({
+      path: '$',
+      reason: 'symbol-keyed object properties are not supported',
+      valueType: 'Object',
+    });
+    expect(tagGetter).not.toHaveBeenCalled();
+  });
+
+  it('does not invoke an inherited Symbol.toStringTag accessor while rejecting a custom prototype', () => {
+    const tagGetter = vi.fn(() => 'Date');
+    const prototype = {};
+    Object.defineProperty(prototype, Symbol.toStringTag, {
+      configurable: true,
+      get: tagGetter,
+    });
+    const value = Object.create(prototype);
+
+    expect(inspectStorageValue(value)).toMatchObject({
+      path: '$',
+      reason: 'only plain objects are supported',
+      valueType: 'Object',
+    });
+    expect(tagGetter).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['non-finite number', Number.NaN, 'numbers must be finite'],
     ['sparse array', Array(1), 'sparse arrays are not supported'],

@@ -22,6 +22,7 @@ import {
   chunkArray,
 } from '../utils/helpers.js';
 import serializer from '../utils/serializer.js';
+import { isBlobValue } from '../utils/binary-brand.js';
 import { markDriverTransactionScope } from '../core/transaction-scope.js';
 
 type IndexedDBDriverContext = LocalSpaceInstance &
@@ -37,7 +38,6 @@ type IndexedDBDriverContext = LocalSpaceInstance &
 const DETECT_BLOB_SUPPORT_STORE = 'local-forage-detect-blob-support';
 let supportsBlobs: boolean | undefined;
 const dbContexts: Record<string, DbContext> = {};
-const toString = Object.prototype.toString;
 const DRIVER_NAME = 'asyncStorage';
 
 const READ_ONLY = 'readonly';
@@ -1068,8 +1068,8 @@ function setItems<T>(
 
       let blobSupport: boolean | undefined;
 
-      const needsBlobCheck = normalized.some(
-        (entry) => toString.call(entry.value) === '[object Blob]'
+      const needsBlobCheck = normalized.some((entry) =>
+        isBlobValue(entry.value)
       );
 
       if (needsBlobCheck) {
@@ -1092,7 +1092,7 @@ function setItems<T>(
             value = null;
           }
 
-          if (toString.call(entry.value) === '[object Blob]') {
+          if (isBlobValue(entry.value)) {
             const canStoreBlob =
               typeof blobSupport === 'boolean'
                 ? blobSupport
@@ -1180,7 +1180,7 @@ async function setItem<T>(
         dbInfo = self._dbInfo;
       }
 
-      if (toString.call(value) === '[object Blob]') {
+      if (isBlobValue(value)) {
         const blobSupport = await ensureBlobSupportForDb(dbInfo);
         if (!blobSupport) {
           value = (await encodeBlob(value as Blob)) as T;
@@ -1608,7 +1608,7 @@ function runTransaction<T>(
                   let actual: V | null | undefined = value;
                   if (actual === undefined) actual = null;
 
-                  if (toString.call(value) === '[object Blob]') {
+                  if (isBlobValue(value)) {
                     const canStoreBlob = await ensureBlobSupport();
                     if (!canStoreBlob) {
                       actual = (await encodeBlob(

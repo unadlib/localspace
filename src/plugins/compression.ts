@@ -16,6 +16,7 @@ import {
   readPluginEnvelope,
 } from '../core/plugin-envelope.js';
 import { markBuiltInStorageTransformPlugin } from '../core/plugin-capabilities.js';
+import { copyUint8ArrayBytes } from '../utils/binary-brand.js';
 
 export interface CompressionCodec {
   compress(data: Uint8Array): Promise<Uint8Array> | Uint8Array;
@@ -146,14 +147,12 @@ const defaultCodec: CompressionCodec = {
 };
 
 const copyCodecBytes = (value: unknown, method: string): Uint8Array => {
-  if (Object.prototype.toString.call(value) !== '[object Uint8Array]') {
+  const copy = copyUint8ArrayBytes(value);
+  if (!copy) {
     throw new TypeError(
       `Compression codec ${method}() must return Uint8Array.`
     );
   }
-  const source = value as Uint8Array;
-  const copy = new Uint8Array(source.byteLength);
-  copy.set(source);
   return copy;
 };
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import serializer from '../src/utils/serializer';
 
 describe('serializer round-trip behaviour', () => {
@@ -9,6 +9,18 @@ describe('serializer round-trip behaviour', () => {
     expect(serializer.deserialize(encoded)).toEqual(payload);
   });
 
+  it('does not consult a user-controlled Symbol.toStringTag accessor', async () => {
+    const tagGetter = vi.fn(() => 'ArrayBuffer');
+    const payload = { safe: true };
+    Object.defineProperty(payload, Symbol.toStringTag, {
+      configurable: true,
+      get: tagGetter,
+    });
+
+    await expect(serializer.serialize(payload)).resolves.toBe('{"safe":true}');
+    expect(tagGetter).not.toHaveBeenCalled();
+  });
+
   it('handles ArrayBuffer with binary markers', async () => {
     const buffer = new Uint8Array([1, 2, 3, 4]).buffer;
     const encoded = await serializer.serialize(buffer);
@@ -17,7 +29,9 @@ describe('serializer round-trip behaviour', () => {
 
     const decoded = serializer.deserialize(encoded);
     expect(decoded).toBeInstanceOf(ArrayBuffer);
-    expect(new Uint8Array(decoded as ArrayBuffer)).toEqual(new Uint8Array(buffer));
+    expect(new Uint8Array(decoded as ArrayBuffer)).toEqual(
+      new Uint8Array(buffer)
+    );
   });
 
   it('supports typed arrays by preserving the underlying data type', async () => {
@@ -27,6 +41,21 @@ describe('serializer round-trip behaviour', () => {
 
     expect(decoded).toBeInstanceOf(Int16Array);
     expect(Array.from(decoded as Int16Array)).toEqual(Array.from(view));
+  });
+
+  it('uses intrinsic typed-array slots instead of an overridden type tag', async () => {
+    const tagGetter = vi.fn(() => 'Blob');
+    const view = new Uint8Array([1, 2, 3]);
+    Object.defineProperty(view, Symbol.toStringTag, {
+      configurable: true,
+      get: tagGetter,
+    });
+
+    const encoded = await serializer.serialize(view);
+    expect(Array.from(serializer.deserialize(encoded) as Uint8Array)).toEqual([
+      1, 2, 3,
+    ]);
+    expect(tagGetter).not.toHaveBeenCalled();
   });
 
   const supportsBlobArrayBuffer =
@@ -79,7 +108,9 @@ describe('serializer round-trip behaviour', () => {
       const decoded = serializer.deserialize(encoded);
 
       expect(decoded).toBeInstanceOf(Uint8ClampedArray);
-      expect(Array.from(decoded as Uint8ClampedArray)).toEqual(Array.from(view));
+      expect(Array.from(decoded as Uint8ClampedArray)).toEqual(
+        Array.from(view)
+      );
     });
 
     it('handles Uint16Array', async () => {
@@ -157,9 +188,7 @@ describe('serializer round-trip behaviour', () => {
         const decoded = serializer.deserialize(encoded);
 
         expect(decoded).toBeInstanceOf(BigUint64Array);
-        expect(Array.from(decoded as BigUint64Array)).toEqual(
-          Array.from(view)
-        );
+        expect(Array.from(decoded as BigUint64Array)).toEqual(Array.from(view));
       }
     );
 
