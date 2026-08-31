@@ -115,6 +115,14 @@ that same instance while its runner is active. Use another instance only when
 the operation is intentionally outside the transaction and its ordering is
 handled explicitly.
 
+`strictTransactions` can detect facade re-entry, but JavaScript cannot identify
+the origin of every Promise. Before 3.0, move timers, network requests, user
+prompts, and other arbitrary waits outside the runner. In 3.0 only Promises
+returned by the supplied transaction scope are supported. IndexedDB may commit
+when no native request remains; a later scope call then rejects with
+`TRANSACTION_INACTIVE`, and an already completed native commit cannot be rolled
+back by that rejection.
+
 ### Close Instances Without Deleting Data
 
 Use `await instance.close()` when an instance is no longer needed. The method
