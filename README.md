@@ -87,8 +87,8 @@ ordinary application data.
 
 ## Stable facade and configuration
 
-Public method references stay stable across `ready()`, driver fallback,
-`setDriver()`, and plugin registration. Destructuring is safe:
+Storage-operation references stay stable across `ready()`, driver fallback,
+`setDriver()`, and plugin registration. Those operations are safe to destructure:
 
 ```ts
 const { getItem, setItem } = cache;

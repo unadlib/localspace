@@ -45,8 +45,9 @@
 ### Changed
 
 - Replaced runtime driver-method injection and wrapper refreshes with stable
-  facade dispatch. Captured/destructured method references and spies continue
-  using the active driver and plugin set across readiness and driver switches.
+  facade dispatch. Captured/destructured operation references and spies
+  continue using the active driver and plugin set across readiness and driver
+  switches.
 - Made driver registration collect and validate visible descriptors before
   reading members; own or inherited accessors reject without being invoked.
 - Made configuration construction-time state. `config()` now returns a
