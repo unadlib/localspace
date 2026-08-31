@@ -41,10 +41,6 @@ const cloneDriverDefinition = (driver: Driver): Readonly<Driver> => {
     prototypeChain.unshift(current);
   }
 
-  // Flatten the visible definition surface so later writes to a class or
-  // object-literal prototype cannot change an already registered driver.
-  // Build the final descriptor map before defining properties so a derived
-  // non-configurable member can still shadow a base member in the snapshot.
   const descriptors = Object.create(null) as Record<
     PropertyKey,
     PropertyDescriptor
@@ -52,12 +48,8 @@ const cloneDriverDefinition = (driver: Driver): Readonly<Driver> => {
   for (const current of prototypeChain) {
     const currentDescriptors = Object.getOwnPropertyDescriptors(current);
     for (const property of Reflect.ownKeys(currentDescriptors)) {
-      Object.defineProperty(descriptors, property, {
-        configurable: true,
-        enumerable: true,
-        value: currentDescriptors[property as keyof typeof currentDescriptors],
-        writable: true,
-      });
+      descriptors[property] =
+        currentDescriptors[property as keyof typeof currentDescriptors];
     }
   }
 
