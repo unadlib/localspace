@@ -149,6 +149,7 @@ describe('immutable configuration', () => {
       getItem: vi.fn(async () => null),
       setItem: vi.fn(async () => undefined),
       removeItem: vi.fn(async () => undefined),
+      getAllKeys: vi.fn(async () => []),
     };
     const originalGetItem = adapter.getItem;
     const instance = new LocalSpace({

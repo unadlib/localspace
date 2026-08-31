@@ -395,11 +395,13 @@ const store = await createReactNativeInstance(localspace, {
 });
 ```
 
-The adapter must implement `getItem`, `setItem`, and `removeItem`. Optional
-`clear`, `getAllKeys`, and multi methods improve coverage/efficiency. A missing
-adapter produces `DRIVER_UNAVAILABLE`; malformed methods produce
-`INVALID_CONFIG`. Selecting the RN driver never falls through to a web/memory
-driver after adapter failure.
+The adapter must implement `getItem`, `setItem`, `removeItem`, and `getAllKeys`.
+Requiring enumeration at selection time ensures `keys`, `key`, `length`,
+`clear`, and `dropInstance` cannot fail halfway through the public API because
+the adapter is incomplete. `clear` and the multi methods remain optional
+optimizations. A missing adapter produces `DRIVER_UNAVAILABLE`; malformed or
+missing required methods produce `INVALID_CONFIG`. Selecting the RN driver
+never falls through to a web/memory driver after adapter failure.
 
 `installReactNativeAsyncStorageDriver()` remains for deliberate realm-wide
 registration and takes no arguments. Every selected instance must still supply

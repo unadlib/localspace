@@ -61,7 +61,8 @@ function isAsyncStorageLike(value: unknown): value is ReactNativeAsyncStorage {
   return (
     typeof maybeStorage.getItem === 'function' &&
     typeof maybeStorage.setItem === 'function' &&
-    typeof maybeStorage.removeItem === 'function'
+    typeof maybeStorage.removeItem === 'function' &&
+    typeof maybeStorage.getAllKeys === 'function'
   );
 }
 
@@ -98,7 +99,7 @@ function resolveConfiguredAsyncStorage(
   if (!isAsyncStorageLike(configuredStorage)) {
     throw createLocalSpaceError(
       'INVALID_CONFIG',
-      'reactNativeAsyncStorage must implement getItem, setItem, and removeItem.',
+      'reactNativeAsyncStorage must implement getItem, setItem, removeItem, and getAllKeys.',
       {
         configKey: 'reactNativeAsyncStorage',
         driver: DRIVER_NAME,
@@ -540,11 +541,10 @@ const reactNativeAsyncStorageWrapper: Driver = {
   _driver: DRIVER_NAME,
   _initStorage,
   _support: true,
-  _capabilities: (config) => ({
+  _capabilities: () => ({
     transactions: false,
     atomicBatch: false,
-    dropInstance:
-      typeof config.reactNativeAsyncStorage?.getAllKeys === 'function',
+    dropInstance: true,
     persistent: true,
     storageBuckets: false,
   }),

@@ -72,6 +72,9 @@
   namespace deletion cannot cross the instance's selected bucket boundary.
 - Made React Native AsyncStorage injection mandatory; runtime globals,
   `require`, and dynamic import are no longer probed.
+- Required React Native adapters to provide `getAllKeys` at selection time so
+  query, clear, and namespace deletion cannot fail later from a partial public
+  capability. `clear` and multi methods remain optional optimizations.
 - Kept the historical default namespace permanently fixed at
   `localforage/keyvaluepairs` so existing supported 2.x data remains addressable.
 

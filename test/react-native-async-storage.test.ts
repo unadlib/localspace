@@ -311,9 +311,9 @@ describe('react native async storage driver', () => {
     await instance.close();
   });
 
-  it('reports adapter-dependent query and drop capabilities explicitly', async () => {
+  it('rejects an adapter without query capability during selection', async () => {
     const values = new Map<string, string>();
-    const minimalAdapter: ReactNativeAsyncStorage = {
+    const incompleteAdapter = {
       getItem: async (key) => values.get(key) ?? null,
       setItem: async (key, value) => {
         values.set(key, value);
@@ -325,26 +325,21 @@ describe('react native async storage driver', () => {
     const instance = new LocalSpace({
       name: 'rn-minimal-capabilities',
       storeName: 'rn_minimal_capabilities',
-      reactNativeAsyncStorage: minimalAdapter,
+      reactNativeAsyncStorage:
+        incompleteAdapter as unknown as ReactNativeAsyncStorage,
       drivers: [reactNativeAsyncStorageDriver],
     });
 
     await instance.setDriver([instance.REACTNATIVEASYNCSTORAGE]);
-    await instance.ready();
-    expect(instance.capabilities()).toMatchObject({
-      transactions: false,
-      dropInstance: false,
+    await expect(instance.ready()).rejects.toMatchObject({
+      code: 'INVALID_CONFIG',
+      details: {
+        configKey: 'reactNativeAsyncStorage',
+        operation: 'initialize',
+        reason: 'adapter-invalid',
+      },
     });
-    await instance.setItem('supported', 'yes');
-    await expect(instance.getItem('supported')).resolves.toBe('yes');
-    await expect(instance.keys()).rejects.toMatchObject({
-      code: 'UNSUPPORTED_OPERATION',
-      details: { operation: 'keys' },
-    });
-    await expect(instance.dropInstance()).rejects.toMatchObject({
-      code: 'UNSUPPORTED_OPERATION',
-      details: { operation: 'dropInstance' },
-    });
+    expect(instance.driver()).toBe(instance.REACTNATIVEASYNCSTORAGE);
     await instance.close();
   });
 });

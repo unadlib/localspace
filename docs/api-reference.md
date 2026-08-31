@@ -404,12 +404,12 @@ Returns a frozen snapshot for the selected initialized session. Before
 initialization it throws `DRIVER_NOT_INITIALIZED`; after close it throws
 `INSTANCE_CLOSED`.
 
-| Driver          | `transactions` | `atomicBatch`   | `dropInstance`           | `persistent` | `storageBuckets`               |
-| --------------- | -------------- | --------------- | ------------------------ | ------------ | ------------------------------ |
-| IndexedDB       | `true`         | `!maxBatchSize` | `true`                   | `true`       | detected from selected backend |
-| localStorage    | `false`        | `false`         | `true`                   | `true`       | `false`                        |
-| memory          | `true`         | `false`         | `true`                   | `false`      | `false`                        |
-| RN AsyncStorage | `false`        | `false`         | adapter has `getAllKeys` | `true`       | `false`                        |
+| Driver          | `transactions` | `atomicBatch`   | `dropInstance` | `persistent` | `storageBuckets`               |
+| --------------- | -------------- | --------------- | -------------- | ------------ | ------------------------------ |
+| IndexedDB       | `true`         | `!maxBatchSize` | `true`         | `true`       | detected from selected backend |
+| localStorage    | `false`        | `false`         | `true`         | `true`       | `false`                        |
+| memory          | `true`         | `false`         | `true`         | `false`      | `false`                        |
+| RN AsyncStorage | `false`        | `false`         | `true`         | `true`       | `false`                        |
 
 ### `getDriver(name): Promise<Readonly<Driver>>`
 
@@ -519,8 +519,9 @@ const store = await createReactNativeInstance(localspace, {
 
 The helper creates a construction-scoped driver instance, selects the RN
 driver first, and awaits readiness. A missing adapter rejects with
-`DRIVER_UNAVAILABLE`; a malformed adapter rejects with `INVALID_CONFIG`. RN
-selection never silently falls back.
+`DRIVER_UNAVAILABLE`; an adapter missing `getItem`, `setItem`, `removeItem`, or
+`getAllKeys` rejects with `INVALID_CONFIG`. `clear` and the `multi*` methods are
+optional optimizations. RN selection never silently falls back.
 
 Realm-wide installation is available for advanced integrations:
 

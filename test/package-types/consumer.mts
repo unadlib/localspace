@@ -25,13 +25,22 @@ import localspace, {
 } from 'localspace';
 import {
   createReactNativeInstance,
+  type ReactNativeAsyncStorage,
   type ReactNativeInstanceOptions,
 } from 'localspace/react-native';
 
 const instance: LocalSpaceInstance = new LocalSpace();
 const items: BatchItems<number> = [{ key: 'count', value: 1 }];
 const mode: TransactionMode = 'readwrite';
-const options = {} as ReactNativeInstanceOptions;
+const asyncStorage: ReactNativeAsyncStorage = {
+  getItem: async () => null,
+  setItem: async () => undefined,
+  removeItem: async () => undefined,
+  getAllKeys: async () => [],
+};
+const options: ReactNativeInstanceOptions = {
+  reactNativeAsyncStorage: asyncStorage,
+};
 const localOptions: LocalSpaceOptions = { drivers: [memoryDriver] };
 const declaredCapabilities: DriverCapabilities = { persistent: false };
 const selectedCapabilities: LocalSpaceCapabilities = instance.capabilities();
@@ -138,6 +147,13 @@ const typecheckRemovedApis = (): void => {
   configSnapshot.name = 'changed';
   // @ts-expect-error mutable internal config is not public
   instance._config.name = 'changed';
+  // @ts-expect-error getAllKeys is required by the complete RN facade contract
+  const incompleteAsyncStorage: ReactNativeAsyncStorage = {
+    getItem: async () => null,
+    setItem: async () => undefined,
+    removeItem: async () => undefined,
+  };
+  void incompleteAsyncStorage;
   // @ts-expect-error strictValues was a 2.1 migration-only option
   const strictOptions: LocalSpaceOptions = { strictValues: true };
   const strictTransactionOptions: LocalSpaceOptions = {

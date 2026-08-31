@@ -308,7 +308,9 @@ custom hook examples. Application-level notification examples live in
 
 Runtime auto-detection was removed. The AsyncStorage adapter is required and a
 missing or malformed adapter fails instead of falling through to another
-driver.
+driver. It must implement `getItem`, `setItem`, `removeItem`, and `getAllKeys`
+so every public query and namespace operation is available after readiness;
+`clear` and the `multi*` methods remain optional optimizations.
 
 ```ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
