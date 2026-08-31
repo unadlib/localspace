@@ -58,6 +58,7 @@ themselves.
 | Storage Bucket fallback to default backend                             | handle readiness failure; a requested bucket never falls back                           |
 | AES-CBC/AES-CTR normal encryption config                               | use the read-only legacy migration plugin, then write AES-GCM data elsewhere            |
 | synthetic `PluginStage: 'error'` or exhaustive 2.1 operation switches  | use the actual hook stage and handle all new operation kinds                            |
+| exhaustive `LocalSpaceErrorCode` switches                              | handle `TRANSACTION_SCOPE_REQUIRED` and `TRANSACTION_INACTIVE` explicitly               |
 | package source/deep imports                                            | import only `localspace`, `localspace/react-native`, or `localspace/package.json`       |
 | prefixed IndexedDB/WebSQL assumptions                                  | require modern unprefixed IndexedDB; migrate WebSQL data first                          |
 
