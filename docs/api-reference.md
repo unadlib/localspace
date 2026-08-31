@@ -281,6 +281,11 @@ detects that condition, `TRANSACTION_INACTIVE` reports a contract violation; it
 cannot undo a native transaction that has already completed. Such work belongs
 before or after `runTransaction()`.
 
+With `pluginErrorPolicy: 'strict'`, an `afterRunTransaction` observer error is
+propagated after the commit and therefore cannot roll it back. Post-commit
+observers should not throw when promise resolution is the application's commit
+signal.
+
 IndexedDB uses one native object-store transaction and keeps it active across
 awaited scope work. Memory serializes read-write runners per JavaScript realm,
 `name`, and `storeName`, using a private snapshot and atomic commit. LocalSpace

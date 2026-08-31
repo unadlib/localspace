@@ -328,4 +328,34 @@ describe('logical query and iteration plugin coverage', () => {
 
     await store.close();
   });
+
+  it('preserves committed data when a strict after-transaction observer fails', async () => {
+    const observerError = new Error('commit notification failed');
+    const afterRunTransaction = vi.fn(() => {
+      throw observerError;
+    });
+    const store = localspace.createInstance({
+      name: uniqueName('transaction-after-observer-error'),
+      pluginErrorPolicy: 'strict',
+      plugins: [
+        {
+          name: 'failing-commit-observer',
+          afterRunTransaction,
+        },
+      ],
+    });
+    await store.setDriver([store.MEMORY]);
+
+    await expect(
+      store.runTransaction('readwrite', (scope) =>
+        scope.set('committed-before-observer', true)
+      )
+    ).rejects.toBe(observerError);
+    expect(afterRunTransaction).toHaveBeenCalledTimes(1);
+    await expect(store.getItem('committed-before-observer')).resolves.toBe(
+      true
+    );
+
+    await store.close();
+  });
 });

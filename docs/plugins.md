@@ -283,6 +283,9 @@ before the driver creates a transaction. `afterRunTransaction` runs only after
 the driver reports a successful commit. Neither hook receives the runner result
 or an active scope, so it cannot rewrite the result or perform transaction-bound
 work. Scope operations continue to use their normal item/query observers.
+Under the strict error policy, an `afterRunTransaction` error is propagated but
+cannot roll back the commit that it is observing; keep post-commit notification
+hooks non-throwing when the caller must treat resolution as the commit signal.
 
 ## Transactions
 
