@@ -263,12 +263,20 @@ Contract:
 - a retained scope rejects after the runner settles;
 - `readonly` scopes reject `set`, `remove`, and `clear` with
   `TRANSACTION_READONLY`;
-- a rejected/failed runner rolls back writes;
+- a rejected/failed runner rolls back writes while the native transaction is
+  still active;
 - the runner result becomes the `runTransaction()` result;
 - plugin transforms and observers run inside the transaction and receive
   `context.transactionScope`;
 - an IndexedDB transaction that becomes natively inactive before settlement
   rejects with `TRANSACTION_INACTIVE`.
+
+Inside the runner, await only Promises returned by the supplied scope. Timers,
+network requests, prompts, and arbitrary external Promises can leave IndexedDB
+with no pending native request, allowing it to commit. If a later scope call
+detects that condition, `TRANSACTION_INACTIVE` reports a contract violation; it
+cannot undo a native transaction that has already completed. Such work belongs
+before or after `runTransaction()`.
 
 IndexedDB uses one native object-store transaction and keeps it active across
 awaited scope work. Memory serializes read-write runners per JavaScript realm,

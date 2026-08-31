@@ -257,6 +257,13 @@ provided scope; ordinary facade calls reject with `TRANSACTION_SCOPE_REQUIRED`.
 The scope becomes invalid as soon as the runner settles, and readonly scopes
 reject mutations with `TRANSACTION_READONLY`.
 
+Only await Promises returned by those scope methods inside the runner. Timers,
+network requests, prompts, and other arbitrary waits are outside the contract.
+With IndexedDB, the browser may commit when no native request remains; a later
+scope call then rejects with `TRANSACTION_INACTIVE`. Writes in that already
+completed native transaction remain committed, so this rejection must not be
+interpreted as rollback. Move external work before or after `runTransaction()`.
+
 Plugins run inside the same transaction and receive the active scope as
 `context.transactionScope`. Async `iterate()` callbacks are awaited
 sequentially; the first non-`undefined` result stops iteration and becomes the

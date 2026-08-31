@@ -57,6 +57,9 @@
   operation state.
 - Changed `iterate()` to await async callbacks sequentially, expose only logical
   decoded values, and return `U | undefined`.
+- Documented the IndexedDB inactive-transaction boundary explicitly: arbitrary
+  external waits are unsupported, and `TRANSACTION_INACTIVE` cannot roll back a
+  native transaction the browser has already committed.
 - Changed TTL visibility so item, batch, iteration, key, and length views agree
   about expired entries; added aggregate clear/drop observers.
 - Changed compression codecs to a bytes-to-bytes contract and persist a

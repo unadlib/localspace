@@ -226,6 +226,14 @@ including a nested `runTransaction`, reject with
 `TRANSACTION_SCOPE_REQUIRED`. A retained scope is invalid after the runner
 settles. Readonly mutations reject with `TRANSACTION_READONLY`.
 
+Await only scope operations inside the runner. JavaScript cannot reliably
+classify the origin of every Promise, so timers, network requests, prompts, and
+other arbitrary waits are unsupported rather than kept alive indefinitely. In
+IndexedDB, the browser may commit once no native request remains. A later scope
+operation rejects with `TRANSACTION_INACTIVE`, but writes in that already
+completed native transaction remain committed; the rejection is not a rollback
+signal. Move external work before or after `runTransaction()`.
+
 Check capability after readiness:
 
 ```ts
