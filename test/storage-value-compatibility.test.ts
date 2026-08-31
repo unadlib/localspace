@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import localspace, {
+  compressionPlugin,
+  encryptionPlugin,
   LocalSpace,
+  ttlPlugin,
   type LocalSpaceInstance,
   type LocalSpaceOptions,
+  type LocalSpacePlugin,
   type StorageValue,
 } from '../src';
 import { inspectStorageValue } from '../src/core/storage-value';
@@ -100,6 +104,42 @@ describe('3.0 StorageValue contract', () => {
       expectStorageValueContract(batch[0].value, fixture);
       expect(batch[1].value).toBe(0);
       expect(Object.is(batch[1].value, -0)).toBe(false);
+      await instance.close();
+    }
+  );
+
+  it.each([
+    ['TTL', () => [ttlPlugin({ defaultTTL: 60_000 })]],
+    ['compression', () => [compressionPlugin({ threshold: 1 })]],
+    [
+      'encryption',
+      () => [
+        encryptionPlugin({
+          key: '0123456789abcdef0123456789abcdef',
+        }),
+      ],
+    ],
+    [
+      'combined built-in transforms',
+      () => [
+        ttlPlugin({ defaultTTL: 60_000 }),
+        compressionPlugin({ threshold: 1 }),
+        encryptionPlugin({
+          key: '0123456789abcdef0123456789abcdef',
+        }),
+      ],
+    ],
+  ] satisfies Array<[string, () => LocalSpacePlugin[]]>)(
+    'round-trips the complete StorageValue corpus through %s',
+    async (_, plugins) => {
+      const instance = await createMemoryInstance({
+        plugins: plugins(),
+        pluginErrorPolicy: 'strict',
+      });
+      const fixture = createStorageValueContractFixture();
+
+      await instance.setItem('contract', fixture.value);
+      expectStorageValueContract(await instance.getItem('contract'), fixture);
       await instance.close();
     }
   );
