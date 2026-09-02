@@ -579,11 +579,11 @@ only unfinished cleanup. `destroy()` was removed; use `close()` for disposal,
 `clear()` for current-store deletion, or `dropInstance()` for namespace
 deletion.
 
-Plugin lifecycle callbacks receive the public stable instance in
-`context.instance` and a callback-scoped guarded receiver in
-`context.lifecycleInstance`. Same-instance storage or lifecycle reentry during
-an async lifecycle callback rejects to prevent deadlocks. Operation hooks do
-not receive `lifecycleInstance`; transaction hooks receive
+Plugin lifecycle callbacks receive a callback-scoped guarded receiver in
+`context.instance`. Same-instance storage or lifecycle reentry during an async
+lifecycle callback rejects to prevent deadlocks. Operation hooks receive the
+public instance instead. `context.instanceToken` provides stable, non-callable
+identity across all hooks, and transaction hooks receive
 `context.transactionScope`.
 
 ## Error contract

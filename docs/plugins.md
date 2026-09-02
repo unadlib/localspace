@@ -64,11 +64,12 @@ have still had a cleanup attempt. A later `close()` retries only failed plugin
 and driver cleanup. Under `lenient`, an ordinary custom-plugin teardown error is
 reported and treated as complete.
 
-`context.instance` is always the public instance and keeps stable identity.
-Lifecycle callbacks also receive `context.lifecycleInstance`, a callback-
-scoped receiver that rejects same-instance storage/lifecycle reentry while the
-callback is pending. This guard extends across `await` and prevents self-
-deadlocks. Operation hooks do not receive `lifecycleInstance`.
+`context.instance` is always safe to call for the current hook. Operation hooks
+receive the public instance. Lifecycle callbacks receive a callback-scoped
+receiver that rejects same-instance storage/lifecycle reentry while the
+callback is pending, including across `await`. `context.instanceToken` is the
+stable identity shared by every context for one store; use it as a WeakMap key
+when plugin state must span lifecycle and operation hooks.
 
 ## Ordering
 
@@ -97,7 +98,7 @@ LocalSpace emits a warning because encrypted bytes rarely compress usefully.
 ```ts
 interface PluginContext {
   instance: LocalSpaceInstance;
-  lifecycleInstance?: LocalSpaceInstance;
+  instanceToken: object;
   transactionScope?: TransactionScope;
   driver: string | null;
   config: LocalSpaceConfigSnapshot;

@@ -371,9 +371,10 @@ Use documented plugin hooks and versioned application DTOs.
 ### Lifecycle and errors
 
 `destroy()` no longer exists. Plugin `onDestroy` runs during `close()` for
-initialized plugins. Inside `onInit`/`onDestroy`, use the callback-scoped
-`context.lifecycleInstance` when retaining or calling a same-instance receiver;
-reentry while the callback is pending rejects instead of deadlocking.
+initialized plugins. Inside `onInit`/`onDestroy`, `context.instance` is the
+callback-scoped receiver; reentry while the callback is pending rejects instead
+of deadlocking. Use `context.instanceToken`, not the receiver itself, as the
+stable WeakMap key for state shared with operation hooks.
 
 `LocalSpaceError` and `PluginAbortError` propagate even under lenient policy.
 Unexpected custom-plugin errors are swallowed only under `pluginErrorPolicy:

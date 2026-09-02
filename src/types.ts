@@ -528,14 +528,17 @@ export type PluginOperation =
 export type PluginStage = 'init' | 'before' | 'after' | 'destroy';
 
 export interface PluginContext {
-  /** The public LocalSpace instance. Its identity is stable across all hooks. */
+  /**
+   * The safe LocalSpace receiver for the current hook. Operation hooks receive
+   * the public instance; lifecycle hooks receive a callback-scoped receiver
+   * that rejects same-instance reentry while the callback is pending.
+   */
   instance: LocalSpaceInstance;
   /**
-   * A callback-scoped receiver for same-instance calls made by `onInit` or
-   * `onDestroy`. It rejects storage and lifecycle reentry while that callback
-   * is pending, including across `await`, and is omitted from operation hooks.
+   * A stable, non-callable identity token shared by every context belonging to
+   * this LocalSpace instance. Use it as a WeakMap key for cross-hook state.
    */
-  lifecycleInstance?: LocalSpaceInstance;
+  instanceToken: object;
   /**
    * The active logical transaction scope when a hook runs for a
    * transaction-bound operation. Plugins must use this scope instead of

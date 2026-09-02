@@ -308,10 +308,11 @@ describe.each(['memory', 'indexeddb'] as const)(
           ])
         ).resolves.toBe('outer');
         expect(nestedError).toMatchObject({
-          code: 'TRANSACTION_SCOPE_REQUIRED',
+          code: 'OPERATION_FAILED',
           details: {
             operation: 'runTransaction',
-            reason: 'transaction-scope-required',
+            reason: 'lifecycle-reentrancy',
+            lifecycle: 'plugin-init',
           },
         });
         expect(nestedRunner).not.toHaveBeenCalled();

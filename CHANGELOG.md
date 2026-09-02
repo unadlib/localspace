@@ -48,6 +48,12 @@
 
 ### Changed
 
+- Made `PluginContext.instance` the safe receiver for every hook. Lifecycle
+  hooks now receive the guarded callback-scoped receiver there, while the new
+  non-callable `instanceToken` provides stable identity across hooks. Removed
+  the unsafe `lifecycleInstance`/public-instance pair that allowed async
+  lifecycle callbacks to reenter initialization and deadlock.
+
 - Replaced runtime driver-method injection and wrapper refreshes with stable
   facade dispatch. Captured/destructured operation references and spies
   continue using the active driver and plugin set across readiness and driver
@@ -209,9 +215,6 @@
 - Isolated lifecycle reentrancy state per asynchronous plugin callback and per
   selected custom driver, releasing guarded receivers after settlement so
   retained contexts can serve later background work without false rejections.
-- Kept `PluginContext.instance` identical to the public instance across every
-  hook, exposed a separate guarded `lifecycleInstance` for async lifecycle
-  calls, and preserved stable custom-driver receivers for identity-keyed state.
 - Typed custom driver `_initStorage()` and `_closeStorage()` receivers as the
   selecting `LocalSpaceInstance`, matching the existing runtime contract.
 - Attempted cleanup when custom `_initStorage()` throws synchronously and kept

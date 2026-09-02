@@ -169,6 +169,8 @@ export class PluginManager {
   private readonly sharedMetadata: Record<string, unknown> =
     sharedMetadataFor();
 
+  private readonly instanceToken: object = Object.freeze(Object.create(null));
+
   private readonly pluginRegistry: RegisteredPlugin[] = [];
 
   private readonly initialized = new WeakSet<LocalSpacePlugin>();
@@ -446,8 +448,8 @@ export class PluginManager {
     transactionScope?: PluginContext['transactionScope']
   ): PluginContext {
     return {
-      instance: this.host,
-      ...(lifecycleInstance ? { lifecycleInstance } : {}),
+      instance: lifecycleInstance ?? this.host,
+      instanceToken: this.instanceToken,
       ...(transactionScope ? { transactionScope } : {}),
       driver: this.host.driver ? this.host.driver() : null,
       config: this.host.config(),

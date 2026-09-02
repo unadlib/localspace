@@ -89,6 +89,10 @@ void driverDefinition.then((definition) => {
 });
 const observerPlugin: LocalSpacePlugin = {
   name: 'package-types-observer',
+  onInit(context) {
+    const token: object = context.instanceToken;
+    void [token, context.instance.ready];
+  },
   afterIterate(summary: Readonly<PluginIterateSummary>) {
     void summary.iterations;
   },

@@ -383,7 +383,7 @@ describe('LocalSpace.close', () => {
               .catch((error) => Promise.resolve(error));
             await Promise.resolve();
             reentryError = await context
-              .lifecycleInstance!.close()
+              .instance.close()
               .catch((error) => Promise.resolve(error));
           },
         },
@@ -422,7 +422,7 @@ describe('LocalSpace.close', () => {
           onInit: async (context) => {
             await Promise.resolve();
             reentryError = await context
-              .lifecycleInstance!.getItem('nested')
+              .instance.getItem('nested')
               .catch((error) => Promise.resolve(error));
           },
         },
@@ -458,7 +458,7 @@ describe('LocalSpace.close', () => {
         {
           name: 'released-plugin-init-guard',
           onInit: async (context) => {
-            lifecycleInstance = context.lifecycleInstance!;
+            lifecycleInstance = context.instance;
             await Promise.resolve();
           },
         },
@@ -495,10 +495,10 @@ describe('LocalSpace.close', () => {
   });
 
   it('preserves plugin instance identity across lifecycle and operation hooks', async () => {
-    const state = new WeakMap<LocalSpaceInstance, { writes: number }>();
-    let initInstance: LocalSpaceInstance | undefined;
-    let hookInstance: LocalSpaceInstance | undefined;
-    let destroyInstance: LocalSpaceInstance | undefined;
+    const state = new WeakMap<object, { writes: number }>();
+    let initToken: object | undefined;
+    let hookToken: object | undefined;
+    let destroyToken: object | undefined;
     const instance = new LocalSpace({
       name: uniqueName('stable-plugin-instance'),
       pluginErrorPolicy: 'strict',
@@ -506,14 +506,14 @@ describe('LocalSpace.close', () => {
         {
           name: 'stable-plugin-instance',
           onInit: (context) => {
-            expect(context.lifecycleInstance).toBeDefined();
-            initInstance = context.instance;
-            state.set(context.instance, { writes: 0 });
+            expect(context.instance).not.toBe(instance);
+            initToken = context.instanceToken;
+            state.set(context.instanceToken, { writes: 0 });
           },
           beforeSet: (_key, value, context) => {
-            expect(context.lifecycleInstance).toBeUndefined();
-            hookInstance = context.instance;
-            const pluginState = state.get(context.instance);
+            expect(context.instance).toBe(instance);
+            hookToken = context.instanceToken;
+            const pluginState = state.get(context.instanceToken);
             if (!pluginState) {
               throw new Error('Plugin instance state is missing.');
             }
@@ -521,9 +521,9 @@ describe('LocalSpace.close', () => {
             return value;
           },
           onDestroy: (context) => {
-            expect(context.lifecycleInstance).toBeDefined();
-            destroyInstance = context.instance;
-            expect(state.get(context.instance)?.writes).toBe(1);
+            expect(context.instance).not.toBe(instance);
+            destroyToken = context.instanceToken;
+            expect(state.get(context.instanceToken)?.writes).toBe(1);
           },
         },
       ],
@@ -533,9 +533,8 @@ describe('LocalSpace.close', () => {
     await expect(instance.setItem('key', 'value')).resolves.toBe('value');
     await instance.close();
 
-    expect(hookInstance).toBe(initInstance);
-    expect(destroyInstance).toBe(initInstance);
-    expect(initInstance).toBe(instance);
+    expect(hookToken).toBe(initToken);
+    expect(destroyToken).toBe(initToken);
   });
 
   it('fails fast when custom driver initialization reenters lifecycle', async () => {
