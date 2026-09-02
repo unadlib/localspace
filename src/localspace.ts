@@ -180,6 +180,7 @@ type DriverClose = () => Promise<void>;
 type DriverSession = {
   driver: string;
   operations: Readonly<Record<DriverOperation, RawDriverMethod>>;
+  facadeOperations: Readonly<Record<DriverOperation, RawDriverMethod>>;
   supportedOperations: ReadonlySet<DriverOperation>;
   initialize(): Promise<void>;
   resolveCapabilities(): Readonly<LocalSpaceCapabilities>;
@@ -887,9 +888,11 @@ export class LocalSpace implements LocalSpaceInstance {
       };
     }
 
+    const frozenOperations = Object.freeze(operations);
     session = {
       driver: definition._driver,
-      operations: Object.freeze(operations),
+      operations: frozenOperations,
+      facadeOperations: this._createFacadeOperations(frozenOperations),
       supportedOperations,
       initialize: () =>
         lifecycleScope
@@ -920,6 +923,62 @@ export class LocalSpace implements LocalSpaceInstance {
     return session;
   }
 
+  private _createFacadeOperations(
+    operations: Readonly<Record<DriverOperation, RawDriverMethod>>
+  ): Readonly<Record<DriverOperation, RawDriverMethod>> {
+    // Driver sessions are created only after ready() locks plugin registration,
+    // so this dispatch graph remains valid for the complete session lifetime.
+    const hasPlugins = this._pluginManager.hasPlugins();
+    const facadeOperations = { ...operations };
+
+    facadeOperations.setItem = hasPlugins
+      ? this._createSetItemWrapper(operations.setItem)
+      : this._createSetItemValueValidationWrapper(operations.setItem);
+    facadeOperations.setItems = hasPlugins
+      ? this._createSetItemsWrapper(operations.setItems)
+      : this._createSetItemsValueValidationWrapper(operations.setItems);
+    facadeOperations.runTransaction = this._createRunTransactionWrapper(
+      operations.runTransaction
+    );
+    facadeOperations.iterate = this._createIterateWrapper(
+      operations.iterate,
+      hasPlugins
+    );
+
+    if (hasPlugins) {
+      facadeOperations.clear = this._createClearWrapper(operations.clear);
+      facadeOperations.dropInstance = this._createDropInstanceWrapper(
+        operations.dropInstance
+      );
+      facadeOperations.getItem = this._createGetItemWrapper(
+        operations.getItem
+      );
+      facadeOperations.getItems = this._createGetItemsWrapper(
+        operations.getItems
+      );
+      facadeOperations.removeItem = this._createRemoveItemWrapper(
+        operations.removeItem
+      );
+      facadeOperations.removeItems = this._createRemoveItemsWrapper(
+        operations.removeItems
+      );
+      facadeOperations.keys = this._createKeysWrapper(
+        operations.keys,
+        operations.iterate
+      );
+      facadeOperations.key = this._createKeyWrapper(
+        operations.key,
+        operations.iterate
+      );
+      facadeOperations.length = this._createLengthWrapper(
+        operations.length,
+        operations.iterate
+      );
+    }
+
+    return Object.freeze(facadeOperations);
+  }
+
   private _dispatchOperation<T>(
     operation: DriverOperation,
     args: unknown[]
@@ -947,84 +1006,7 @@ export class LocalSpace implements LocalSpaceInstance {
         this._assertTransactionArguments(session, args);
       }
 
-      const original = session.operations[operation];
-      let implementation: RawDriverMethod = original;
-      const hasPlugins = this._pluginManager.hasPlugins();
-
-      switch (operation) {
-        case 'setItem':
-          implementation = hasPlugins
-            ? this._createSetItemWrapper(original)
-            : this._createSetItemValueValidationWrapper(original);
-          break;
-        case 'setItems':
-          implementation = hasPlugins
-            ? this._createSetItemsWrapper(original)
-            : this._createSetItemsValueValidationWrapper(original);
-          break;
-        case 'runTransaction':
-          implementation = this._createRunTransactionWrapper(original);
-          break;
-        case 'clear':
-          if (hasPlugins) {
-            implementation = this._createClearWrapper(original);
-          }
-          break;
-        case 'dropInstance':
-          if (hasPlugins) {
-            implementation = this._createDropInstanceWrapper(original);
-          }
-          break;
-        case 'getItem':
-          if (hasPlugins) {
-            implementation = this._createGetItemWrapper(original);
-          }
-          break;
-        case 'getItems':
-          if (hasPlugins) {
-            implementation = this._createGetItemsWrapper(original);
-          }
-          break;
-        case 'removeItem':
-          if (hasPlugins) {
-            implementation = this._createRemoveItemWrapper(original);
-          }
-          break;
-        case 'removeItems':
-          if (hasPlugins) {
-            implementation = this._createRemoveItemsWrapper(original);
-          }
-          break;
-        case 'iterate': {
-          implementation = this._createIterateWrapper(original, hasPlugins);
-          break;
-        }
-        case 'keys':
-          if (hasPlugins) {
-            implementation = this._createKeysWrapper(
-              original,
-              session.operations.iterate
-            );
-          }
-          break;
-        case 'key':
-          if (hasPlugins) {
-            implementation = this._createKeyWrapper(
-              original,
-              session.operations.iterate
-            );
-          }
-          break;
-        case 'length': {
-          if (hasPlugins) {
-            implementation = this._createLengthWrapper(
-              original,
-              session.operations.iterate
-            );
-          }
-          break;
-        }
-      }
+      const implementation = session.facadeOperations[operation];
 
       if (!isTransaction) {
         return implementation(...args);

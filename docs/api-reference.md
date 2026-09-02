@@ -139,7 +139,9 @@ Construction-scoped custom driver definitions do not leak to another instance.
 ## Core storage methods
 
 All public operation methods are stable facade functions: their identity does
-not change after readiness, driver fallback/switching, or plugin setup.
+not change after readiness, driver fallback/switching, or plugin setup. The
+validation/plugin dispatch graph is compiled once for each selected driver
+session.
 
 ### `getItem<T = StorageValue>(key): Promise<T | null>`
 

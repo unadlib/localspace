@@ -82,7 +82,8 @@
 - Replaced runtime driver-method injection and wrapper refreshes with stable
   facade dispatch. Captured/destructured operation references and spies
   continue using the active driver and plugin set across readiness and driver
-  switches.
+  switches. Each selected driver session compiles its validation/plugin
+  dispatch graph once instead of rebuilding operation wrappers per call.
 - Made driver registration collect and validate visible descriptors before
   reading members; own or inherited accessors reject without being invoked.
 - Made configuration construction-time state. `config()` now returns a
