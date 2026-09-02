@@ -37,6 +37,7 @@ themselves.
 | `instance.defineDriver()`                                              | use construction-scoped `drivers` or exported realm-wide `registerDriver()`             |
 | treating `getDriver()` output or custom-driver inputs as mutable state | treat definitions as readonly; keep mutable state on the selected driver session        |
 | underscored `LocalSpaceInstance` implementation fields                 | stop accessing them; use the supported facade, config, capability, and driver APIs      |
+| `PluginContext.dbInfo`                                                 | branch on `context.driver` and read `context.config`; driver internals are not exposed  |
 | `destroy()`                                                            | use `close()` for disposal, `clear()`/`dropInstance()` for deletion                     |
 | `size` configuration                                                   | remove it; built-in drivers never used it as quota enforcement                          |
 | broad arbitrary value generics                                         | store only `StorageValue`; convert rich values explicitly                               |
@@ -378,6 +379,14 @@ reentry while the callback is pending rejects instead of deadlocking.
 Unexpected custom-plugin errors are swallowed only under `pluginErrorPolicy:
 'lenient'` after `onError`/console reporting. Built-in transformations fail
 closed.
+
+`PluginContext.dbInfo` is gone. It handed plugins driver internals — the live
+`IDBDatabase`, the IndexedDB factory, and the internal key prefix — through an
+interface that is supposed to be driver-agnostic, and it was already `null` on
+every driver except IndexedDB. A plugin needing backend-specific behaviour
+should branch on `context.driver` and read the frozen `context.config`
+snapshot; anything beyond that belongs in a custom driver, which owns its own
+`_dbInfo` on its session receiver.
 
 `PluginOperation` now includes query, destructive, transaction, and lifecycle
 operations. Do not treat the 2.1 union as exhaustive. `PluginStage` no longer

@@ -12,6 +12,51 @@ const createStore = (plugins: LocalSpacePlugin[]) => {
 };
 
 describe('single-pass plugin pipeline', () => {
+  it('exposes only the documented context surface, never driver internals', async () => {
+    const operationKeys: string[][] = [];
+    const lifecycleKeys: string[][] = [];
+    const store = await createStore([
+      {
+        name: 'context-shape',
+        onInit: (context) => {
+          lifecycleKeys.push(Object.keys(context).sort());
+        },
+        afterSet: (_key, _value, context) => {
+          operationKeys.push(Object.keys(context).sort());
+        },
+      },
+    ]);
+
+    await store.setItem('key', 'value');
+
+    expect(operationKeys).toEqual([
+      [
+        'config',
+        'driver',
+        'instance',
+        'metadata',
+        'operation',
+        'operationState',
+      ].sort(),
+    ]);
+    expect(lifecycleKeys).toEqual([
+      [
+        'config',
+        'driver',
+        'instance',
+        'lifecycleInstance',
+        'metadata',
+        'operation',
+        'operationState',
+      ].sort(),
+    ]);
+    // The live IndexedDB connection, factory, and internal key prefix reached
+    // plugins through `dbInfo` before 3.0. Nothing driver-specific may return.
+    for (const keys of [...operationKeys, ...lifecycleKeys]) {
+      expect(keys).not.toContain('dbInfo');
+    }
+  });
+
   it('keeps operationState plugin-owned apart from documented batch metadata', async () => {
     const singleStateKeys: PropertyKey[][] = [];
     const batchStateKeys: PropertyKey[][] = [];

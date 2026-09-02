@@ -543,7 +543,6 @@ export interface PluginContext {
    */
   transactionScope?: TransactionScope;
   driver: string | null;
-  dbInfo: DbInfo | null;
   config: LocalSpaceConfigSnapshot;
   metadata: Record<string, unknown>;
   operation: PluginOperation | null;

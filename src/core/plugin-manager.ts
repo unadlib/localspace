@@ -1,7 +1,6 @@
 import type {
   BatchItems,
   BatchResponse,
-  DbInfo,
   LocalSpaceConfigSnapshot,
   LocalSpaceInstance,
   LocalSpacePlugin,
@@ -38,7 +37,6 @@ type PluginLifecycleBridge = {
   createInvocation(
     lifecycle: 'plugin-init' | 'plugin-destroy'
   ): PluginLifecycleInvocation;
-  getDbInfo(): DbInfo | null;
 };
 
 type RegisteredPlugin = {
@@ -452,7 +450,6 @@ export class PluginManager {
       ...(lifecycleInstance ? { lifecycleInstance } : {}),
       ...(transactionScope ? { transactionScope } : {}),
       driver: this.host.driver ? this.host.driver() : null,
-      dbInfo: this.lifecycleBridge.getDbInfo(),
       config: this.host.config(),
       metadata: this.sharedMetadata,
       operation,

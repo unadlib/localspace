@@ -119,6 +119,12 @@
 ### Removed
 
 - Removed `config(options)`, `instance.defineDriver()`, and `destroy()`.
+- Removed `PluginContext.dbInfo`. It exposed driver internals — including the
+  live `IDBDatabase`, the IndexedDB factory, and the internal key prefix —
+  through a driver-agnostic interface, was `null` for every non-IndexedDB
+  driver, and was used by no built-in plugin. Plugins now see `driver` plus the
+  frozen `config` snapshot. This also removes the per-operation bookkeeping that
+  existed only to keep that field current.
 - Removed the 2.1-only `strictValues` and `strictTransactions` migration options
   because 3.0 validation and transaction-scope enforcement are mandatory.
 - Removed `prewarmTransactions`, `connectionIdleMs`, and

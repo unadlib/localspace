@@ -100,7 +100,6 @@ interface PluginContext {
   lifecycleInstance?: LocalSpaceInstance;
   transactionScope?: TransactionScope;
   driver: string | null;
-  dbInfo: DbInfo | null;
   config: LocalSpaceConfigSnapshot;
   metadata: Record<string, unknown>;
   operation: PluginOperation | null;
@@ -108,7 +107,12 @@ interface PluginContext {
 }
 ```
 
-- `config` is a detached, frozen snapshot.
+- `config` is a detached, frozen snapshot. Together with `driver` it is the
+  complete view a plugin gets of the active backend. Driver internals such as
+  the live IndexedDB connection are deliberately not exposed: they are
+  driver-specific, absent for other drivers, and not part of any stable
+  contract. A plugin that needs backend-specific behaviour should branch on
+  `driver` and use the public API.
 - `metadata` is shared across contexts for the lifetime of the plugin manager;
   namespace keys to avoid collisions.
 - `operationState` is per operation/context and is suitable for carrying a

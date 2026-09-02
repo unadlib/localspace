@@ -249,6 +249,15 @@ export class LocalSpace implements LocalSpaceInstance {
   private _manualDriverOverride = false;
   private _initDriver: (() => Promise<void>) | null = null;
   private _ready: Promise<void> | null = null;
+  /**
+   * Mirror of the active driver's `_dbInfo`, matching the field name drivers
+   * assign on their own receiver. Nothing in LocalSpace reads it; it exists so
+   * driver-level tests can inspect connection state. It is intentionally absent
+   * from `LocalSpaceInstance` and from `PluginContext` — plugins get `driver`
+   * and the immutable `config` snapshot instead of driver internals.
+   *
+   * @internal
+   */
   private _dbInfo: DbInfo | null = null;
   private _driver?: string;
   private _closed = false;
@@ -302,7 +311,6 @@ export class LocalSpace implements LocalSpaceInstance {
     this._pluginManager = new PluginManager(this, plugins, {
       createInvocation: (lifecycle) =>
         this._createLifecycleInvocation(lifecycle),
-      getDbInfo: () => this._dbInfo,
     });
 
     const driverInitializationPromises = drivers.map((driver) =>
@@ -832,10 +840,17 @@ export class LocalSpace implements LocalSpaceInstance {
       definition
     );
     let session!: DriverSession;
+    // Mirrors the active driver's `_dbInfo` onto the instance for white-box
+    // tests. Drivers only ever assign `_dbInfo` inside `_initStorage()`, and
+    // the mirror holds the same object reference afterwards, so lifecycle
+    // transitions are the only points that need to re-read it; operations
+    // mutate that object in place and stay visible without any resync.
     const syncFacade = () => {
       if (this._activeDriverSession === session) {
-        this._dbInfo = (receiverContext.get('_dbInfo') ??
-          null) as DbInfo | null;
+        const dbInfo = (receiverContext.get('_dbInfo') ?? null) as DbInfo | null;
+        if (this._dbInfo !== dbInfo) {
+          this._dbInfo = dbInfo;
+        }
       }
     };
     const receiver =
@@ -863,7 +878,7 @@ export class LocalSpace implements LocalSpaceInstance {
       operations[operation] = (...args: unknown[]) => {
         try {
           this._assertOpen(operation);
-          return Promise.resolve(candidate(...args)).finally(syncFacade);
+          return Promise.resolve(candidate(...args));
         } catch (error) {
           return Promise.reject(error);
         }
