@@ -233,10 +233,42 @@ await store.runTransaction('readwrite', async (tx) => {
 ```
 
 Available scope methods are `get`, `set`, `remove`, `keys`, `iterate`, and
-`clear`. During a runner, all ordinary facade operations on that instance,
-including a nested `runTransaction`, reject with
-`TRANSACTION_SCOPE_REQUIRED`. A retained scope is invalid after the runner
-settles. Readonly mutations reject with `TRANSACTION_READONLY`.
+`clear`. All ordinary facade operations on that instance, including a nested
+`runTransaction`, reject with `TRANSACTION_SCOPE_REQUIRED` for the complete
+admitted transaction, including plugin initialization and before/after
+observers. Admission follows invocation order, so this rejects deterministically
+rather than depending on how quickly the driver reaches the runner:
+
+```ts
+// 2.1.x: sometimes wrote outside the transaction, sometimes rejected
+await Promise.all([
+  store.runTransaction('readwrite', async (tx) => tx.set('a', 1)),
+  store.setItem('b', 2), // 3.0: always TRANSACTION_SCOPE_REQUIRED
+]);
+```
+
+Any overlapping `runTransaction()` on the same instance is rejected instead of
+queued — including one issued by unrelated code, not just a nested call from
+within the runner. LocalSpace cannot tell the two apart, and queueing a nested
+call could make it wait for its own caller. Start independent transactions
+sequentially:
+
+```ts
+await Promise.all([txA(), txB()]); // one rejects in 3.0
+await txA();
+await txB(); // both run
+```
+
+Capability and argument validation happen before the transaction window is
+claimed. Calling `runTransaction()` on a non-transactional driver, or passing
+invalid transaction arguments, does not make a concurrent ordinary operation
+fail with `TRANSACTION_SCOPE_REQUIRED`.
+
+Move unrelated writes out of the runner, or issue them after the transaction
+resolves.
+
+A retained scope is invalid after the runner settles. Readonly mutations reject
+with `TRANSACTION_READONLY`.
 
 Await only scope operations inside the runner. JavaScript cannot reliably
 classify the origin of every Promise, so timers, network requests, prompts, and

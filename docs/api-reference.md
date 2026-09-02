@@ -259,7 +259,17 @@ Contract:
 
 - the runner must use only the supplied scope for same-instance storage work;
 - every ordinary facade operation on that instance rejects with
-  `TRANSACTION_SCOPE_REQUIRED` while the runner is active;
+  `TRANSACTION_SCOPE_REQUIRED` for the complete admitted transaction, including
+  plugin initialization and before/after observers — not only while the runner
+  callback happens to be executing;
+- any overlapping `runTransaction()` on that instance also rejects with
+  `TRANSACTION_SCOPE_REQUIRED`; LocalSpace cannot distinguish a nested call
+  from unrelated concurrent code, and queueing a nested call could deadlock;
+- transaction admission follows invocation order. Capability and argument
+  validation run before the transaction window is claimed, so an unsupported
+  or invalid transaction attempt does not reject unrelated ordinary work;
+- start independent same-instance transactions sequentially with `await`, not
+  together with `Promise.all()`;
 - a retained scope rejects after the runner settles;
 - `readonly` scopes reject `set`, `remove`, and `clear` with
   `TRANSACTION_READONLY`;

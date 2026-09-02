@@ -100,6 +100,14 @@
 - Transaction runners must use only their supplied scope. Same-instance facade
   calls reject with `TRANSACTION_SCOPE_REQUIRED`, readonly mutations reject
   with `TRANSACTION_READONLY`, and inactive IndexedDB work fails explicitly.
+  Admission follows invocation order and the rejection window spans plugin
+  initialization, driver execution, and before/after observers, so an ordinary
+  operation issued in the same tick cannot race past it.
+- Any overlapping same-instance `runTransaction()` rejects rather than being
+  queued. Nested and unrelated concurrent calls are indistinguishable in the
+  browser, and queueing a nested call can deadlock. Capability and argument
+  validation happen before the window is claimed, so rejected unsupported or
+  invalid attempts do not poison concurrent ordinary work.
 - IndexedDB maintains one native object-store transaction across awaited scope
   and plugin work, including Web Crypto, compression, TTL, and async iteration.
 - Memory transactions now serialize competing writers and atomically commit or

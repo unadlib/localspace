@@ -231,6 +231,40 @@ describe('driver capability snapshots', () => {
     await instance.close();
   });
 
+  it('does not let an unsupported transaction poison concurrent ordinary work', async () => {
+    const driver = createMinimalDriver(uniqueName('no-transactions'));
+    const runner = vi.fn();
+    const instance = new LocalSpace({
+      driver: driver._driver,
+      drivers: [driver],
+    });
+
+    const [transaction, ordinary] = await Promise.allSettled([
+      instance.runTransaction('readwrite', runner),
+      instance.setItem('ordinary', 'stored'),
+    ]);
+
+    expect(transaction).toMatchObject({
+      status: 'rejected',
+      reason: {
+        code: 'UNSUPPORTED_OPERATION',
+        details: {
+          driver: driver._driver,
+          operation: 'runTransaction',
+          reason: 'driver-operation-unavailable',
+        },
+      },
+    });
+    expect(ordinary).toMatchObject({
+      status: 'fulfilled',
+      value: 'stored',
+    });
+    expect(runner).not.toHaveBeenCalled();
+    await expect(instance.getItem('ordinary')).resolves.toBe('stored');
+
+    await instance.close();
+  });
+
   it('snapshots nested declarations without freezing caller-owned metadata', async () => {
     const declaration: DriverCapabilities = {
       transactions: true,

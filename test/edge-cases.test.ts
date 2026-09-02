@@ -151,7 +151,7 @@ describe('Edge cases and concurrency tests', () => {
       }
     });
 
-    it('should handle concurrent transactions', async () => {
+    it('should reject overlapping same-instance transactions', async () => {
       await instance.setItem('counter', 0);
 
       const transaction1 = instance.runTransaction(
@@ -172,11 +172,25 @@ describe('Edge cases and concurrency tests', () => {
         }
       );
 
-      await Promise.all([transaction1, transaction2]);
+      const results = await Promise.allSettled([transaction1, transaction2]);
+      expect(results[0]).toMatchObject({ status: 'fulfilled', value: 0 });
+      expect(results[1]).toMatchObject({
+        status: 'rejected',
+        reason: {
+          code: 'TRANSACTION_SCOPE_REQUIRED',
+          details: { operation: 'runTransaction' },
+        },
+      });
+      await expect(instance.getItem('counter')).resolves.toBe(1);
 
-      // Both transactions should complete; final value depends on execution order
-      const finalValue = await instance.getItem<number>('counter');
-      expect(finalValue).toBeGreaterThanOrEqual(1);
+      await expect(
+        instance.runTransaction('readwrite', async (scope) => {
+          const value = (await scope.get<number>('counter')) ?? 0;
+          await scope.set('counter', value + 10);
+          return value;
+        })
+      ).resolves.toBe(1);
+      await expect(instance.getItem('counter')).resolves.toBe(11);
     });
 
     it('should rollback on transaction error', async () => {

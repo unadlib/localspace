@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import localspace from '../src';
 import type {
   LocalSpaceInstance,
+  LocalSpacePlugin,
   StorageValue,
   TransactionScope,
 } from '../src/types';
@@ -14,15 +15,16 @@ const timeoutAfter = (ms: number) =>
   });
 
 const createStore = async (
-  driver: TransactionDriver
+  driver: TransactionDriver,
+  plugins: LocalSpacePlugin[] = []
 ): Promise<LocalSpaceInstance> => {
   const store = localspace.createInstance({
     name: `transaction-contract-${driver}-${Math.random().toString(36).slice(2)}`,
     storeName: 'store',
+    plugins,
+    pluginErrorPolicy: 'strict',
   });
-  await store.setDriver([
-    driver === 'memory' ? store.MEMORY : store.INDEXEDDB,
-  ]);
+  await store.setDriver([driver === 'memory' ? store.MEMORY : store.INDEXEDDB]);
   await store.ready();
   return store;
 };
@@ -78,10 +80,9 @@ describe.each(['memory', 'indexeddb'] as const)(
     it('rejects every ordinary facade operation while the runner is active', async () => {
       const store = await createStore(driver);
       const nestedRunner = vi.fn();
-      const operations: Array<[
-        string,
-        (instance: LocalSpaceInstance) => Promise<unknown>,
-      ]> = [
+      const operations: Array<
+        [string, (instance: LocalSpaceInstance) => Promise<unknown>]
+      > = [
         ['clear', (instance) => instance.clear()],
         ['getItem', (instance) => instance.getItem('seed')],
         ['getItems', (instance) => instance.getItems(['seed'])],
@@ -96,10 +97,7 @@ describe.each(['memory', 'indexeddb'] as const)(
           (instance) => instance.runTransaction('readonly', nestedRunner),
         ],
         ['setItem', (instance) => instance.setItem('ordinary', 'blocked')],
-        [
-          'setItems',
-          (instance) => instance.setItems({ ordinary: 'blocked' }),
-        ],
+        ['setItems', (instance) => instance.setItems({ ordinary: 'blocked' })],
         ['dropInstance', (instance) => instance.dropInstance()],
       ];
 
@@ -135,6 +133,320 @@ describe.each(['memory', 'indexeddb'] as const)(
       }
     });
 
+    it('rejects an ordinary operation issued in the same tick as the runner', async () => {
+      // Admission order, rather than driver timing, decides which call owns the
+      // transaction window.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const store = await createStore(driver);
+
+        try {
+          const [transaction, ordinary] = await Promise.allSettled([
+            store.runTransaction('readwrite', async (scope) => {
+              await scope.set('scoped', 'committed');
+              return 'runner-completed';
+            }),
+            store.setItem('ordinary', 'blocked'),
+          ]);
+
+          expect(transaction).toMatchObject({
+            status: 'fulfilled',
+            value: 'runner-completed',
+          });
+          expect(ordinary).toMatchObject({
+            status: 'rejected',
+            reason: {
+              code: 'TRANSACTION_SCOPE_REQUIRED',
+              details: {
+                operation: 'setItem',
+                reason: 'transaction-scope-required',
+              },
+            },
+          });
+          await expect(store.getItem('ordinary')).resolves.toBeNull();
+          await expect(store.getItem('scoped')).resolves.toBe('committed');
+        } finally {
+          await cleanupStore(store);
+        }
+      }
+    });
+
+    it('rejects every overlapping transaction deterministically', async () => {
+      const store = await createStore(driver);
+
+      try {
+        await store.setItem('counter', 0);
+
+        const increment = (amount: number) =>
+          store.runTransaction('readwrite', async (scope) => {
+            const current = (await scope.get<number>('counter')) ?? 0;
+            await scope.set('counter', current + amount);
+            return current;
+          });
+
+        const results = await Promise.race([
+          Promise.allSettled([increment(1), increment(10)]),
+          timeoutAfter(1000),
+        ]);
+
+        expect(results.map((result) => result.status)).toEqual([
+          'fulfilled',
+          'rejected',
+        ]);
+        expect(results[1]).toMatchObject({
+          status: 'rejected',
+          reason: {
+            code: 'TRANSACTION_SCOPE_REQUIRED',
+            details: {
+              operation: 'runTransaction',
+              reason: 'transaction-scope-required',
+            },
+          },
+        });
+        await expect(store.getItem('counter')).resolves.toBe(1);
+
+        await expect(increment(10)).resolves.toBe(1);
+        await expect(store.getItem('counter')).resolves.toBe(11);
+      } finally {
+        await cleanupStore(store);
+      }
+    });
+
+    it('rejects a nested transaction rather than queueing it behind its own runner', async () => {
+      const store = await createStore(driver);
+
+      try {
+        const result = await Promise.race([
+          store.runTransaction('readwrite', async (scope) => {
+            await expect(
+              store.runTransaction('readwrite', () => 'inner')
+            ).rejects.toMatchObject({
+              code: 'TRANSACTION_SCOPE_REQUIRED',
+              details: {
+                operation: 'runTransaction',
+                reason: 'transaction-scope-required',
+              },
+            });
+            await scope.set('scoped', 'committed');
+            return 'runner-completed';
+          }),
+          timeoutAfter(500),
+        ]);
+
+        expect(result).toBe('runner-completed');
+        await expect(store.getItem('scoped')).resolves.toBe('committed');
+      } finally {
+        await cleanupStore(store);
+      }
+    });
+
+    it('rejects an unrelated transaction started after the runner is executing', async () => {
+      const store = await createStore(driver);
+      let enterRunner!: () => void;
+      const runnerEntered = new Promise<void>((resolve) => {
+        enterRunner = resolve;
+      });
+      let releaseRunner!: () => void;
+      const runnerHeld = new Promise<void>((resolve) => {
+        releaseRunner = resolve;
+      });
+
+      try {
+        const first = store.runTransaction('readwrite', async (scope) => {
+          await scope.set('scoped', 'committed');
+          enterRunner();
+          await runnerHeld;
+          return 'runner-completed';
+        });
+
+        await runnerEntered;
+        const overlapping = store.runTransaction(
+          'readwrite',
+          () => 'unrelated'
+        );
+        await expect(overlapping).rejects.toMatchObject({
+          code: 'TRANSACTION_SCOPE_REQUIRED',
+          details: {
+            operation: 'runTransaction',
+            reason: 'transaction-scope-required',
+          },
+        });
+
+        releaseRunner();
+        await expect(Promise.race([first, timeoutAfter(500)])).resolves.toBe(
+          'runner-completed'
+        );
+      } finally {
+        releaseRunner();
+        await cleanupStore(store);
+      }
+    });
+
+    it('rejects transaction reentry from plugin initialization without deadlocking', async () => {
+      let shouldReenter = true;
+      let nestedError: unknown;
+      const nestedRunner = vi.fn(() => 'nested');
+      const outerRunner = vi.fn(() => 'outer');
+      const plugin: LocalSpacePlugin = {
+        name: 'transaction-init-reentry',
+        async onInit(context) {
+          if (!shouldReenter) return;
+          shouldReenter = false;
+          try {
+            await context.instance.runTransaction('readonly', nestedRunner);
+          } catch (error) {
+            nestedError = error;
+          }
+        },
+      };
+      const store = await createStore(driver, [plugin]);
+
+      try {
+        await expect(
+          Promise.race([
+            store.runTransaction('readonly', outerRunner),
+            timeoutAfter(500),
+          ])
+        ).resolves.toBe('outer');
+        expect(nestedError).toMatchObject({
+          code: 'TRANSACTION_SCOPE_REQUIRED',
+          details: {
+            operation: 'runTransaction',
+            reason: 'transaction-scope-required',
+          },
+        });
+        expect(nestedRunner).not.toHaveBeenCalled();
+        expect(outerRunner).toHaveBeenCalledTimes(1);
+      } finally {
+        await cleanupStore(store);
+      }
+    });
+
+    it('rejects transaction reentry from a before observer without deadlocking', async () => {
+      let shouldReenter = true;
+      let nestedError: unknown;
+      const nestedRunner = vi.fn(() => 'nested');
+      const outerRunner = vi.fn(() => 'outer');
+      const plugin: LocalSpacePlugin = {
+        name: 'transaction-before-reentry',
+        async beforeRunTransaction(_mode, context) {
+          if (!shouldReenter) return;
+          shouldReenter = false;
+          try {
+            await context.instance.runTransaction('readonly', nestedRunner);
+          } catch (error) {
+            nestedError = error;
+          }
+        },
+      };
+      const store = await createStore(driver, [plugin]);
+
+      try {
+        await expect(
+          Promise.race([
+            store.runTransaction('readonly', outerRunner),
+            timeoutAfter(500),
+          ])
+        ).resolves.toBe('outer');
+        expect(nestedError).toMatchObject({
+          code: 'TRANSACTION_SCOPE_REQUIRED',
+          details: {
+            operation: 'runTransaction',
+            reason: 'transaction-scope-required',
+          },
+        });
+        expect(nestedRunner).not.toHaveBeenCalled();
+        expect(outerRunner).toHaveBeenCalledTimes(1);
+      } finally {
+        await cleanupStore(store);
+      }
+    });
+
+    it('keeps the transaction window active through after observers', async () => {
+      let shouldReenter = true;
+      let nestedError: unknown;
+      const nestedRunner = vi.fn(() => 'nested');
+      const plugin: LocalSpacePlugin = {
+        name: 'transaction-after-reentry',
+        async afterRunTransaction(_mode, context) {
+          if (!shouldReenter) return;
+          shouldReenter = false;
+          try {
+            await context.instance.runTransaction('readonly', nestedRunner);
+          } catch (error) {
+            nestedError = error;
+          }
+        },
+      };
+      const store = await createStore(driver, [plugin]);
+
+      try {
+        await expect(
+          Promise.race([
+            store.runTransaction('readwrite', (scope) =>
+              scope.set('committed', 'value')
+            ),
+            timeoutAfter(500),
+          ])
+        ).resolves.toBe('value');
+        expect(nestedError).toMatchObject({
+          code: 'TRANSACTION_SCOPE_REQUIRED',
+          details: {
+            operation: 'runTransaction',
+            reason: 'transaction-scope-required',
+          },
+        });
+        expect(nestedRunner).not.toHaveBeenCalled();
+        await expect(store.getItem('committed')).resolves.toBe('value');
+      } finally {
+        await cleanupStore(store);
+      }
+    });
+
+    it('does not claim a window for invalid transaction arguments', async () => {
+      const store = await createStore(driver);
+      const runner = vi.fn();
+
+      try {
+        const [transaction, ordinary] = await Promise.allSettled([
+          store.runTransaction('versionchange' as never, runner),
+          store.setItem('ordinary', 'stored'),
+        ]);
+
+        expect(transaction).toMatchObject({
+          status: 'rejected',
+          reason: {
+            code: 'INVALID_ARGUMENT',
+            details: { transactionMode: 'versionchange' },
+          },
+        });
+        expect(ordinary).toMatchObject({
+          status: 'fulfilled',
+          value: 'stored',
+        });
+        expect(runner).not.toHaveBeenCalled();
+        await expect(store.getItem('ordinary')).resolves.toBe('stored');
+
+        const [missingRunner, nextOrdinary] = await Promise.allSettled([
+          store.runTransaction('readonly', undefined as never),
+          store.setItem('next', 'also-stored'),
+        ]);
+        expect(missingRunner).toMatchObject({
+          status: 'rejected',
+          reason: {
+            code: 'INVALID_ARGUMENT',
+            details: { reason: 'invalid-transaction-runner' },
+          },
+        });
+        expect(nextOrdinary).toMatchObject({
+          status: 'fulfilled',
+          value: 'also-stored',
+        });
+        await expect(store.getItem('next')).resolves.toBe('also-stored');
+      } finally {
+        await cleanupStore(store);
+      }
+    });
+
     it('invalidates every scope operation when the runner settles', async () => {
       const store = await createStore(driver);
       let capturedScope: TransactionScope | undefined;
@@ -145,10 +457,7 @@ describe.each(['memory', 'indexeddb'] as const)(
           return 'done';
         });
 
-        const scopeOperations: Array<[
-          string,
-          () => Promise<unknown>,
-        ]> = [
+        const scopeOperations: Array<[string, () => Promise<unknown>]> = [
           ['get', () => capturedScope!.get('key')],
           ['set', () => capturedScope!.set('key', 'value')],
           ['remove', () => capturedScope!.remove('key')],
@@ -224,8 +533,9 @@ describe('IndexedDB transaction compatibility optimizations', () => {
     const store = await createStore('indexeddb');
 
     try {
-      const db = (store as LocalSpaceInstance & { _dbInfo: { db: IDBDatabase } })
-        ._dbInfo.db;
+      const db = (
+        store as LocalSpaceInstance & { _dbInfo: { db: IDBDatabase } }
+      )._dbInfo.db;
       const transactionSpy = vi.spyOn(db, 'transaction');
 
       await expect(

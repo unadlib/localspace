@@ -263,6 +263,8 @@ export class LocalSpace implements LocalSpaceInstance {
   private _operationsStarting = 0;
   private readonly _activeOperations = new Set<Promise<unknown>>();
   private _activeTransactionRunners = 0;
+  // Covers the complete admitted dispatch, including plugin observers.
+  private _claimedTransactionWindows = 0;
   private _invokingLifecycleCallback: LifecycleCallback | null = null;
   private _pluginManager: PluginManager;
   private readonly _driverRegistry = new DriverRegistry(globalDriverRegistry);
@@ -905,29 +907,28 @@ export class LocalSpace implements LocalSpaceInstance {
     operation: DriverOperation,
     args: unknown[]
   ): Promise<T> {
-    if (this._activeTransactionRunners > 0) {
-      return Promise.reject(
-        createLocalSpaceError(
-          'TRANSACTION_SCOPE_REQUIRED',
-          `Use the transaction scope for ${operation}() while a transaction runner is active.`,
-          {
-            operation,
-            reason: 'transaction-scope-required',
-          }
-        )
-      );
+    const isTransaction = operation === 'runTransaction';
+    if (this._claimedTransactionWindows > 0) {
+      return Promise.reject(this._transactionScopeRequiredError(operation));
     }
 
     this.#configurationLocked = true;
-    return this._runTrackedOperation(operation, args, async () => {
+    const executor = async () => {
       await this.ready();
       this._assertOpen(operation);
+
+      if (this._claimedTransactionWindows > 0) {
+        throw this._transactionScopeRequiredError(operation);
+      }
 
       const session = this._activeDriverSession;
       if (!this._driverInitialized || !session) {
         throw this._notInitializedError(operation);
       }
       this._assertOperationSupported(session, operation);
+      if (isTransaction) {
+        this._assertTransactionArguments(session, args);
+      }
 
       const original = session.operations[operation];
       let implementation: RawDriverMethod = original;
@@ -1008,8 +1009,62 @@ export class LocalSpace implements LocalSpaceInstance {
         }
       }
 
-      return implementation(...args);
-    }) as Promise<T>;
+      if (!isTransaction) {
+        return implementation(...args);
+      }
+
+      this._claimedTransactionWindows += 1;
+      try {
+        return await implementation(...args);
+      } finally {
+        this._claimedTransactionWindows -= 1;
+      }
+    };
+
+    return this._runTrackedOperation(operation, args, executor) as Promise<T>;
+  }
+
+  private _transactionScopeRequiredError(
+    operation: DriverOperation
+  ): LocalSpaceError {
+    return createLocalSpaceError(
+      'TRANSACTION_SCOPE_REQUIRED',
+      `Use the transaction scope for ${operation}() while a transaction is active.`,
+      {
+        operation,
+        reason: 'transaction-scope-required',
+      }
+    );
+  }
+
+  private _assertTransactionArguments(
+    session: DriverSession,
+    args: unknown[]
+  ): void {
+    const [mode, runner] = args;
+    if (mode !== 'readonly' && mode !== 'readwrite') {
+      throw createLocalSpaceError(
+        'INVALID_ARGUMENT',
+        `Unsupported transaction mode: ${String(mode)}`,
+        {
+          driver: session.driver,
+          operation: 'runTransaction',
+          reason: 'invalid-transaction-mode',
+          transactionMode: String(mode),
+        }
+      );
+    }
+    if (typeof runner !== 'function') {
+      throw createLocalSpaceError(
+        'INVALID_ARGUMENT',
+        'Transaction runner must be a function.',
+        {
+          driver: session.driver,
+          operation: 'runTransaction',
+          reason: 'invalid-transaction-runner',
+        }
+      );
+    }
   }
 
   private _assertOperationSupported(
@@ -1767,7 +1822,8 @@ export class LocalSpace implements LocalSpaceInstance {
     if (
       this._operationsStarting === 0 &&
       this._activeOperations.size === 0 &&
-      this._activeTransactionRunners === 0
+      this._activeTransactionRunners === 0 &&
+      this._claimedTransactionWindows === 0
     ) {
       return;
     }
@@ -1779,6 +1835,7 @@ export class LocalSpace implements LocalSpaceInstance {
         operation,
         reason: 'active-operations',
         activeTransactionRunners: this._activeTransactionRunners,
+        claimedTransactionWindows: this._claimedTransactionWindows,
       }
     );
   }
