@@ -493,7 +493,7 @@ export class PluginManager {
   ): Promise<void> {
     for (const plugin of this.getActivePlugins({ reverse: true, role })) {
       if (!plugin.afterSet) continue;
-      await this.invokeVoidHook(
+      await this.invokeSettledObserver(
         plugin,
         () => plugin.afterSet!(key, value, context),
         'after',
@@ -564,7 +564,7 @@ export class PluginManager {
   async afterRemove(key: string, context: PluginContext): Promise<void> {
     for (const plugin of this.getActivePlugins({ reverse: true })) {
       if (!plugin.afterRemove) continue;
-      await this.invokeVoidHook(
+      await this.invokeSettledObserver(
         plugin,
         () => plugin.afterRemove!(key, context),
         'after',
@@ -725,7 +725,7 @@ export class PluginManager {
 
     for (const plugin of this.getActivePlugins({ reverse: true, role })) {
       if (plugin.afterSetItems) {
-        current = await this.invokeValueHook(
+        current = await this.invokePostCommitValueHook(
           plugin,
           () => plugin.afterSetItems!(current, context),
           'after',
@@ -742,7 +742,7 @@ export class PluginManager {
       for (let index = 0; index < current.length; index++) {
         const entry = current[index];
         const item = items[index];
-        await this.invokeVoidHook(
+        await this.invokeSettledObserver(
           plugin,
           () => plugin.afterSet!(entry.key, entry.value as T, item.context),
           'after',
@@ -961,7 +961,7 @@ export class PluginManager {
     context.operationState.batchSize = keys.length;
     for (const plugin of this.getActivePlugins({ reverse: true })) {
       if (plugin.afterRemoveItems) {
-        await this.invokeVoidHook(
+        await this.invokeSettledObserver(
           plugin,
           () => plugin.afterRemoveItems!(keys, context),
           'after',
@@ -986,7 +986,7 @@ export class PluginManager {
         };
         item.context.operationState.isBatch = true;
         item.context.operationState.batchSize = keys.length;
-        await this.invokeVoidHook(
+        await this.invokeSettledObserver(
           plugin,
           () => plugin.afterRemove!(key, item.context),
           'after',
@@ -1012,14 +1012,25 @@ export class PluginManager {
     })) {
       const executor = executorFor(plugin);
       if (!executor) continue;
-      await this.invokeVoidHook(
-        plugin,
-        executor,
-        stage,
-        operation,
-        key,
-        context
-      );
+      if (stage === 'after') {
+        await this.invokeSettledObserver(
+          plugin,
+          executor,
+          stage,
+          operation,
+          key,
+          context
+        );
+      } else {
+        await this.invokeVoidHook(
+          plugin,
+          executor,
+          stage,
+          operation,
+          key,
+          context
+        );
+      }
     }
   }
 
@@ -1361,6 +1372,53 @@ export class PluginManager {
         context
       );
       return fallback;
+    }
+  }
+
+  private async invokePostCommitValueHook<T>(
+    plugin: LocalSpacePlugin,
+    executor: () => Promise<T> | T,
+    stage: PluginStage,
+    operation: PluginOperation,
+    key: string | undefined,
+    context: PluginContext,
+    fallback: T
+  ): Promise<T> {
+    try {
+      const result = await executor();
+      return (typeof result === 'undefined' ? fallback : result) as T;
+    } catch (error) {
+      await this.dispatchPluginError(
+        plugin,
+        error,
+        stage,
+        operation,
+        key,
+        context
+      );
+      return fallback;
+    }
+  }
+
+  private async invokeSettledObserver(
+    plugin: LocalSpacePlugin,
+    executor: () => Promise<void> | void,
+    stage: PluginStage,
+    operation: PluginOperation,
+    key: string | undefined,
+    context: PluginContext
+  ): Promise<void> {
+    try {
+      await executor();
+    } catch (error) {
+      await this.dispatchPluginError(
+        plugin,
+        error,
+        stage,
+        operation,
+        key,
+        context
+      );
     }
   }
 

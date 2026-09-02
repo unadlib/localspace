@@ -354,7 +354,10 @@ Observer return values are ignored and result arrays/summaries are frozen.
 `clear`/`dropInstance` do not synthesize one remove hook per key.
 The outer transaction hooks do not receive the runner result or an active
 scope; operation hooks inside the runner continue to receive
-`context.transactionScope`.
+`context.transactionScope`. An error from a void after observer is reported
+through `onError` (or the console) but cannot reject the operation. This is also
+true for item observers inside a transaction; validation that must veto the
+transaction belongs in a before hook.
 
 Query operations now materialize the logical decoded view when transforms can
 affect visibility. With TTL, an expired item is absent from `getItem`,
@@ -376,10 +379,13 @@ callback-scoped receiver; reentry while the callback is pending rejects instead
 of deadlocking. Use `context.instanceToken`, not the receiver itself, as the
 stable WeakMap key for state shared with operation hooks.
 
-`LocalSpaceError` and `PluginAbortError` propagate even under lenient policy.
-Unexpected custom-plugin errors are swallowed only under `pluginErrorPolicy:
-'lenient'` after `onError`/console reporting. Built-in transformations fail
-closed.
+`LocalSpaceError` and `PluginAbortError` from transforms and before hooks
+propagate even under lenient policy. Unexpected custom-plugin transform/before
+errors are swallowed only under `pluginErrorPolicy: 'lenient'` after
+`onError`/console reporting. Void after observers are always reported without
+replacing the result, and a failing post-write `afterSetItems` falls back to its
+unmodified result. Read transforms (`afterGet`/`afterGetItems`) still follow the
+selected policy. Built-in transformations still fail closed.
 
 `PluginContext.dbInfo` is gone. It handed plugins driver internals — the live
 `IDBDatabase`, the IndexedDB factory, and the internal key prefix — through an

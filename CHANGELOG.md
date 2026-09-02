@@ -56,6 +56,10 @@
 - Made iteration genuinely incremental. Drivers now await async callbacks and
   stop before the next item (or after one bounded IndexedDB page), while plugin
   decoding runs per entry instead of materializing the whole logical store.
+- Made void after observers non-vetoing. Their failures are reported through
+  `onError` without rejecting a write, removal, clear, drop, query, or
+  transaction. This is stable inside and outside transaction scopes; strict
+  mode continues to propagate transform and pre-settlement hook failures.
 
 - Replaced runtime driver-method injection and wrapper refreshes with stable
   facade dispatch. Captured/destructured operation references and spies

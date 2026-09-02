@@ -88,7 +88,7 @@ describe('pluginErrorPolicy', () => {
     expect(got.map((r) => r.value)).toEqual(['v1', 'v2']);
   });
 
-  it('strict policy propagates batch hook failures', async () => {
+  it('strict policy reports post-commit failures but propagates read transforms', async () => {
     const store = localspace.createInstance({
       name: 'policy-strict-batch',
       storeName: 'store',
@@ -104,6 +104,11 @@ describe('pluginErrorPolicy', () => {
         { key: 'k1', value: 'v1' },
         { key: 'k2', value: 'v2' },
       ])
-    ).rejects.toBeInstanceOf(Error);
+    ).resolves.toEqual([
+      { key: 'k1', value: 'v1' },
+      { key: 'k2', value: 'v2' },
+    ]);
+    await expect(store.getItem('k1')).resolves.toBe('v1');
+    await expect(store.getItems(['k1', 'k2'])).rejects.toBeInstanceOf(Error);
   });
 });

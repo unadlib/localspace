@@ -329,8 +329,9 @@ describe('logical query and iteration plugin coverage', () => {
     await store.close();
   });
 
-  it('preserves committed data when a strict after-transaction observer fails', async () => {
+  it('reports a strict after-transaction observer without rejecting the commit', async () => {
     const observerError = new Error('commit notification failed');
+    const onError = vi.fn();
     const afterRunTransaction = vi.fn(() => {
       throw observerError;
     });
@@ -341,6 +342,7 @@ describe('logical query and iteration plugin coverage', () => {
         {
           name: 'failing-commit-observer',
           afterRunTransaction,
+          onError,
         },
       ],
     });
@@ -350,8 +352,15 @@ describe('logical query and iteration plugin coverage', () => {
       store.runTransaction('readwrite', (scope) =>
         scope.set('committed-before-observer', true)
       )
-    ).rejects.toBe(observerError);
+    ).resolves.toBe(true);
     expect(afterRunTransaction).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(
+      observerError,
+      expect.objectContaining({
+        operation: 'runTransaction',
+        stage: 'after',
+      })
+    );
     await expect(store.getItem('committed-before-observer')).resolves.toBe(
       true
     );

@@ -293,10 +293,9 @@ detects that condition, `TRANSACTION_INACTIVE` reports a contract violation; it
 cannot undo a native transaction that has already completed. Such work belongs
 before or after `runTransaction()`.
 
-With `pluginErrorPolicy: 'strict'`, an `afterRunTransaction` observer error is
-propagated after the commit and therefore cannot roll it back. Post-commit
-observers should not throw when promise resolution is the application's commit
-signal.
+An `afterRunTransaction` observer error is reported through `onError` (or the
+console) without replacing the successful transaction result. The commit has
+already happened, so the public promise remains a reliable commit signal.
 
 IndexedDB uses one native object-store transaction and keeps it active across
 awaited scope work. Memory serializes read-write runners per JavaScript realm,
@@ -366,7 +365,7 @@ interface LocalSpaceOptions extends LocalSpaceConfig {
 | `maxBatchSize`            | unset                   | non-negative safe integer; `0`/unset means no split                                                          |
 | `reactNativeAsyncStorage` | none                    | required when selecting the RN driver                                                                        |
 | `pluginInitPolicy`        | `'fail'`                | optionally disable a plugin whose initialization fails                                                       |
-| `pluginErrorPolicy`       | `'lenient'`             | unexpected custom-plugin errors may be reported and swallowed; structured/fail-closed errors still propagate |
+| `pluginErrorPolicy`       | `'lenient'`             | controls transform/pre-settlement failures; void after-observer failures are always reported                 |
 | `plugins`                 | `[]`                    | construction-time plugins                                                                                    |
 | `drivers`                 | `[]`                    | construction-scoped immutable driver definitions                                                             |
 

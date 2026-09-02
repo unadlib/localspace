@@ -104,7 +104,10 @@ export interface LocalSpaceConfig {
   /**
    * Plugin runtime error policy.
    * - 'lenient' (default): swallow unexpected plugin errors (except LocalSpaceError/PluginAbortError) after reporting via onError
-   * - 'strict': propagate all plugin errors to the caller
+   * - 'strict': propagate read/write transforms and hooks that run before an operation settles
+   * Void after hooks are observational by contract and are always reported
+   * without replacing the operation result. Post-write batch result hooks use
+   * the unmodified result as their fallback.
    */
   pluginErrorPolicy?: 'strict' | 'lenient';
 }
@@ -584,6 +587,7 @@ export interface LocalSpacePlugin {
   onError?(error: unknown, info: PluginErrorInfo): Promise<void> | void;
 
   beforeSet?<T>(key: string, value: T, context: PluginContext): Promise<T> | T;
+  /** Observe a successful driver write. Errors are reported, never propagated. */
   afterSet?<T>(
     key: string,
     value: T,
@@ -611,6 +615,10 @@ export interface LocalSpacePlugin {
     entries: BatchItems<T>,
     context: PluginContext
   ): Promise<BatchItems<T>> | BatchItems<T>;
+  /**
+   * Transform the successful batch result. An error is reported and falls
+   * back to the unmodified result because the write has already completed.
+   */
   afterSetItems?<T>(
     entries: BatchResponse<T>,
     context: PluginContext

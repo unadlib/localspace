@@ -273,7 +273,9 @@ interface LocalSpacePlugin {
 
 These hooks are observers: return values are ignored. Arrays and summaries are
 frozen copies. Before observers use descending priority and after observers use
-reverse order.
+reverse order. Void after hooks are notification points: their failures are
+reported and never veto the operation, including item hooks running inside a
+larger transaction. Put validation that must prevent a write in a before hook.
 
 `iterate`, `keys`, `key`, and `length` operate on the decoded logical view, not
 raw driver records. Built-in TTL expiration is resolved during that scan, so an
@@ -290,9 +292,9 @@ before the driver creates a transaction. `afterRunTransaction` runs only after
 the driver reports a successful commit. Neither hook receives the runner result
 or an active scope, so it cannot rewrite the result or perform transaction-bound
 work. Scope operations continue to use their normal item/query observers.
-Under the strict error policy, an `afterRunTransaction` error is propagated but
-cannot roll back the commit that it is observing; keep post-commit notification
-hooks non-throwing when the caller must treat resolution as the commit signal.
+An `afterRunTransaction` error is reported through `onError` (or the console)
+without replacing the successful transaction result. The commit has already
+happened, so rejecting here would falsely imply that rollback was possible.
 
 ## Transactions
 
@@ -336,13 +338,19 @@ const store = localspace.createInstance({
 
 `pluginErrorPolicy`:
 
-- `strict` propagates every runtime hook error;
+- `strict` propagates transform errors and errors from hooks that run before an
+  operation settles;
 - `lenient` reports an unexpected custom-plugin error through `onError` (or
   the console) and uses the pre-hook value/result.
 
-`LocalSpaceError` and `PluginAbortError` always propagate under either policy.
-Built-in storage transforms convert malformed payload, crypto, compression,
-and expiration failures into structured LocalSpace errors, so they fail closed.
+Void after observers never replace an operation's result under either policy.
+Their errors, including `LocalSpaceError` and `PluginAbortError`, are reported;
+this is a stable plugin contract rather than a backend-dependent guess about
+whether rollback is still technically possible. A failing post-write
+`afterSetItems` result hook similarly falls back to the unmodified result.
+`afterGet`/`afterGetItems` remain read-result transforms and follow the selected
+policy. `LocalSpaceError` and `PluginAbortError` from transforms and before
+hooks always propagate, so built-in storage transforms continue to fail closed.
 For data transforms, `strict` remains the clearest application policy.
 
 ```ts
