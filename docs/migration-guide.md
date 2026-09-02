@@ -347,6 +347,11 @@ manager, and `operationState` is isolated per plugin and operation. Remove
 cross-plugin coordination through those objects; use an application-owned
 channel when plugins intentionally need to communicate.
 
+Plugin definitions are snapshotted at registration. Later mutation of the
+caller object or its prototype has no effect, accessor members reject without
+running, and the stored definition is frozen. Move mutable `this` state into
+`context.metadata`.
+
 ### Add complete operation observers
 
 3.0 adds observer pairs for:

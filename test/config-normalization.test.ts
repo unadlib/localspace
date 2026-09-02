@@ -276,4 +276,49 @@ describe('pre-ready plugin registration', () => {
     expect(afterSet).not.toHaveBeenCalled();
     await instance.close();
   });
+
+  it('snapshots plugin definitions without mutating caller objects', async () => {
+    const originalHook = vi.fn((_key: string, value: unknown) => value);
+    const replacementHook = vi.fn((_key: string, value: unknown) => value);
+    const pluginPrototype = { beforeSet: originalHook };
+    const plugin = Object.assign(Object.create(pluginPrototype), {
+      name: 'snapshotted-plugin',
+    }) as LocalSpacePlugin;
+    const instance = new LocalSpace({
+      driver: 'memoryStorageWrapper',
+      plugins: [plugin],
+    });
+
+    expect(Object.isFrozen(plugin)).toBe(false);
+    plugin.name = 'caller-mutated-name';
+    pluginPrototype.beforeSet = replacementHook;
+    plugin.beforeSet = replacementHook;
+
+    await instance.setItem('key', 'value');
+    expect(originalHook).toHaveBeenCalledTimes(1);
+    expect(replacementHook).not.toHaveBeenCalled();
+    await instance.close();
+  });
+
+  it('rejects plugin accessors without invoking them', () => {
+    const getter = vi.fn(() => (_key: string, value: unknown) => value);
+    const plugin = { name: 'accessor-plugin' } as LocalSpacePlugin;
+    Object.defineProperty(plugin, 'beforeSet', {
+      configurable: true,
+      enumerable: true,
+      get: getter,
+    });
+
+    expect(() => new LocalSpace({ plugins: [plugin] })).toThrowError(
+      expect.objectContaining<Partial<LocalSpaceError>>({
+        code: 'INVALID_CONFIG',
+        details: expect.objectContaining({
+          plugin: 'accessor-plugin',
+          member: 'beforeSet',
+          reason: 'plugin-accessor',
+        }),
+      })
+    );
+    expect(getter).not.toHaveBeenCalled();
+  });
 });

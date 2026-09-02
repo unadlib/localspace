@@ -38,6 +38,12 @@ The first `ready()` or storage call synchronously locks plugin registration.
 Later `use()` calls reject with `CONFIG_LOCKED`. Names must be non-empty and
 unique within the instance; a duplicate batch is rejected atomically.
 
+Registration snapshots visible data-property descriptors and never mutates the
+caller-owned object. Later changes to its hooks, name, priority, or prototype
+do not affect the instance. Accessor properties are rejected without invoking
+their getters. The stored definition is frozen; keep mutable plugin state in
+`context.metadata`, not on `this`.
+
 Lifecycle hooks:
 
 ```ts

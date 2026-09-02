@@ -71,6 +71,9 @@
 - Isolated `PluginContext.metadata` per plugin for the instance lifetime and
   `operationState` per plugin operation, while preserving framework-owned batch
   metadata and internal TTL visibility without exposing shared marker state.
+- Snapshotted and froze plugin definitions at registration without changing the
+  caller-owned object. Later object/prototype mutation is isolated, and visible
+  accessor members reject without executing user code during validation.
 
 - Replaced runtime driver-method injection and wrapper refreshes with stable
   facade dispatch. Captured/destructured operation references and spies

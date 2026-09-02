@@ -126,6 +126,98 @@ const PLUGIN_HOOKS = [
   'afterRunTransaction',
 ] as const satisfies ReadonlyArray<keyof LocalSpacePlugin>;
 
+const invalidPlugin = (
+  plugin: string | undefined,
+  reason: string,
+  member?: PropertyKey
+) =>
+  createLocalSpaceError(
+    'INVALID_CONFIG',
+    plugin
+      ? `Plugin "${plugin}" has an invalid definition.`
+      : 'Every plugin must be an object with a unique non-empty own name.',
+    {
+      configKey: 'plugins',
+      ...(plugin ? { plugin } : {}),
+      ...(member !== undefined ? { member: String(member) } : {}),
+      reason,
+    }
+  );
+
+const snapshotPlugin = (input: LocalSpacePlugin): LocalSpacePlugin => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw invalidPlugin(undefined, 'invalid-plugin');
+  }
+
+  const prototypeChain: object[] = [];
+  for (
+    let current: object | null = input;
+    current && current !== Object.prototype;
+    current = Object.getPrototypeOf(current)
+  ) {
+    prototypeChain.unshift(current);
+  }
+
+  const descriptors = Object.create(null) as Record<
+    PropertyKey,
+    PropertyDescriptor
+  >;
+  for (const current of prototypeChain) {
+    const currentDescriptors = Object.getOwnPropertyDescriptors(current);
+    for (const property of Reflect.ownKeys(currentDescriptors)) {
+      descriptors[property] =
+        currentDescriptors[property as keyof typeof currentDescriptors];
+    }
+  }
+
+  const ownName = Object.getOwnPropertyDescriptor(input, 'name');
+  if (
+    !ownName ||
+    !('value' in ownName) ||
+    typeof ownName.value !== 'string' ||
+    ownName.value.length === 0
+  ) {
+    throw invalidPlugin(undefined, 'invalid-plugin-name', 'name');
+  }
+  const name = ownName.value;
+
+  for (const property of Reflect.ownKeys(descriptors)) {
+    if (!('value' in descriptors[property])) {
+      throw invalidPlugin(name, 'plugin-accessor', property);
+    }
+  }
+
+  const version = descriptors.version?.value;
+  if (version !== undefined && typeof version !== 'string') {
+    throw invalidPlugin(name, 'invalid-plugin-member', 'version');
+  }
+  const priority = descriptors.priority?.value;
+  if (
+    priority !== undefined &&
+    (typeof priority !== 'number' || !Number.isFinite(priority))
+  ) {
+    throw invalidPlugin(name, 'invalid-plugin-member', 'priority');
+  }
+  const enabled = descriptors.enabled?.value;
+  if (
+    enabled !== undefined &&
+    typeof enabled !== 'boolean' &&
+    typeof enabled !== 'function'
+  ) {
+    throw invalidPlugin(name, 'invalid-plugin-member', 'enabled');
+  }
+  for (const hook of PLUGIN_HOOKS) {
+    const implementation = descriptors[hook]?.value;
+    if (implementation !== undefined && typeof implementation !== 'function') {
+      throw invalidPlugin(name, 'invalid-plugin-hook', hook);
+    }
+  }
+
+  return Object.freeze(
+    Object.create(null, descriptors) as LocalSpacePlugin
+  );
+};
+
 /**
  * Plugin combination warnings to help users avoid problematic configurations.
  */
@@ -251,21 +343,13 @@ export class PluginManager {
   }
 
   registerPlugins(plugins: LocalSpacePlugin[]): void {
+    const snapshots = plugins.map(snapshotPlugin);
     const existingNames = new Set(
       this.pluginRegistry.map(({ plugin }) => plugin.name)
     );
     const pendingNames = new Set<string>();
-    for (const plugin of plugins) {
-      if (!plugin || typeof plugin !== 'object') {
-        throw createLocalSpaceError(
-          'INVALID_CONFIG',
-          'Every plugin must be an object with a unique non-empty name.',
-          { configKey: 'plugins', reason: 'invalid-plugin' }
-        );
-      }
+    for (const plugin of snapshots) {
       if (
-        typeof plugin.name !== 'string' ||
-        plugin.name.length === 0 ||
         existingNames.has(plugin.name) ||
         pendingNames.has(plugin.name)
       ) {
@@ -275,75 +359,14 @@ export class PluginManager {
           {
             configKey: 'plugins',
             plugin: plugin?.name,
-            reason:
-              typeof plugin?.name === 'string' && plugin.name.length > 0
-                ? 'duplicate-plugin'
-                : 'invalid-plugin-name',
+            reason: 'duplicate-plugin',
           }
         );
-      }
-      if (plugin.version !== undefined && typeof plugin.version !== 'string') {
-        throw createLocalSpaceError(
-          'INVALID_CONFIG',
-          `Plugin "${plugin.name}" version must be a string.`,
-          {
-            configKey: 'plugins',
-            plugin: plugin.name,
-            member: 'version',
-            reason: 'invalid-plugin-member',
-          }
-        );
-      }
-      if (
-        plugin.priority !== undefined &&
-        (typeof plugin.priority !== 'number' ||
-          !Number.isFinite(plugin.priority))
-      ) {
-        throw createLocalSpaceError(
-          'INVALID_CONFIG',
-          `Plugin "${plugin.name}" priority must be a finite number.`,
-          {
-            configKey: 'plugins',
-            plugin: plugin.name,
-            member: 'priority',
-            reason: 'invalid-plugin-member',
-          }
-        );
-      }
-      if (
-        plugin.enabled !== undefined &&
-        typeof plugin.enabled !== 'boolean' &&
-        typeof plugin.enabled !== 'function'
-      ) {
-        throw createLocalSpaceError(
-          'INVALID_CONFIG',
-          `Plugin "${plugin.name}" enabled must be a boolean or function.`,
-          {
-            configKey: 'plugins',
-            plugin: plugin.name,
-            member: 'enabled',
-            reason: 'invalid-plugin-member',
-          }
-        );
-      }
-      for (const hook of PLUGIN_HOOKS) {
-        if (plugin[hook] !== undefined && typeof plugin[hook] !== 'function') {
-          throw createLocalSpaceError(
-            'INVALID_CONFIG',
-            `Plugin "${plugin.name}" hook ${hook} must be a function.`,
-            {
-              configKey: 'plugins',
-              plugin: plugin.name,
-              member: hook,
-              reason: 'invalid-plugin-hook',
-            }
-          );
-        }
       }
       pendingNames.add(plugin.name);
     }
 
-    for (const plugin of plugins) {
+    for (const plugin of snapshots) {
       this.pluginRegistry.push({ plugin, order: this.orderCounter++ });
     }
     this.sortPlugins();
