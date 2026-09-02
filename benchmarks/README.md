@@ -38,6 +38,35 @@ published package identity/integrity fails the command. Historical absolute
 milliseconds remain observations rather than portable gates; a release must
 retain the same-run JSON evidence.
 
+## Release evidence workflow
+
+`benchmark-results/release-3.0.0.json`, when present, is the authoritative
+same-run evidence for the release candidate. Do not duplicate its current
+measurements in prose: those copies become stale after the next source or
+package change. Generate the report with:
+
+```sh
+node scripts/compare-v2.1-baseline.mjs --skip-legacy-probes \
+  --output benchmark-results/release-3.0.0.json
+```
+
+Run it only after the last source change, from a clean worktree at the candidate
+tip. The harness records `candidate.dirty` from `git status --porcelain`, and
+evidence captured over uncommitted changes does not identify what was measured.
+
+Regenerating this file is a release step, not an occasional chore. Rerun it
+once every source change for the release has landed, and commit the result on
+its own. `candidate.gitCommit` then names the last commit that changed
+behaviour: a file cannot contain its own commit hash, so the measured tree is
+necessarily the parent of the commit carrying the file, and that parent must
+differ from the tagged tree only by this report.
+
+Never repoint the commit field by hand to make a stale file look current. If a
+source change lands after the report, delete or regenerate the report before
+the next commit. Because an in-tree report can never name its own commit,
+publishing the same JSON as a CI artifact attached to the tag is the stronger
+option if this ever needs to identify a tagged tree exactly.
+
 Package size is measured separately from runtime speed. The baseline values are
 from the immutable published tarball, while the candidate is measured with
 `npm pack --dry-run --json` after its production build.
@@ -49,6 +78,21 @@ The E4 decision is backed by the complete same-process samples in
 `benchmark-results/e4-after-removal.json`. Both runs used Node 24.16.0,
 Playwright 1.60.0, and Chromium 148 on the same arm64 macOS host, with seven
 measured samples and one warmup.
+
+Both files are a frozen archive, not current release evidence. They were
+captured on 2026-08-31 from a worktree that still carried the tuning removal as
+uncommitted changes (`candidate.dirty` is `true` and `candidate.packageVersion`
+still reads `2.1.0`), and their `candidate.gitCommit` was re-pointed when the
+3.0 branch was rebased, so it identifies the rebased commit rather than the
+tree that was measured. They also predate the 2026-09-01 removal of the core
+StoredRecord wrapper, so their absolute milliseconds do not describe the
+shipping value format.
+
+Neither file can be regenerated: `prewarmTransactions`, `connectionIdleMs`, and
+`maxConcurrentTransactions` no longer exist in the source, so the "before"
+configuration is unreachable from the current tree. They are retained only as
+the raw backing for the removal decision below. Current 3.0 performance claims
+must come from a freshly generated `benchmark-results/release-3.0.0.json`.
 
 Before removal, the candidate's prewarm-on and prewarm-off ready medians were
 both 0.4 ms. The pinned 2.1.0 artifact measured 0.4 ms with prewarm and 0.5 ms
