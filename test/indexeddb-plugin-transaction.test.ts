@@ -153,6 +153,10 @@ describe('IndexedDB plugin-aware transactions', () => {
         record(`afterGet:${key}:${context.operation}`, context);
         return value;
       },
+      isValueVisible: (key, _value, context) => {
+        record(`isValueVisible:${key}:${context.operation}`, context);
+        return true;
+      },
       beforeRemove: (key, context) => {
         record(`beforeRemove:${key}`, context);
         return key;
@@ -186,6 +190,7 @@ describe('IndexedDB plugin-aware transactions', () => {
       expect(events).toContain('afterGet:a:getItem');
       expect(events).toContain('beforeKeys');
       expect(events).toContain('afterGet:a:keys');
+      expect(events).toContain('isValueVisible:a:keys');
       expect(events).toContain('afterKeys');
       expect(events).toContain('beforeIterate');
       expect(events).toContain('afterGet:a:iterate');
