@@ -37,6 +37,41 @@ export type StorageValue =
   | StorageValue[]
   | { [key: string]: StorageValue };
 
+type UnsupportedStorageObject =
+  | Date
+  | RegExp
+  | Map<unknown, unknown>
+  | Set<unknown>
+  | WeakMap<object, unknown>
+  | WeakSet<object>
+  | Promise<unknown>
+  | Error
+  | DataView
+  | SharedArrayBuffer
+  | Blob
+  | ((...args: never[]) => unknown);
+
+/**
+ * Recursively checks the serializable shape of an application DTO without
+ * requiring an index signature. Runtime validation remains authoritative for
+ * prototype, descriptor, cycle, finiteness, and detached-buffer checks.
+ */
+type StorageValueInputShape<T> = T extends StoragePrimitive | StorageBinary
+  ? T
+  : T extends UnsupportedStorageObject
+    ? never
+    : T extends readonly unknown[]
+      ? { [Key in keyof T]: StorageValueInput<T[Key]> }
+      : T extends object
+        ? { [Key in keyof T]: StorageValueInput<T[Key]> }
+        : never;
+
+export type StorageValueInput<T> = [T] extends [StorageValue]
+  ? [StorageValue] extends [T]
+    ? T
+    : StorageValueInputShape<T>
+  : StorageValueInputShape<T>;
+
 /**
  * Configuration options for localspace
  */
@@ -212,7 +247,7 @@ export interface Driver {
    * Iterate through all items. Drivers must await each callback and stop before
    * reading the next item when it resolves to a non-undefined result.
    */
-  iterate<T extends StorageValue = StorageValue, U = void>(
+  iterate<T = StorageValue, U = void>(
     iteratorCallback: (
       value: T,
       key: string,
@@ -223,14 +258,12 @@ export interface Driver {
   /**
    * Get item by key
    */
-  getItem<T extends StorageValue = StorageValue>(
-    key: string
-  ): Promise<T | null>;
+  getItem<T = StorageValue>(key: string): Promise<T | null>;
 
   /**
    * Set item
    */
-  setItem<T extends StorageValue>(key: string, value: T): Promise<T>;
+  setItem<T>(key: string, value: T & StorageValueInput<T>): Promise<T>;
 
   /**
    * Remove item
@@ -240,16 +273,14 @@ export interface Driver {
   /**
    * Batch set multiple items atomically when supported by the driver.
    */
-  setItems?<T extends StorageValue>(
-    entries: BatchItems<T>
+  setItems?<T>(
+    entries: BatchItems<T & StorageValueInput<T>>
   ): Promise<BatchResponse<T>>;
 
   /**
    * Batch get multiple items in order.
    */
-  getItems?<T extends StorageValue = StorageValue>(
-    keys: string[]
-  ): Promise<BatchResponse<T>>;
+  getItems?<T = StorageValue>(keys: string[]): Promise<BatchResponse<T>>;
 
   /**
    * Batch remove multiple items.
@@ -405,7 +436,7 @@ export interface LocalSpaceInstance {
    * Iterate through logical items in driver order. Async callbacks are awaited
    * sequentially; returning a non-undefined value stops iteration.
    */
-  iterate<T extends StorageValue = StorageValue, U = void>(
+  iterate<T = StorageValue, U = void>(
     iteratorCallback: (
       value: T,
       key: string,
@@ -416,14 +447,12 @@ export interface LocalSpaceInstance {
   /**
    * Get item
    */
-  getItem<T extends StorageValue = StorageValue>(
-    key: string
-  ): Promise<T | null>;
+  getItem<T = StorageValue>(key: string): Promise<T | null>;
 
   /**
    * Set item
    */
-  setItem<T extends StorageValue>(key: string, value: T): Promise<T>;
+  setItem<T>(key: string, value: T & StorageValueInput<T>): Promise<T>;
 
   /**
    * Remove item
@@ -438,16 +467,14 @@ export interface LocalSpaceInstance {
   /**
    * Batch set items
    */
-  setItems<T extends StorageValue>(
-    entries: BatchItems<T>
+  setItems<T>(
+    entries: BatchItems<T & StorageValueInput<T>>
   ): Promise<BatchResponse<T>>;
 
   /**
    * Batch get items in order
    */
-  getItems<T extends StorageValue = StorageValue>(
-    keys: string[]
-  ): Promise<BatchResponse<T>>;
+  getItems<T = StorageValue>(keys: string[]): Promise<BatchResponse<T>>;
 
   /**
    * Batch remove items
@@ -505,11 +532,11 @@ export type BatchItems<T> =
 export type BatchResponse<T> = Array<{ key: string; value: T | null }>;
 
 export interface TransactionScope {
-  get<T extends StorageValue = StorageValue>(key: string): Promise<T | null>;
-  set<T extends StorageValue>(key: string, value: T): Promise<T>;
+  get<T = StorageValue>(key: string): Promise<T | null>;
+  set<T>(key: string, value: T & StorageValueInput<T>): Promise<T>;
   remove(key: string): Promise<void>;
   keys(): Promise<string[]>;
-  iterate<T extends StorageValue = StorageValue, U = void>(
+  iterate<T = StorageValue, U = void>(
     iterator: (value: T, key: string, iterationNumber: number) => U | Promise<U>
   ): Promise<U | undefined>;
   clear(): Promise<void>;
@@ -576,7 +603,7 @@ export interface PluginIterateSummary {
   readonly stopped: boolean;
 }
 
-export interface LocalSpacePlugin {
+export interface LocalSpacePlugin<TValue = StorageValue> {
   name: string;
   version?: string;
   priority?: number;
@@ -586,20 +613,24 @@ export interface LocalSpacePlugin {
   onDestroy?(context: PluginContext): Promise<void> | void;
   onError?(error: unknown, info: PluginErrorInfo): Promise<void> | void;
 
-  beforeSet?<T>(key: string, value: T, context: PluginContext): Promise<T> | T;
-  /** Observe a successful driver write. Errors are reported, never propagated. */
-  afterSet?<T>(
+  beforeSet?(
     key: string,
-    value: T,
+    value: TValue,
+    context: PluginContext
+  ): Promise<TValue> | TValue;
+  /** Observe a successful driver write. Errors are reported, never propagated. */
+  afterSet?(
+    key: string,
+    value: TValue,
     context: PluginContext
   ): Promise<void> | void;
 
   beforeGet?(key: string, context: PluginContext): Promise<string> | string;
-  afterGet?<T>(
+  afterGet?(
     key: string,
-    value: T | null,
+    value: TValue | null,
     context: PluginContext
-  ): Promise<T | null> | T | null;
+  ): Promise<TValue | null> | TValue | null;
 
   beforeRemove?(key: string, context: PluginContext): Promise<string> | string;
   afterRemove?(key: string, context: PluginContext): Promise<void> | void;
@@ -611,27 +642,27 @@ export interface LocalSpacePlugin {
    * defines both forms is therefore never invoked twice for one phase.
    * Priority ordering is global across both hook forms.
    */
-  beforeSetItems?<T>(
-    entries: BatchItems<T>,
+  beforeSetItems?(
+    entries: BatchItems<TValue>,
     context: PluginContext
-  ): Promise<BatchItems<T>> | BatchItems<T>;
+  ): Promise<BatchItems<TValue>> | BatchItems<TValue>;
   /**
    * Transform the successful batch result. An error is reported and falls
    * back to the unmodified result because the write has already completed.
    */
-  afterSetItems?<T>(
-    entries: BatchResponse<T>,
+  afterSetItems?(
+    entries: BatchResponse<TValue>,
     context: PluginContext
-  ): Promise<BatchResponse<T>> | BatchResponse<T>;
+  ): Promise<BatchResponse<TValue>> | BatchResponse<TValue>;
 
   beforeGetItems?(
     keys: string[],
     context: PluginContext
   ): Promise<string[]> | string[];
-  afterGetItems?<T>(
-    entries: BatchResponse<T>,
+  afterGetItems?(
+    entries: BatchResponse<TValue>,
     context: PluginContext
-  ): Promise<BatchResponse<T>> | BatchResponse<T>;
+  ): Promise<BatchResponse<TValue>> | BatchResponse<TValue>;
 
   beforeRemoveItems?(
     keys: string[],

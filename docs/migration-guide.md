@@ -175,15 +175,17 @@ views, `NaN`, and infinities. Detached `ArrayBuffer` values and typed-array
 views are invalid. The exact top-level `localspace.plugin` envelope namespace
 is reserved for built-in transforms and cannot be written as application data.
 
-TypeScript read/write generics now extend `StorageValue`. Prefer stored DTO type
-aliases that structurally satisfy the record contract:
+TypeScript writes now use `StorageValueInput<T>`, a recursive structural check
+that accepts named interfaces without requiring a string index signature while
+rejecting common unsupported leaves. Read generics describe the expected DTO;
+they do not construct or validate a class:
 
 ```ts
-type StoredUser = {
+interface StoredUser {
   id: string;
   roles: string[];
   lastSeen: string | null;
-};
+}
 
 await store.setItem<StoredUser>('user', value);
 const user = await store.getItem<StoredUser>('user');
@@ -327,8 +329,8 @@ present; otherwise it maps the single hook. Choose either implementation:
 
 ```ts
 // Simple form: automatically mapped for setItems().
-beforeSet<T>(_key: string, value: T): T {
-  return transform(value) as T;
+beforeSet(_key, value) {
+  return transform(value);
 },
 
 // Or optimized batch form. If both are declared, this wins for batch calls.

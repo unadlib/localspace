@@ -89,6 +89,21 @@ driver or byte transform must preserve binary nested inside an array or object.
 Objects that merely contain a `__localspace__` property remain ordinary
 application data unless they claim the exact reserved plugin namespace.
 
+Write types are checked recursively without forcing DTO interfaces to declare
+a string index signature:
+
+```ts
+interface StoredUser {
+  id: string;
+  roles: string[];
+}
+
+const saved: StoredUser = await cache.setItem('user', user);
+```
+
+Runtime validation remains authoritative because TypeScript's structural type
+system cannot distinguish every data-only class instance from an interface.
+
 ## Stable facade and configuration
 
 Storage-operation references stay stable across `ready()`, driver fallback,

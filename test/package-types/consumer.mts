@@ -21,6 +21,8 @@ import localspace, {
   type LocalSpacePlugin,
   type PluginIterateSummary,
   type StorageValue,
+  type StorageValueInput,
+  type TTLPluginOptions,
   type TransactionMode,
 } from 'localspace';
 import {
@@ -41,7 +43,27 @@ const asyncStorage: ReactNativeAsyncStorage = {
 const options: ReactNativeInstanceOptions = {
   reactNativeAsyncStorage: asyncStorage,
 };
-const localOptions: LocalSpaceOptions = { drivers: [memoryDriver] };
+interface StoredUser {
+  id: string;
+  roles: string[];
+  profile: { active: boolean; nickname?: string };
+}
+const storedUser: StoredUser = {
+  id: 'user-1',
+  roles: ['admin'],
+  profile: { active: true },
+};
+const checkedStoredUser: StorageValueInput<StoredUser> = storedUser;
+const stringPlugin: LocalSpacePlugin<string> = {
+  name: 'package-types-string-plugin',
+  beforeSet: (_key, value) => value.trim(),
+};
+void instance.use(stringPlugin);
+const localOptions: LocalSpaceOptions = {
+  drivers: [memoryDriver],
+  plugins: [stringPlugin],
+};
+const ttlOptions: TTLPluginOptions = { defaultTTL: 1_000 };
 const declaredCapabilities: DriverCapabilities = { persistent: false };
 const selectedCapabilities: LocalSpaceCapabilities = instance.capabilities();
 const configSnapshot: LocalSpaceConfigSnapshot = instance.config();
@@ -76,6 +98,13 @@ const legacyEncryption = legacyEncryptionMigrationPlugin(
 );
 void instance.setItem('migration', migrationValue);
 void instance.setItems([{ key: 'migration', value: migrationValue }]);
+const storedUserWrite: Promise<StoredUser> = instance.setItem(
+  'stored-user',
+  storedUser
+);
+const storedUserRead: Promise<StoredUser | null> =
+  instance.getItem<StoredUser>('stored-user');
+void instance.setItems([{ key: 'stored-user', value: storedUser }]);
 void instance.getItem<StorageValue>('migration');
 void instance.getItems<StorageValue>(['migration']);
 const iterateResult: Promise<string | undefined> = instance.iterate<
@@ -120,6 +149,8 @@ const observerPlugin: LocalSpacePlugin = {
 };
 void instance.runTransaction('readwrite', async (transaction) => {
   await transaction.set('migration', migrationValue);
+  await transaction.set('stored-user', storedUser);
+  await transaction.get<StoredUser>('stored-user');
   await transaction.get<StorageValue>('migration');
   await transaction.iterate<StorageValue>(() => undefined);
 });
@@ -149,6 +180,7 @@ const typecheckDirectLifecycleCalls = (
   void driver._closeStorage?.();
 };
 const typecheckRemovedApis = (): void => {
+  const concreteInstance = new LocalSpace();
   // @ts-expect-error config(options) was removed in 3.0
   instance.config({ name: 'changed' });
   // @ts-expect-error instance driver registration was removed in 3.0
@@ -159,6 +191,12 @@ const typecheckRemovedApis = (): void => {
   configSnapshot.name = 'changed';
   // @ts-expect-error mutable internal config is not public
   instance._config.name = 'changed';
+  // @ts-expect-error operation tracking is an implementation detail
+  concreteInstance._runTrackedOperation;
+  // @ts-expect-error support filtering is an implementation detail
+  concreteInstance._getSupportedDrivers;
+  // @ts-expect-error lifecycle state is an implementation detail
+  concreteInstance._assertOpen;
   // @ts-expect-error getAllKeys is required by the complete RN facade contract
   const incompleteAsyncStorage: ReactNativeAsyncStorage = {
     getItem: async () => null,
@@ -178,8 +216,9 @@ const typecheckRemovedApis = (): void => {
   void instance.setItem('undefined', undefined);
   // @ts-expect-error Map is outside the 3.0 StorageValue contract
   void instance.setItems([{ key: 'map', value: new Map() }]);
-  // @ts-expect-error reads cannot promise values outside StorageValue
-  void instance.getItem<Date>('date');
+  const invalidDto: { createdAt: Date } = { createdAt: new Date() };
+  // @ts-expect-error unsupported fields are rejected recursively
+  void instance.setItem('invalid-dto', invalidDto);
   const legacyAlgorithm: EncryptionPluginOptions = {
     key: '0123456789abcdef0123456789abcdef',
     // @ts-expect-error AES-CBC was removed from normal encryption configuration
@@ -213,6 +252,8 @@ const typecheckRemovedApis = (): void => {
   void callerOwnedIv;
   void missingKeySource;
   void ambiguousKeySource;
+  void concreteInstance;
+  void invalidDto;
 };
 setDeprecationWarnings(false);
 void registerDriver(customDriver, { overwrite: true });
@@ -224,10 +265,16 @@ void [
   mode,
   options,
   localOptions,
+  storedUser,
+  checkedStoredUser,
+  stringPlugin,
+  ttlOptions,
   declaredCapabilities,
   selectedCapabilities,
   configSnapshot,
   migrationValue,
+  storedUserWrite,
+  storedUserRead,
   compressionCodec,
   compression,
   encryptionAlgorithm,

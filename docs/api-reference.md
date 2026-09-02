@@ -10,6 +10,8 @@ import localspace, {
   LocalSpaceError,
   type LocalSpaceInstance,
   type StorageValue,
+  type StorageValueInput,
+  type TTLPluginOptions,
 } from 'localspace';
 ```
 
@@ -49,6 +51,24 @@ type StorageValue =
   | StorageValue[]
   | { [key: string]: StorageValue };
 ```
+
+Public writes use the recursive `StorageValueInput<T>` check, so normal named
+interfaces work without adding a string index signature. It rejects common
+unsupported leaf types while retaining the caller's precise DTO type:
+
+```ts
+interface StoredProfile {
+  name: string;
+  roles: string[];
+  preferences: { compact: boolean };
+}
+
+const profile: StoredProfile = await store.setItem('profile', input);
+```
+
+TypeScript is structurally typed and cannot distinguish every data-only class
+from an interface. Runtime validation remains authoritative for prototypes,
+descriptors, cycles, finite numbers, detached buffers, and reserved envelopes.
 
 Every application value and every plugin-produced write value is validated.
 The runtime accepts only:
@@ -121,10 +141,13 @@ Construction-scoped custom driver definitions do not leak to another instance.
 All public operation methods are stable facade functions: their identity does
 not change after readiness, driver fallback/switching, or plugin setup.
 
-### `getItem<T extends StorageValue>(key): Promise<T | null>`
+### `getItem<T = StorageValue>(key): Promise<T | null>`
 
 Returns the decoded logical value, or `null` when the key does not exist or a
 plugin intentionally hides it.
+
+The read generic describes the DTO the caller expects; it is not a decoder or
+runtime assertion. Reading as a class type does not construct that class.
 
 ```ts
 const profile = await store.getItem<{
@@ -133,7 +156,7 @@ const profile = await store.getItem<{
 }>('profile');
 ```
 
-### `setItem<T extends StorageValue>(key, value): Promise<T>`
+### `setItem<T>(key, value: T & StorageValueInput<T>): Promise<T>`
 
 Validates, copies, transforms, and stores one value. Validation happens before
 plugin or driver side effects. The returned value is the logical write result,
@@ -203,7 +226,7 @@ type BatchItems<T> =
 type BatchResponse<T> = Array<{ key: string; value: T | null }>;
 ```
 
-### `setItems<T extends StorageValue>(entries): Promise<BatchResponse<T>>`
+### `setItems<T>(entries: BatchItems<T & StorageValueInput<T>>): Promise<BatchResponse<T>>`
 
 Accepts an entry array, `Map`, or object. Values are validated before plugin or
 driver side effects. The response contains logical values in the effective
@@ -220,7 +243,7 @@ On IndexedDB an unchunked call is atomic. When `maxBatchSize` splits the call,
 or when another driver is selected, do not assume batch atomicity; inspect
 `capabilities().atomicBatch`.
 
-### `getItems<T extends StorageValue>(keys): Promise<BatchResponse<T>>`
+### `getItems<T = StorageValue>(keys): Promise<BatchResponse<T>>`
 
 Returns one result for each requested key in requested order. Missing or
 plugin-hidden values are `null`.
@@ -238,11 +261,11 @@ configuration.
 type TransactionMode = 'readonly' | 'readwrite';
 
 interface TransactionScope {
-  get<T extends StorageValue>(key: string): Promise<T | null>;
-  set<T extends StorageValue>(key: string, value: T): Promise<T>;
+  get<T = StorageValue>(key: string): Promise<T | null>;
+  set<T>(key: string, value: T & StorageValueInput<T>): Promise<T>;
   remove(key: string): Promise<void>;
   keys(): Promise<string[]>;
-  iterate<T extends StorageValue, U>(
+  iterate<T = StorageValue, U = void>(
     iterator: (value: T, key: string, iterationNumber: number) => U | Promise<U>
   ): Promise<U | undefined>;
   clear(): Promise<void>;

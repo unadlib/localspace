@@ -130,20 +130,24 @@ interface PluginContext {
 ## Item hooks
 
 ```ts
-interface LocalSpacePlugin {
-  beforeSet?<T>(key: string, value: T, context: PluginContext): Promise<T> | T;
-  afterSet?<T>(
+interface LocalSpacePlugin<TValue = StorageValue> {
+  beforeSet?(
     key: string,
-    value: T,
+    value: TValue,
+    context: PluginContext
+  ): Promise<TValue> | TValue;
+  afterSet?(
+    key: string,
+    value: TValue,
     context: PluginContext
   ): Promise<void> | void;
 
   beforeGet?(key: string, context: PluginContext): Promise<string> | string;
-  afterGet?<T>(
+  afterGet?(
     key: string,
-    value: T | null,
+    value: TValue | null,
     context: PluginContext
-  ): Promise<T | null> | T | null;
+  ): Promise<TValue | null> | TValue | null;
 
   beforeRemove?(key: string, context: PluginContext): Promise<string> | string;
   afterRemove?(key: string, context: PluginContext): Promise<void> | void;
@@ -161,24 +165,24 @@ rewrite the public operation result.
 ## Batch hooks: one form per plugin and phase
 
 ```ts
-interface LocalSpacePlugin {
-  beforeSetItems?<T>(
-    entries: BatchItems<T>,
+interface LocalSpacePlugin<TValue = StorageValue> {
+  beforeSetItems?(
+    entries: BatchItems<TValue>,
     context: PluginContext
-  ): Promise<BatchItems<T>> | BatchItems<T>;
-  afterSetItems?<T>(
-    entries: BatchResponse<T>,
+  ): Promise<BatchItems<TValue>> | BatchItems<TValue>;
+  afterSetItems?(
+    entries: BatchResponse<TValue>,
     context: PluginContext
-  ): Promise<BatchResponse<T>> | BatchResponse<T>;
+  ): Promise<BatchResponse<TValue>> | BatchResponse<TValue>;
 
   beforeGetItems?(
     keys: string[],
     context: PluginContext
   ): Promise<string[]> | string[];
-  afterGetItems?<T>(
-    entries: BatchResponse<T>,
+  afterGetItems?(
+    entries: BatchResponse<TValue>,
     context: PluginContext
-  ): Promise<BatchResponse<T>> | BatchResponse<T>;
+  ): Promise<BatchResponse<TValue>> | BatchResponse<TValue>;
 
   beforeRemoveItems?(
     keys: string[],
@@ -211,12 +215,16 @@ A custom plugin usually needs only single hooks:
 ```ts
 import type { LocalSpacePlugin } from 'localspace';
 
-const normalizeStrings: LocalSpacePlugin = {
+const normalizeStrings: LocalSpacePlugin<string> = {
   name: 'normalize-strings',
-  beforeSet: <T>(_key: string, value: T): T =>
-    (typeof value === 'string' ? value.trim() : value) as T,
+  beforeSet: (_key, value) => value.trim(),
 };
 ```
+
+The value parameter is an authoring aid, not a runtime filter. A specialized
+plugin must only be attached to a store whose values match that type; use the
+default `LocalSpacePlugin` and narrow values inside each hook for heterogeneous
+stores. Plugin-produced writes are still checked at runtime.
 
 `setItems()` maps that hook automatically. Add `beforeSetItems` only when a
 true batch implementation is useful; do not retain a 2.x

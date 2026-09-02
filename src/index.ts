@@ -23,6 +23,7 @@ import type {
   StoragePrimitive,
   StorageBinary,
   StorageValue,
+  StorageValueInput,
   DriverRegistrationOptions,
   DriverCapabilities,
   LocalSpaceCapabilities,
@@ -59,6 +60,7 @@ export type {
   StoragePrimitive,
   StorageBinary,
   StorageValue,
+  StorageValueInput,
   DriverRegistrationOptions,
   DriverCapabilities,
   LocalSpaceCapabilities,
@@ -81,6 +83,7 @@ export { default as serializer } from './utils/serializer.js';
 
 // Export plugins
 export { ttlPlugin } from './plugins/ttl.js';
+export type { TTLPluginOptions } from './plugins/ttl.js';
 export {
   encryptionPlugin,
   legacyEncryptionMigrationPlugin,

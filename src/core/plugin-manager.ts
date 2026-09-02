@@ -3,7 +3,7 @@ import type {
   BatchResponse,
   LocalSpaceConfigSnapshot,
   LocalSpaceInstance,
-  LocalSpacePlugin,
+  LocalSpacePlugin as LocalSpacePluginDefinition,
   PluginContext,
   PluginErrorInfo,
   PluginIterateSummary,
@@ -18,6 +18,11 @@ import {
   getPluginBackgroundTaskController,
   type PluginBackgroundTaskPause,
 } from './plugin-capabilities.js';
+
+// A manager holds plugins with different author-facing value types. Runtime
+// validation is the common boundary, so the registry intentionally erases
+// that generic after registration.
+type LocalSpacePlugin = LocalSpacePluginDefinition<any>;
 
 export class PluginAbortError extends Error {
   constructor(message = 'Plugin aborted the operation') {

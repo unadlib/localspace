@@ -60,6 +60,14 @@
   `onError` without rejecting a write, removal, clear, drop, query, or
   transaction. This is stable inside and outside transaction scopes; strict
   mode continues to propagate transform and pre-settlement hook failures.
+- Made write typing accept ordinary named DTO interfaces through the recursive
+  `StorageValueInput<T>` check, while retaining precise return types and runtime
+  validation. Read generics are explicit expected-type assertions rather than
+  pretending to decode classes.
+- Made plugin value hooks generic at the plugin boundary instead of requiring
+  every implementation to declare generic methods, exported `TTLPluginOptions`
+  from the package root, and hid remaining operation internals from the public
+  `LocalSpace` class type.
 
 - Replaced runtime driver-method injection and wrapper refreshes with stable
   facade dispatch. Captured/destructured operation references and spies

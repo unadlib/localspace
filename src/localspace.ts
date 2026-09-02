@@ -14,6 +14,7 @@ import type {
   LocalSpaceCapabilities,
   LocalSpaceConfigSnapshot,
   StorageValue,
+  StorageValueInput,
 } from './types.js';
 import { extend, isArray, normalizeBatchEntries } from './utils/helpers.js';
 import {
@@ -346,14 +347,11 @@ export class LocalSpace implements LocalSpaceInstance {
       args
     )) as LocalSpaceInstance['getItems'];
 
-  iterate = <T extends StorageValue = StorageValue, U = void>(
-    iteratorCallback: (
-      value: T,
-      key: string,
-      iterationNumber: number
-    ) => U | Promise<U>
-  ): Promise<U | undefined> =>
-    this._dispatchOperation<U | undefined>('iterate', [iteratorCallback]);
+  iterate: LocalSpaceInstance['iterate'] = ((...args: unknown[]) =>
+    this._dispatchOperation(
+      'iterate',
+      args
+    )) as LocalSpaceInstance['iterate'];
 
   key = (keyIndex: number): Promise<string | null> =>
     this._dispatchOperation<string | null>('key', [keyIndex]);
@@ -378,13 +376,17 @@ export class LocalSpace implements LocalSpaceInstance {
     runner: (scope: TransactionScope) => Promise<T> | T
   ): Promise<T> => this._dispatchOperation<T>('runTransaction', [mode, runner]);
 
-  setItem = <T extends StorageValue>(key: string, value: T): Promise<T> =>
-    this._dispatchOperation<T>('setItem', [key, value]);
+  setItem: LocalSpaceInstance['setItem'] = ((...args: unknown[]) =>
+    this._dispatchOperation(
+      'setItem',
+      args
+    )) as LocalSpaceInstance['setItem'];
 
-  setItems = <T extends StorageValue>(
-    entries: BatchItems<T>
-  ): Promise<BatchResponse<T>> =>
-    this._dispatchOperation<BatchResponse<T>>('setItems', [entries]);
+  setItems: LocalSpaceInstance['setItems'] = ((...args: unknown[]) =>
+    this._dispatchOperation(
+      'setItems',
+      args
+    )) as LocalSpaceInstance['setItems'];
 
   dropInstance = (options?: LocalSpaceConfig): Promise<void> =>
     this._dispatchOperation('dropInstance', [options]);
@@ -1115,7 +1117,7 @@ export class LocalSpace implements LocalSpaceInstance {
     );
   }
 
-  _runTrackedOperation(
+  private _runTrackedOperation(
     operation: string,
     args: unknown[],
     executor: () => unknown
@@ -1691,7 +1693,7 @@ export class LocalSpace implements LocalSpaceInstance {
         const validatingScope = {} as TransactionScope;
         const rawGet = ((key: string) => scope.get(key)) as RawDriverMethod;
         const rawSet = ((key: string, value: unknown) =>
-          scope.set(key, value as StorageValue)) as RawDriverMethod;
+          (scope.set as RawDriverMethod)(key, value)) as RawDriverMethod;
         const rawRemove = ((key: string) =>
           scope.remove(key)) as RawDriverMethod;
         const rawKeys = (() => scope.keys()) as RawDriverMethod;
@@ -1726,7 +1728,7 @@ export class LocalSpace implements LocalSpaceInstance {
           : rawClear;
 
         Object.assign(validatingScope, {
-          get: async <T extends StorageValue>(key: string) => {
+          get: async <T = StorageValue>(key: string) => {
             assertScopeActive('get');
             return runDriverTransactionScopeOperation(
               scope,
@@ -1734,7 +1736,10 @@ export class LocalSpace implements LocalSpaceInstance {
               () => getOperation(key) as Promise<T | null>
             );
           },
-          set: async <T extends StorageValue>(key: string, value: T) => {
+          set: async <T>(
+            key: string,
+            value: T & StorageValueInput<T>
+          ) => {
             assertScopeActive('set');
             return runDriverTransactionScopeOperation(
               scope,
@@ -1756,7 +1761,7 @@ export class LocalSpace implements LocalSpaceInstance {
               () => keysOperation() as Promise<string[]>
             );
           },
-          iterate: async <T extends StorageValue, U>(
+          iterate: async <T = StorageValue, U = void>(
             iterator: (
               value: T,
               key: string,
@@ -1804,19 +1809,6 @@ export class LocalSpace implements LocalSpaceInstance {
     this._assertOpen(operation);
     await this._pluginManager.ensureInitialized();
     this._assertOpen(operation);
-  }
-
-  _getSupportedDrivers(drivers: string[]): string[] {
-    const supportedDrivers: string[] = [];
-    for (const driverName of drivers) {
-      if (
-        this.supports(driverName) ||
-        this._isDriverForcedByInstanceConfig(driverName)
-      ) {
-        supportedDrivers.push(driverName);
-      }
-    }
-    return supportedDrivers;
   }
 
   private _isDriverForcedByInstanceConfig(driverName: string): boolean {
@@ -2094,7 +2086,7 @@ export class LocalSpace implements LocalSpaceInstance {
     );
   }
 
-  _assertOpen(operation: string): void {
+  private _assertOpen(operation: string): void {
     if (this._closed) {
       throw this._closedError(operation);
     }
