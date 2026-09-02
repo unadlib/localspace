@@ -528,13 +528,14 @@ export class PluginManager {
     role: PluginHookRole = 'all'
   ): Promise<T | null> {
     let currentValue: T | null = value;
+    const operation = context.operation ?? 'getItem';
     for (const plugin of this.getActivePlugins({ reverse: true, role })) {
       if (!plugin.afterGet) continue;
       currentValue = await this.invokeValueHook(
         plugin,
         () => plugin.afterGet!(key, currentValue, context),
         'after',
-        'getItem',
+        operation,
         key,
         context,
         currentValue

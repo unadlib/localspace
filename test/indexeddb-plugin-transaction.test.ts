@@ -222,7 +222,7 @@ describe('IndexedDB plugin-aware transactions', () => {
     }
   });
 
-  it('materializes logical values and awaits transaction iterate callbacks', async () => {
+  it('streams logical values and awaits transaction iterate callbacks', async () => {
     const store = await createStore('transaction-async-iterate', [
       compressionPlugin({ threshold: 1 }),
     ]);

@@ -527,8 +527,10 @@ if (found !== undefined) {
 ```
 
 Iteration exposes logical decoded values and participates in plugin observers.
-Do not rely on driver/plugin envelopes or leave async callback promises
-unawaited.
+It stops without materializing the complete store, although a driver may read a
+bounded page. Do not rely on driver/plugin envelopes or leave async callback
+promises unawaited. Custom drivers must await each callback result and stop
+before reading another item when that result is non-`undefined`.
 
 ## Driver registration and capabilities
 

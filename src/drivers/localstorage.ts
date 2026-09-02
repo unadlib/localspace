@@ -165,10 +165,10 @@ function getItem<T>(
 
 function iterate<T, U>(
   this: LocalStorageDriverContext,
-  iterator: (value: T, key: string, iterationNumber: number) => U
+  iterator: (value: T, key: string, iterationNumber: number) => U | Promise<U>
 ): Promise<U | undefined> {
   const promise = withLocalStorageErrorContext(
-    this.ready().then(() => {
+    this.ready().then(async () => {
       const dbInfo = this._dbInfo;
       const keyPrefix = dbInfo.keyPrefix;
       const keyPrefixLength = keyPrefix.length;
@@ -187,7 +187,7 @@ function iterate<T, U>(
           value = dbInfo.serializer.deserialize(rawValue) as T;
         }
 
-        const result = iterator(
+        const result = await iterator(
           value as T,
           key.substring(keyPrefixLength),
           iterationNumber++

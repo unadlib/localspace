@@ -1595,37 +1595,57 @@ export class LocalSpace implements LocalSpaceInstance {
         iterationNumber: number
       ) => U | Promise<U>
     ): Promise<U | undefined> => {
-      const context = hasPlugins
-        ? this._pluginManager.createContext(
+      if (!hasPlugins) {
+        return original(iterator) as Promise<U | undefined>;
+      }
+
+      await this._ensurePluginsInitialized('iterate');
+      const context = this._pluginManager.createContext(
+        'iterate',
+        undefined,
+        transactionScope
+      );
+      await this._pluginManager.beforeIterate(context);
+
+      let iterations = 0;
+      let stopped = false;
+      const result = (await original(
+        async (storedValue: unknown, key: string) => {
+          const entryContext = this._pluginManager.createContext(
             'iterate',
             undefined,
             transactionScope
-          )
-        : undefined;
-      if (context) {
-        await this._ensurePluginsInitialized('iterate');
-        await this._pluginManager.beforeIterate(context);
-      }
+          );
+          const storageValue = await this._pluginManager.afterGet(
+            key,
+            storedValue,
+            entryContext,
+            'storage-transform'
+          );
+          const logicalValue = await this._pluginManager.afterGet(
+            key,
+            storageValue,
+            entryContext,
+            'logical'
+          );
+          if (isPluginValueHidden(entryContext, key)) {
+            return undefined;
+          }
 
-      const entries = await this._materializeLogicalEntries(original, context);
-      let iterations = 0;
-      let stopped = false;
-      let result: U | undefined;
-      for (const entry of entries) {
-        iterations += 1;
-        result = await iterator(entry.value as T, entry.key, iterations);
-        if (result !== undefined) {
-          stopped = true;
-          break;
+          iterations += 1;
+          const callbackResult = await iterator(
+            logicalValue as T,
+            key,
+            iterations
+          );
+          if (callbackResult !== undefined) {
+            stopped = true;
+          }
+          return callbackResult;
         }
-      }
+      )) as U | undefined;
 
-      if (context) {
-        await this._pluginManager.afterIterate(
-          { iterations, stopped },
-          context
-        );
-      }
+      await this._pluginManager.afterIterate({ iterations, stopped }, context);
       return result;
     };
   }

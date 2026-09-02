@@ -206,10 +206,15 @@ export interface Driver {
       ) => DriverCapabilities);
 
   /**
-   * Iterate through all items
+   * Iterate through all items. Drivers must await each callback and stop before
+   * reading the next item when it resolves to a non-undefined result.
    */
   iterate<T extends StorageValue = StorageValue, U = void>(
-    iteratorCallback: (value: T, key: string, iterationNumber: number) => U
+    iteratorCallback: (
+      value: T,
+      key: string,
+      iterationNumber: number
+    ) => U | Promise<U>
   ): Promise<U | undefined>;
 
   /**

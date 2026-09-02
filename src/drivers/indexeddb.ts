@@ -42,7 +42,13 @@ const DRIVER_NAME = 'asyncStorage';
 
 const READ_ONLY = 'readonly';
 const READ_WRITE = 'readwrite';
+const ITERATE_PAGE_SIZE = 64;
 let detectBlobSupportPromise: Promise<boolean> | null = null;
+
+const isPromiseLike = <T>(value: T | Promise<T>): value is Promise<T> =>
+  value !== null &&
+  (typeof value === 'object' || typeof value === 'function') &&
+  typeof (value as PromiseLike<T>).then === 'function';
 
 const IDB_DOM_EXCEPTION_NAMES = new Set([
   'AbortError',
@@ -993,59 +999,163 @@ function getItems<T>(
 
 function iterate<T, U>(
   this: IndexedDBDriverContext,
-  iterator: (value: T, key: string, iterationNumber: number) => U
+  iterator: (value: T, key: string, iterationNumber: number) => U | Promise<U>
 ): Promise<U | undefined> {
   const self = this;
 
-  const promise = new Promise<U | undefined>((resolve, reject) => {
-    self
-      .ready()
-      .then(() => {
-        createTransaction(
-          self._dbInfo,
-          READ_ONLY,
-          (err: Error | null, transaction?: IDBTransaction) => {
-            if (err) return reject(err);
+  type IterationEntry = { key: string; value: T };
+  type IterationPage = { entries: IterationEntry[]; exhausted: boolean };
+  type DirectIterationOutcome =
+    | { type: 'complete'; result?: U }
+    | { type: 'async'; key: string; result: Promise<U> };
+  let iterationNumber = 1;
 
-            try {
-              const storeName = requireStoreName(self._dbInfo);
-              const store = transaction!.objectStore(storeName);
-              const req = store.openCursor();
-              let iterationNumber = 1;
-
-              req.onsuccess = () => {
-                const cursor = req.result;
-                if (cursor) {
-                  let value = cursor.value;
-                  if (value === undefined) {
-                    value = null;
-                  }
-                  if (isEncodedBlob(value)) {
-                    value = decodeBlob(value);
-                  }
-                  const result = iterator(
-                    value,
-                    cursor.key as string,
-                    iterationNumber++
-                  );
-                  if (result !== undefined) {
-                    resolve(result);
-                  } else {
-                    cursor.continue();
-                  }
-                } else {
-                  resolve(undefined);
-                }
-              };
-
-              req.onerror = () => reject(req.error);
-            } catch (e) {
-              reject(e);
-            }
+  const iterateSynchronouslyUntilAsync = (): Promise<DirectIterationOutcome> =>
+    new Promise<DirectIterationOutcome>((resolve, reject) => {
+      createTransaction(
+        self._dbInfo,
+        READ_ONLY,
+        (err: Error | null, transaction?: IDBTransaction) => {
+          if (err || !transaction) {
+            reject(err ?? new Error('Failed to create iterate transaction'));
+            return;
           }
+
+          try {
+            const storeName = requireStoreName(self._dbInfo);
+            const request = transaction.objectStore(storeName).openCursor();
+            request.onsuccess = () => {
+              const cursor = request.result;
+              if (!cursor) {
+                resolve({ type: 'complete' });
+                return;
+              }
+
+              let value = cursor.value;
+              if (value === undefined) {
+                value = null;
+              }
+              if (isEncodedBlob(value)) {
+                value = decodeBlob(value);
+              }
+
+              try {
+                const result = iterator(
+                  value,
+                  cursor.key as string,
+                  iterationNumber++
+                );
+                if (isPromiseLike(result)) {
+                  resolve({
+                    type: 'async',
+                    key: cursor.key as string,
+                    result: Promise.resolve(result),
+                  });
+                } else if (result !== undefined) {
+                  resolve({ type: 'complete', result });
+                } else {
+                  cursor.continue();
+                }
+              } catch (error) {
+                reject(error);
+              }
+            };
+            request.onerror = () => reject(request.error);
+            transaction.onabort = () =>
+              reject(
+                transaction.error ?? new Error('Iterate transaction aborted')
+              );
+          } catch (error) {
+            reject(error);
+          }
+        }
+      );
+    });
+
+  const readPage = (afterKey?: string): Promise<IterationPage> =>
+    new Promise<IterationPage>((resolve, reject) => {
+      createTransaction(
+        self._dbInfo,
+        READ_ONLY,
+        (err: Error | null, transaction?: IDBTransaction) => {
+          if (err || !transaction) {
+            reject(err ?? new Error('Failed to create iterate transaction'));
+            return;
+          }
+
+          try {
+            const storeName = requireStoreName(self._dbInfo);
+            const store = transaction.objectStore(storeName);
+            const range =
+              afterKey === undefined
+                ? undefined
+                : IDBKeyRange.lowerBound(afterKey, true);
+            const request = store.openCursor(range);
+            const entries: IterationEntry[] = [];
+
+            request.onsuccess = () => {
+              const cursor = request.result;
+              if (!cursor) {
+                resolve({ entries, exhausted: true });
+                return;
+              }
+
+              let value = cursor.value;
+              if (value === undefined) {
+                value = null;
+              }
+              if (isEncodedBlob(value)) {
+                value = decodeBlob(value);
+              }
+              entries.push({ key: cursor.key as string, value });
+              if (entries.length >= ITERATE_PAGE_SIZE) {
+                resolve({ entries, exhausted: false });
+                return;
+              }
+              cursor.continue();
+            };
+            request.onerror = () => reject(request.error);
+            transaction.onabort = () =>
+              reject(
+                transaction.error ?? new Error('Iterate transaction aborted')
+              );
+          } catch (error) {
+            reject(error);
+          }
+        }
+      );
+    });
+
+  const promise = self.ready().then(async () => {
+    const direct = await iterateSynchronouslyUntilAsync();
+    if (direct.type === 'complete') {
+      return direct.result;
+    }
+
+    const firstAsyncResult = await direct.result;
+    if (firstAsyncResult !== undefined) {
+      return firstAsyncResult;
+    }
+    let afterKey: string | undefined = direct.key;
+
+    while (true) {
+      const page = await readPage(afterKey);
+      for (const entry of page.entries) {
+        const result = await iterator(
+          entry.value,
+          entry.key,
+          iterationNumber++
         );
-      })
-      .catch(reject);
+        if (result !== undefined) {
+          return result;
+        }
+      }
+
+      if (page.exhausted || page.entries.length === 0) {
+        return undefined;
+      }
+      afterKey = page.entries[page.entries.length - 1].key;
+    }
   });
 
   const wrappedPromise = withIdbErrorContext(promise, 'iterate');
@@ -1664,46 +1774,48 @@ function runTransaction<T>(
                     key: string,
                     iteration: number
                   ) => U | Promise<U>
-                ) => {
-                  const entries = await runInActiveRequestTask(
+                ) =>
+                  runInActiveRequestTask(
                     'iterate',
                     () =>
-                      new Promise<Array<{ key: string; value: V }>>(
-                        (res, rej) => {
-                          const all: Array<{ key: string; value: V }> = [];
-                          const req = store.openCursor();
-                          req.onsuccess = () => {
-                            const cursor = req.result;
-                            if (!cursor) {
-                              res(all);
+                      new Promise<U | undefined>((res, rej) => {
+                        const req = store.openCursor();
+                        let iteration = 1;
+                        req.onsuccess = () => {
+                          const cursor = req.result;
+                          if (!cursor) {
+                            res(undefined);
+                            return;
+                          }
+                          let value = cursor.value;
+                          if (value === undefined) value = null;
+                          if (isEncodedBlob(value)) {
+                            value = decodeBlob(value);
+                          }
+                          let callbackResult: U | Promise<U>;
+                          try {
+                            callbackResult = fn(
+                              value,
+                              cursor.key as string,
+                              iteration++
+                            );
+                          } catch (error) {
+                            rej(error);
+                            return;
+                          }
+                          Promise.resolve(callbackResult).then((result) => {
+                            if (result !== undefined) {
+                              res(result);
                               return;
                             }
-                            let value = cursor.value;
-                            if (value === undefined) value = null;
-                            if (isEncodedBlob(value)) {
-                              value = decodeBlob(value);
-                            }
-                            all.push({ key: cursor.key as string, value });
-                            cursor.continue();
-                          };
-                          req.onerror = () => rej(req.error);
-                        }
-                      )
-                  );
-
-                  let iteration = 1;
-                  for (const entry of entries) {
-                    const result = await fn(
-                      entry.value,
-                      entry.key,
-                      iteration++
-                    );
-                    if (result !== undefined) {
-                      return result;
-                    }
-                  }
-                  return undefined;
-                },
+                            void runInActiveRequestTask('iterate', () => {
+                              cursor.continue();
+                            }).catch(rej);
+                          }, rej);
+                        };
+                        req.onerror = () => rej(req.error);
+                      })
+                  ),
                 clear: () => {
                   makeReadOnlyGuard();
                   return runInActiveRequestTask(

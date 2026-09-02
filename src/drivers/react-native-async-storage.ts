@@ -225,7 +225,7 @@ function getItem<T>(
 
 function iterate<T, U>(
   this: ReactNativeAsyncStorageDriverContext,
-  iterator: (value: T, key: string, iterationNumber: number) => U
+  iterator: (value: T, key: string, iterationNumber: number) => U | Promise<U>
 ): Promise<U | undefined> {
   const promise = withAsyncStorageErrorContext(
     this.ready().then(async () => {
@@ -241,7 +241,7 @@ function iterate<T, U>(
             ? null
             : (dbInfo.serializer.deserialize(rawValue) as T);
 
-        const result = iterator(
+        const result = await iterator(
           value as T,
           fullKey.substring(prefixLength),
           iterationNumber++

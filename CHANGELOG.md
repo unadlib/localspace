@@ -53,6 +53,9 @@
   non-callable `instanceToken` provides stable identity across hooks. Removed
   the unsafe `lifecycleInstance`/public-instance pair that allowed async
   lifecycle callbacks to reenter initialization and deadlock.
+- Made iteration genuinely incremental. Drivers now await async callbacks and
+  stop before the next item (or after one bounded IndexedDB page), while plugin
+  decoding runs per entry instead of materializing the whole logical store.
 
 - Replaced runtime driver-method injection and wrapper refreshes with stable
   facade dispatch. Captured/destructured operation references and spies

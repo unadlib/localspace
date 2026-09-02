@@ -278,7 +278,9 @@ reverse order.
 `iterate`, `keys`, `key`, and `length` operate on the decoded logical view, not
 raw driver records. Built-in TTL expiration is resolved during that scan, so an
 expired entry is absent consistently from every view. A stored logical `null`
-is still an item and remains visible in keys/length.
+is still an item and remains visible in keys/length. Iteration streams each item
+through `afterGet`; the batch-only `afterGetItems` optimization is reserved for
+batch/query materialization and is not an implicit whole-store iterate hook.
 
 `clear` and `dropInstance` do not synthesize per-item remove hooks; use their
 dedicated observers for aggregate deletion.

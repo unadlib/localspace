@@ -186,7 +186,9 @@ const match = await store.iterate<StorageValue, string>(
 Iteration exposes decoded logical values. Callbacks are awaited sequentially.
 Iteration numbers start at 1. The first non-`undefined` callback result stops
 iteration and becomes the result; otherwise the promise resolves to
-`undefined`.
+`undefined`. LocalSpace does not materialize the complete value set first:
+drivers stop immediately or after a bounded internal page. Outside an explicit
+transaction, writes interleaved between pages may be observed by later pages.
 
 ## Batch methods
 
@@ -489,7 +491,9 @@ receives a distinct session receiver shared by `_initStorage`, operations, and
 A driver requires `_driver`, `_initStorage`, `clear`, `getItem`, `iterate`,
 `key`, `keys`, `length`, `removeItem`, and `setItem`. `dropInstance`, batch
 methods, `runTransaction`, and `_closeStorage` are optional. `_support` may be a
-boolean or a sync/async probe.
+boolean or a sync/async probe. A custom driver's `iterate` implementation must
+await callback results sequentially and stop before reading the next item when
+the callback resolves to a non-`undefined` result.
 
 ```ts
 interface DriverCapabilities {

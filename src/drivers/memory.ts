@@ -220,24 +220,34 @@ function iterate<T, U>(
   iterator: (value: T, key: string, iterationNumber: number) => U | Promise<U>
 ): Promise<U | undefined> {
   const promise = withMemoryErrorContext(
-    this.ready().then(() =>
-      runStoreOperation(this._dbInfo.store, async () => {
-        let iterationNumber = 1;
+    this.ready().then(async () => {
+      const store = this._dbInfo.store;
+      const entries = store.entries();
+      let iterationNumber = 1;
 
-        for (const [key, value] of this._dbInfo.store.entries()) {
-          const result = await iterator(
-            (await cloneValue(value as T)) as T,
-            key,
-            iterationNumber++
-          );
-          if (result !== undefined) {
-            return result;
+      while (true) {
+        const entry = await runStoreOperation(store, async () => {
+          const next = entries.next();
+          if (next.done) {
+            return null;
           }
+          const [key, value] = next.value;
+          return { key, value: await cloneValue(value as T) };
+        });
+        if (!entry) {
+          return undefined;
         }
 
-        return undefined;
-      })
-    ),
+        const result = await iterator(
+          entry.value,
+          entry.key,
+          iterationNumber++
+        );
+        if (result !== undefined) {
+          return result;
+        }
+      }
+    }),
     'iterate'
   );
 

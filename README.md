@@ -271,7 +271,8 @@ interpreted as rollback. Move external work before or after `runTransaction()`.
 Plugins run inside the same transaction and receive the active scope as
 `context.transactionScope`. Async `iterate()` callbacks are awaited
 sequentially; the first non-`undefined` result stops iteration and becomes the
-return value.
+return value. Iteration reads at most a bounded driver page ahead instead of
+materializing the complete value set.
 
 localStorage and React Native AsyncStorage report `transactions: false` and
 reject `runTransaction()` with `UNSUPPORTED_OPERATION`.
