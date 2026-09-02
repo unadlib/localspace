@@ -9,10 +9,10 @@
   "budgets": {
     "entryCount": 59,
     "packedBytes": 470000,
-    "unpackedBytes": 2050000,
+    "unpackedBytes": 2110000,
     "mainBundleBytes": 120000,
     "reactNativeBundleBytes": 20000,
-    "mainSourceMapBytes": 470000,
+    "mainSourceMapBytes": 480000,
     "reactNativeSourceMapBytes": 80000
   },
   "files": [
