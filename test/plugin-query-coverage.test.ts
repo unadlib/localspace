@@ -66,6 +66,86 @@ describe('logical query and iteration plugin coverage', () => {
     }
   );
 
+  it('does not decode values for key views without a visibility predicate', async () => {
+    const afterGet = vi.fn((_key: string, value: unknown) => value);
+    const store = localspace.createInstance({
+      name: uniqueName('key-view-without-visibility'),
+      driver: localspace.MEMORY,
+      plugins: [{ name: 'read-transform-only', afterGet }],
+    });
+    await store.setItems([
+      { key: 'a', value: 1 },
+      { key: 'b', value: 2 },
+    ]);
+
+    await expect(store.keys()).resolves.toEqual(['a', 'b']);
+    await expect(store.key(0)).resolves.toBe('a');
+    await expect(store.length()).resolves.toBe(2);
+    expect(afterGet).not.toHaveBeenCalled();
+
+    await expect(store.getItem('a')).resolves.toBe(1);
+    expect(afterGet).toHaveBeenCalledTimes(1);
+    await store.close();
+  });
+
+  it('applies explicit custom visibility to every logical view', async () => {
+    const isValueVisible = vi.fn((key: string) => key !== 'hidden');
+    const store = localspace.createInstance({
+      name: uniqueName('custom-value-visibility'),
+      driver: localspace.MEMORY,
+      plugins: [{ name: 'visibility-filter', isValueVisible }],
+    });
+    await store.setItems([
+      { key: 'visible', value: 'kept' },
+      { key: 'hidden', value: 'secret' },
+      { key: 'stored-null', value: null },
+    ]);
+
+    await expect(store.getItem('hidden')).resolves.toBeNull();
+    await expect(
+      store.getItems(['visible', 'hidden', 'stored-null'])
+    ).resolves.toEqual([
+      { key: 'visible', value: 'kept' },
+      { key: 'hidden', value: null },
+      { key: 'stored-null', value: null },
+    ]);
+    await expect(store.keys()).resolves.toEqual(['visible', 'stored-null']);
+    await expect(store.length()).resolves.toBe(2);
+    await expect(store.key(1)).resolves.toBe('stored-null');
+
+    const iterated: string[] = [];
+    await store.iterate((_value, key) => {
+      iterated.push(key);
+    });
+    expect(iterated).toEqual(['visible', 'stored-null']);
+    expect(isValueVisible).toHaveBeenCalled();
+    await store.close();
+  });
+
+  it('rejects invalid visibility results', async () => {
+    const store = localspace.createInstance({
+      name: uniqueName('invalid-value-visibility'),
+      driver: localspace.MEMORY,
+      pluginErrorPolicy: 'strict',
+      plugins: [
+        {
+          name: 'invalid-visibility-result',
+          isValueVisible: () => 'visible' as never,
+        },
+      ],
+    });
+    await store.setItem('key', 'value');
+
+    await expect(store.getItem('key')).rejects.toMatchObject({
+      code: 'OPERATION_FAILED',
+      details: {
+        plugin: 'invalid-visibility-result',
+        reason: 'invalid-plugin-visibility',
+      },
+    });
+    await store.close();
+  });
+
   it('awaits iteration callbacks and exposes only decoded logical values', async () => {
     const summaries: PluginIterateSummary[] = [];
     const observer: LocalSpacePlugin = {

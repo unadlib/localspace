@@ -371,10 +371,12 @@ through `onError` (or the console) but cannot reject the operation. This is also
 true for item observers inside a transaction; validation that must veto the
 transaction belongs in a before hook.
 
-Query operations now materialize the logical decoded view when transforms can
-affect visibility. With TTL, an expired item is absent from `getItem`,
-`getItems`, `iterate`, `keys`, `key`, and `length`; decide whether custom
-visibility transforms need matching logic.
+Query operations now materialize the decoded view only for built-in TTL or a
+plugin that explicitly defines `isValueVisible`. With TTL, an expired item is
+absent from `getItem`, `getItems`, `iterate`, `keys`, `key`, and `length`.
+Custom visibility plugins return `false` from that predicate for the same
+cross-operation semantics. Ordinary `afterGet` transforms no longer make
+keys/length decode the complete store.
 
 ### Validate plugin output
 

@@ -633,6 +633,15 @@ export interface LocalSpacePlugin<TValue = StorageValue> {
     value: TValue | null,
     context: PluginContext
   ): Promise<TValue | null> | TValue | null;
+  /**
+   * Decide whether a decoded value participates in get/iteration/key views.
+   * Defining this hook opts key and length operations into logical value scans.
+   */
+  isValueVisible?(
+    key: string,
+    value: TValue | null,
+    context: PluginContext
+  ): Promise<boolean> | boolean;
 
   beforeRemove?(key: string, context: PluginContext): Promise<string> | string;
   afterRemove?(key: string, context: PluginContext): Promise<void> | void;

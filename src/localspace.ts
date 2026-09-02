@@ -1250,12 +1250,19 @@ export class LocalSpace implements LocalSpaceInstance {
         context,
         'storage-transform'
       );
-      return this._pluginManager.afterGet(
+      const result = await this._pluginManager.afterGet(
         targetKey,
         logicalValue,
         context,
         'logical'
       );
+      return (await this._pluginManager.isValueVisible(
+        targetKey,
+        result,
+        context
+      ))
+        ? result
+        : null;
     }) as typeof this.getItem;
   }
 
@@ -1402,10 +1409,26 @@ export class LocalSpace implements LocalSpaceInstance {
         storageResult.items,
         'logical'
       );
-      return logicalResult.entries.map((entry, index) => ({
-        key: logicalResult.items[index]?.requestedKey ?? entry.key,
-        value: entry.value,
-      }));
+      const result: BatchResponse<unknown> = [];
+      for (let index = 0; index < logicalResult.entries.length; index++) {
+        const entry = logicalResult.entries[index];
+        const item = logicalResult.items[index];
+        const hiddenByTransform =
+          isPluginValueHidden(batchContext, entry.key) ||
+          (item ? isPluginValueHidden(item.context, entry.key) : false);
+        const visible =
+          !hiddenByTransform &&
+          (await this._pluginManager.isValueVisible(
+            entry.key,
+            entry.value,
+            item?.context ?? batchContext
+          ));
+        result.push({
+          key: item?.requestedKey ?? entry.key,
+          value: visible ? entry.value : null,
+        });
+      }
+      return result;
     }) as typeof this.getItems;
   }
 
@@ -1507,19 +1530,32 @@ export class LocalSpace implements LocalSpaceInstance {
       operation
     );
 
-    return logicalResult.entries.filter((entry, index) => {
+    const visibleEntries: Array<{ key: string; value: unknown }> = [];
+    for (let index = 0; index < logicalResult.entries.length; index++) {
+      const entry = logicalResult.entries[index];
       const item = logicalResult.items[index];
       const candidateKeys = [
         entry.key,
         item?.targetKey,
         item?.requestedKey,
       ].filter((key): key is string => typeof key === 'string');
-      return !candidateKeys.some(
+      const hiddenByTransform = candidateKeys.some(
         (key) =>
           isPluginValueHidden(readContext, key) ||
           (item ? isPluginValueHidden(item.context, key) : false)
       );
-    });
+      if (
+        !hiddenByTransform &&
+        (await this._pluginManager.isValueVisible(
+          entry.key,
+          entry.value,
+          item?.context ?? readContext
+        ))
+      ) {
+        visibleEntries.push(entry);
+      }
+    }
+    return visibleEntries;
   }
 
   private _createKeysWrapper(
@@ -1630,7 +1666,14 @@ export class LocalSpace implements LocalSpaceInstance {
             entryContext,
             'logical'
           );
-          if (isPluginValueHidden(entryContext, key)) {
+          if (
+            isPluginValueHidden(entryContext, key) ||
+            !(await this._pluginManager.isValueVisible(
+              key,
+              logicalValue,
+              entryContext
+            ))
+          ) {
             return undefined;
           }
 

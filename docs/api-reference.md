@@ -184,7 +184,9 @@ plugin `beforeClear` and `afterClear` observers.
 ### `length(): Promise<number>`
 
 Returns the number of logical visible items. Built-in TTL expiration is applied
-before counting, so `getItem`, `iterate`, `keys`, `key`, and `length` agree.
+before counting, and custom plugins can define `isValueVisible`, so `getItem`,
+`iterate`, `keys`, `key`, and `length` agree. Read transforms that cannot affect
+visibility do not force a value scan.
 
 ### `keys(): Promise<string[]>`
 

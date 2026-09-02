@@ -74,6 +74,10 @@
 - Snapshotted and froze plugin definitions at registration without changing the
   caller-owned object. Later object/prototype mutation is isolated, and visible
   accessor members reject without executing user code during validation.
+- Added the explicit `isValueVisible` plugin predicate and limited logical
+  key/length scans to TTL or plugins that define it. Encryption, compression,
+  and ordinary read transforms no longer decode the whole store just to list or
+  count keys.
 
 - Replaced runtime driver-method injection and wrapper refreshes with stable
   facade dispatch. Captured/destructured operation references and spies

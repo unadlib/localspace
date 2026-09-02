@@ -132,6 +132,11 @@ const observerPlugin: LocalSpacePlugin = {
   afterKey(index, key) {
     void [index, key];
   },
+  isValueVisible(key, value, context) {
+    const visible: boolean = key.length > 0;
+    void [value, context.operation];
+    return visible;
+  },
   afterLength(length) {
     void length;
   },

@@ -16,6 +16,8 @@ import { normalizeBatchEntries } from '../utils/helpers.js';
 import {
   getBuiltInStorageTransformKind,
   getPluginBackgroundTaskController,
+  isPluginValueHidden,
+  markPluginValueHidden,
   sharePluginContextInternalState,
   type PluginBackgroundTaskPause,
 } from './plugin-capabilities.js';
@@ -102,6 +104,7 @@ const PLUGIN_HOOKS = [
   'afterSet',
   'beforeGet',
   'afterGet',
+  'isValueVisible',
   'beforeRemove',
   'afterRemove',
   'beforeSetItems',
@@ -336,10 +339,58 @@ export class PluginManager {
   needsLogicalReadScan(): boolean {
     return this.getActivePlugins().some(
       (plugin) =>
-        getBuiltInStorageTransformKind(plugin) !== null ||
-        typeof plugin.afterGet === 'function' ||
-        typeof plugin.afterGetItems === 'function'
+        getBuiltInStorageTransformKind(plugin) === 'ttl' ||
+        typeof plugin.isValueVisible === 'function'
     );
+  }
+
+  async isValueVisible<T>(
+    key: string,
+    value: T | null,
+    context: PluginContext
+  ): Promise<boolean> {
+    if (isPluginValueHidden(context, key)) {
+      return false;
+    }
+
+    let visible = true;
+    const operation = context.operation ?? 'getItem';
+    for (const plugin of this.getActivePlugins({ reverse: true })) {
+      if (!plugin.isValueVisible) continue;
+      const pluginVisible = await this.invokeValueHook(
+        plugin,
+        async (pluginContext) => {
+          const result = await plugin.isValueVisible!(
+            key,
+            value,
+            pluginContext
+          );
+          if (typeof result !== 'boolean') {
+            throw createLocalSpaceError(
+              'OPERATION_FAILED',
+              `Plugin "${plugin.name}" returned a non-boolean visibility result.`,
+              {
+                plugin: plugin.name,
+                operation,
+                reason: 'invalid-plugin-visibility',
+              }
+            );
+          }
+          return result;
+        },
+        'after',
+        operation,
+        key,
+        context,
+        true
+      );
+      visible = pluginVisible && visible;
+    }
+
+    if (!visible) {
+      markPluginValueHidden(context, key);
+    }
+    return visible;
   }
 
   registerPlugins(plugins: LocalSpacePlugin[]): void {

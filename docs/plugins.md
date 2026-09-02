@@ -156,6 +156,11 @@ interface LocalSpacePlugin<TValue = StorageValue> {
     value: TValue | null,
     context: PluginContext
   ): Promise<TValue | null> | TValue | null;
+  isValueVisible?(
+    key: string,
+    value: TValue | null,
+    context: PluginContext
+  ): Promise<boolean> | boolean;
 
   beforeRemove?(key: string, context: PluginContext): Promise<string> | string;
   afterRemove?(key: string, context: PluginContext): Promise<void> | void;
@@ -169,6 +174,11 @@ output and reports the plugin name in `SERIALIZATION_FAILED` details.
 `beforeGet` and `beforeRemove` may rewrite a key. `afterSet` and `afterRemove`
 are observers; their return values and `operationState` mutations cannot
 rewrite the public operation result.
+
+`isValueVisible` runs after read transforms and explicitly opts a plugin into
+logical key/length filtering. Returning `false` makes `getItem`/`getItems`
+report `null` and removes the entry from `iterate`/`keys`/`key`/`length`.
+Visibility predicates should be deterministic and side-effect free.
 
 ## Batch hooks: one form per plugin and phase
 
@@ -293,11 +303,13 @@ reverse order. Void after hooks are notification points: their failures are
 reported and never veto the operation, including item hooks running inside a
 larger transaction. Put validation that must prevent a write in a before hook.
 
-`iterate`, `keys`, `key`, and `length` operate on the decoded logical view, not
-raw driver records. Built-in TTL expiration is resolved during that scan, so an
-expired entry is absent consistently from every view. A stored logical `null`
-is still an item and remains visible in keys/length. Iteration streams each item
-through `afterGet`; the batch-only `afterGetItems` optimization is reserved for
+`iterate`, `keys`, `key`, and `length` operate on the logical visible view.
+Built-in TTL expiration and explicit `isValueVisible` predicates are resolved
+during value scans, so hidden entries are absent consistently. A stored logical
+`null` remains visible unless a predicate hides it. Encryption, compression,
+and ordinary `afterGet` transforms alone do not force keys/length to read and
+decode every value. Iteration still streams each delivered item through
+`afterGet`; the batch-only `afterGetItems` optimization is reserved for
 batch/query materialization and is not an implicit whole-store iterate hook.
 
 `clear` and `dropInstance` do not synthesize per-item remove hooks; use their
