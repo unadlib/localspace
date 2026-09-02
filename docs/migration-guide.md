@@ -398,7 +398,11 @@ Supply exactly one of `key` and `keyDerivation`. Remove any caller-owned
 `algorithm.iv`: the 3.0 writer creates a fresh IV for every write. The
 `algorithm` object configures only the remaining AES-GCM parameters;
 `ivLength`, `ivGenerator`, and `randomSource` are the explicit controlled-
-runtime extension points.
+runtime extension points. Both hooks must guarantee that an IV never repeats
+under one key across restarts and concurrent writers. LocalSpace can check only
+the returned byte length, not uniqueness; omit the hooks to use its default
+CSPRNG unless the runtime can enforce that stronger coordination contract. See
+[the encryption plugin guide](plugins.md#encryption-plugin) for details.
 
 For AES-CBC or AES-CTR data, open the old namespace with
 `legacyEncryptionMigrationPlugin`, read each value, and write it into a

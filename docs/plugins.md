@@ -489,6 +489,16 @@ parameters and does not accept a caller-owned `iv`. Custom `subtle`,
 `ivGenerator`, and `randomSource` implementations are available for controlled
 runtimes.
 
+> **Security:** AES-GCM fails catastrophically if an IV is reused with the same
+> key. Two writes sharing an IV leak relationships between their plaintexts and
+> can break integrity beyond those values. LocalSpace validates that a custom
+> `ivGenerator` or `randomSource` returns the expected byte length, but it cannot
+> verify uniqueness. The hook must prevent reuse across restarts and concurrent
+> writers. A deterministic construction is safe only with durable,
+> collision-free coordination; a fixed or repeatable seeded value is not. When
+> in doubt, omit both and use the default 96-bit IV from
+> `crypto.getRandomValues()`.
+
 PBKDF2 derivation:
 
 ```ts
