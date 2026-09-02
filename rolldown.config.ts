@@ -17,9 +17,6 @@ const globalName = pkg.name
 const sharedOptions = {
   transform: {
     target: 'es2020',
-    define: {
-      __DEV__: 'false',
-    },
   },
   treeshake: true,
 } satisfies Partial<RolldownOptions>;

@@ -1,8 +1,6 @@
 export {};
 
 declare global {
-  var __DEV__: boolean;
-
   interface StorageBucketOptions {
     durability?: 'relaxed' | 'strict';
     persisted?: boolean;

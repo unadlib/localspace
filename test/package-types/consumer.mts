@@ -5,7 +5,6 @@ import localspace, {
   legacyEncryptionMigrationPlugin,
   memoryDriver,
   registerDriver,
-  setDeprecationWarnings,
   type BatchItems,
   type CompressionCodec,
   type Driver,
@@ -25,11 +24,13 @@ import localspace, {
   type TTLPluginOptions,
   type TransactionMode,
 } from 'localspace';
+import * as localspaceApi from 'localspace';
 import {
   createReactNativeInstance,
   type ReactNativeAsyncStorage,
   type ReactNativeInstanceOptions,
 } from 'localspace/react-native';
+import * as reactNativeApi from 'localspace/react-native';
 
 const instance: LocalSpaceInstance = new LocalSpace();
 const items: BatchItems<number> = [{ key: 'count', value: 1 }];
@@ -197,6 +198,10 @@ const typecheckRemovedApis = (): void => {
   concreteInstance._getSupportedDrivers;
   // @ts-expect-error lifecycle state is an implementation detail
   concreteInstance._assertOpen;
+  // @ts-expect-error the 2.1 warning toggle was removed with its categories
+  localspaceApi.setDeprecationWarnings;
+  // @ts-expect-error the RN entry point has no 2.1 warning toggle either
+  reactNativeApi.setDeprecationWarnings;
   // @ts-expect-error getAllKeys is required by the complete RN facade contract
   const incompleteAsyncStorage: ReactNativeAsyncStorage = {
     getItem: async () => null,
@@ -255,7 +260,6 @@ const typecheckRemovedApis = (): void => {
   void concreteInstance;
   void invalidDto;
 };
-setDeprecationWarnings(false);
 void registerDriver(customDriver, { overwrite: true });
 
 void [
@@ -290,6 +294,5 @@ void [
   typecheckDirectLifecycleCalls,
   typecheckRemovedApis,
   createReactNativeInstance,
-  setDeprecationWarnings,
   registerDriver,
 ];

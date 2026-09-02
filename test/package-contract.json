@@ -7,7 +7,7 @@
     "unpackedBytes": 2036351
   },
   "budgets": {
-    "entryCount": 61,
+    "entryCount": 59,
     "packedBytes": 470000,
     "unpackedBytes": 2050000,
     "mainBundleBytes": 120000,
@@ -70,8 +70,6 @@
     "dist/react-native.esm.js.map",
     "dist/types.d.cts",
     "dist/types.d.ts",
-    "dist/utils/deprecations.d.cts",
-    "dist/utils/deprecations.d.ts",
     "dist/utils/helpers.d.cts",
     "dist/utils/helpers.d.ts",
     "dist/utils/serializer.d.cts",

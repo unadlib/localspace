@@ -5,7 +5,6 @@ import type {
 } from './types.js';
 import reactNativeAsyncStorageDriver from './drivers/react-native-async-storage.js';
 import { registerDriver } from './core/driver-registry.js';
-export { setDeprecationWarnings } from './utils/deprecations.js';
 
 /**
  * Register the React Native AsyncStorage driver in the current JavaScript

@@ -1,45 +1,8 @@
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const packageJson = require('../package.json');
-
-function probeUnsetNodeEnv(moduleKind) {
-  const loadLocalSpace =
-    moduleKind === 'esm'
-      ? "const { LocalSpace } = await import('localspace');"
-      : "const { LocalSpace } = require('localspace');";
-  const source = `
-(async () => {
-  const warnings = [];
-  console.warn = (message) => warnings.push(String(message));
-  delete process.env.NODE_ENV;
-  ${loadLocalSpace}
-  const instance = new LocalSpace({ name: 'package-unset-env', storeName: 'store' });
-  await instance.setDriver([instance.MEMORY]);
-  await instance.runTransaction('readonly', (scope) => scope.keys());
-  await instance.close();
-  process.stdout.write(JSON.stringify(warnings));
-})().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});`;
-  const env = { ...process.env };
-  delete env.NODE_ENV;
-  const args =
-    moduleKind === 'esm'
-      ? ['--input-type=module', '--eval', source]
-      : ['--eval', source];
-  const result = spawnSync(process.execPath, args, {
-    cwd: path.join(__dirname, '..'),
-    encoding: 'utf8',
-    env,
-  });
-
-  assert.equal(result.status, 0, result.stderr);
-  return JSON.parse(result.stdout);
-}
 
 async function main() {
   assert.equal(packageJson.exports['.'].require.types, './dist/index.d.cts');
@@ -64,7 +27,7 @@ async function main() {
   assert.equal(typeof cjs.legacyEncryptionMigrationPlugin, 'function');
   assert.equal('syncPlugin' in cjs, false);
   assert.equal('quotaPlugin' in cjs, false);
-  assert.equal(typeof cjs.setDeprecationWarnings, 'function');
+  assert.equal('setDeprecationWarnings' in cjs, false);
   assert.throws(
     () => require('localspace/src/localspace'),
     (error) => error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'
@@ -84,11 +47,6 @@ async function main() {
     algorithm: { name: 'AES-CBC' },
   });
   assert.equal(legacyMigrationPlugin.name, 'encryption');
-  assert.deepEqual(probeUnsetNodeEnv('cjs'), []);
-  assert.deepEqual(probeUnsetNodeEnv('esm'), []);
-
-  const originalWarn = console.warn;
-  const originalNodeEnv = process.env.NODE_ENV;
 
   const cjsReactNative = require('localspace/react-native');
   assert.equal(typeof cjsReactNative.createReactNativeInstance, 'function');
@@ -96,7 +54,7 @@ async function main() {
     typeof cjsReactNative.installReactNativeAsyncStorageDriver,
     'function'
   );
-  assert.equal(typeof cjsReactNative.setDeprecationWarnings, 'function');
+  assert.equal('setDeprecationWarnings' in cjsReactNative, false);
 
   const originalRuntimeStorage = global.__LOCALSPACE_ASYNC_STORAGE__;
   const runtimeStorage = {
@@ -150,44 +108,15 @@ async function main() {
   assert.equal(typeof esm.legacyEncryptionMigrationPlugin, 'function');
   assert.equal('syncPlugin' in esm, false);
   assert.equal('quotaPlugin' in esm, false);
-  assert.equal(typeof esm.setDeprecationWarnings, 'function');
+  assert.equal('setDeprecationWarnings' in esm, false);
   await assert.rejects(
     import('localspace/src/localspace'),
     (error) => error?.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED'
   );
 
-  const crossEntryWarnings = [];
-  console.warn = (message) => crossEntryWarnings.push(String(message));
-  try {
-    process.env.NODE_ENV = 'development';
-    const cjsMemory = new cjs.LocalSpace({
-      name: 'package-cjs-warning',
-      storeName: 'store',
-    });
-    await cjsMemory.setDriver([cjsMemory.MEMORY]);
-    await cjsMemory.runTransaction('readonly', (scope) => scope.keys());
-    await cjsMemory.close();
-
-    const esmMemory = new esm.LocalSpace({
-      name: 'package-esm-warning',
-      storeName: 'store',
-    });
-    await esmMemory.setDriver([esmMemory.MEMORY]);
-    await esmMemory.runTransaction('readonly', (scope) => scope.keys());
-    await esmMemory.close();
-  } finally {
-    if (originalNodeEnv === undefined) {
-      delete process.env.NODE_ENV;
-    } else {
-      process.env.NODE_ENV = originalNodeEnv;
-    }
-    console.warn = originalWarn;
-  }
-  assert.deepEqual(crossEntryWarnings, []);
-
   const esmReactNative = await import('localspace/react-native');
   assert.equal(typeof esmReactNative.createReactNativeInstance, 'function');
-  assert.equal(typeof esmReactNative.setDeprecationWarnings, 'function');
+  assert.equal('setDeprecationWarnings' in esmReactNative, false);
 }
 
 main().catch((error) => {

@@ -67,7 +67,6 @@ export type {
 };
 export type { LocalSpaceErrorCode, LocalSpaceErrorDetails } from './errors.js';
 export { LocalSpaceError } from './errors.js';
-export { setDeprecationWarnings } from './utils/deprecations.js';
 export { registerDriver } from './core/driver-registry.js';
 
 // Export class for creating instances

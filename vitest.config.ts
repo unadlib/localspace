@@ -21,7 +21,4 @@ export default defineConfig({
       },
     },
   },
-  define: {
-    __DEV__: false,
-  },
 });

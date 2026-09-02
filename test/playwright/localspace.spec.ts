@@ -214,34 +214,6 @@ test.describe('localspace browser interoperability', () => {
     });
   });
 
-  test('production browser bundle suppresses deprecation warnings', async ({
-    page,
-  }) => {
-    await ensureFixtureReady(page);
-
-    const warnings = await page.evaluate(async () => {
-      const localspace = (window as any).localspace;
-      const originalWarn = console.warn;
-      const messages: string[] = [];
-      console.warn = (...args: unknown[]) => {
-        messages.push(args.map(String).join(' '));
-      };
-      try {
-        const instance = localspace.createInstance({
-          name: `production-warning-check-${Date.now()}`,
-        });
-        await instance.setDriver([instance.MEMORY]);
-        await instance.runTransaction('readonly', (scope: any) => scope.keys());
-        await instance.close();
-      } finally {
-        console.warn = originalWarn;
-      }
-      return messages;
-    });
-
-    expect(warnings).toEqual([]);
-  });
-
   test('setItem/getItem/iterate mirror localForage behaviour', async ({
     page,
   }) => {

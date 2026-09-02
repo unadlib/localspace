@@ -140,6 +140,9 @@
 ### Removed
 
 - Removed `config(options)`, `instance.defineDriver()`, and `destroy()`.
+- Removed the 2.1-only `setDeprecationWarnings()` export and its realm-global
+  state. All retained migration warnings belong to the 2.1 bridge; 3.0 has no
+  deprecation categories to toggle.
 - Removed `PluginContext.dbInfo`. It exposed driver internals — including the
   live `IDBDatabase`, the IndexedDB factory, and the internal key prefix —
   through a driver-agnostic interface, was `null` for every non-IndexedDB
