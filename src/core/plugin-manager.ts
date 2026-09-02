@@ -16,6 +16,7 @@ import { normalizeBatchEntries } from '../utils/helpers.js';
 import {
   getBuiltInStorageTransformKind,
   getPluginBackgroundTaskController,
+  sharePluginContextInternalState,
   type PluginBackgroundTaskPause,
 } from './plugin-capabilities.js';
 
@@ -90,7 +91,8 @@ type BeforeSetItemsOptions<T> = {
   prepareValueOutput?: (value: T, plugin: LocalSpacePlugin, key: string) => T;
 };
 
-const sharedMetadataFor = (): Record<string, unknown> => Object.create(null);
+const createPluginState = (): Record<string, unknown> => Object.create(null);
+const hasOwn = Object.prototype.hasOwnProperty;
 
 const PLUGIN_HOOKS = [
   'onInit',
@@ -171,8 +173,15 @@ export class PluginManager {
 
   private readonly lifecycleBridge: PluginLifecycleBridge;
 
-  private readonly sharedMetadata: Record<string, unknown> =
-    sharedMetadataFor();
+  private readonly metadataByPlugin = new WeakMap<
+    LocalSpacePlugin,
+    Record<string, unknown>
+  >();
+
+  private readonly contextViews = new WeakMap<
+    PluginContext,
+    WeakMap<LocalSpacePlugin, PluginContext>
+  >();
 
   private readonly instanceToken: object = Object.freeze(Object.create(null));
 
@@ -418,9 +427,10 @@ export class PluginManager {
 
       const lifecycle = this.lifecycleBridge.createInvocation('plugin-init');
       const context = this.createContext(null, lifecycle.instance);
+      const pluginContext = this.contextForPlugin(plugin, context);
       const initPromise = (async () => {
         try {
-          await lifecycle.invoke(() => plugin.onInit!(context));
+          await lifecycle.invoke(() => plugin.onInit!(pluginContext));
           this.initialized.add(plugin);
         } catch (error) {
           await this.dispatchPluginError(
@@ -458,10 +468,46 @@ export class PluginManager {
       ...(transactionScope ? { transactionScope } : {}),
       driver: this.host.driver ? this.host.driver() : null,
       config: this.host.config(),
-      metadata: this.sharedMetadata,
+      metadata: createPluginState(),
       operation,
-      operationState: Object.create(null),
+      operationState: createPluginState(),
     };
+  }
+
+  private contextForPlugin(
+    plugin: LocalSpacePlugin,
+    context: PluginContext
+  ): PluginContext {
+    let views = this.contextViews.get(context);
+    if (!views) {
+      views = new WeakMap();
+      this.contextViews.set(context, views);
+    }
+
+    let view = views.get(plugin);
+    if (!view) {
+      let metadata = this.metadataByPlugin.get(plugin);
+      if (!metadata) {
+        metadata = createPluginState();
+        this.metadataByPlugin.set(plugin, metadata);
+      }
+      view = {
+        ...context,
+        metadata,
+        operationState: createPluginState(),
+      };
+      sharePluginContextInternalState(context, view);
+      views.set(plugin, view);
+    }
+
+    for (const field of ['isBatch', 'batchSize'] as const) {
+      if (hasOwn.call(context.operationState, field)) {
+        view.operationState[field] = context.operationState[field];
+      } else {
+        delete view.operationState[field];
+      }
+    }
+    return view;
   }
 
   async beforeSet<T>(
@@ -476,7 +522,7 @@ export class PluginManager {
       if (!plugin.beforeSet) continue;
       current = await this.invokeValueHook(
         plugin,
-        () => plugin.beforeSet!(key, current, context),
+        (pluginContext) => plugin.beforeSet!(key, current, pluginContext),
         'before',
         'setItem',
         key,
@@ -500,7 +546,7 @@ export class PluginManager {
       if (!plugin.afterSet) continue;
       await this.invokeSettledObserver(
         plugin,
-        () => plugin.afterSet!(key, value, context),
+        (pluginContext) => plugin.afterSet!(key, value, pluginContext),
         'after',
         'setItem',
         key,
@@ -515,7 +561,7 @@ export class PluginManager {
       if (!plugin.beforeGet) continue;
       currentKey = await this.invokeValueHook(
         plugin,
-        () => plugin.beforeGet!(currentKey, context),
+        (pluginContext) => plugin.beforeGet!(currentKey, pluginContext),
         'before',
         'getItem',
         currentKey,
@@ -538,7 +584,7 @@ export class PluginManager {
       if (!plugin.afterGet) continue;
       currentValue = await this.invokeValueHook(
         plugin,
-        () => plugin.afterGet!(key, currentValue, context),
+        (pluginContext) => plugin.afterGet!(key, currentValue, pluginContext),
         'after',
         operation,
         key,
@@ -555,7 +601,7 @@ export class PluginManager {
       if (!plugin.beforeRemove) continue;
       currentKey = await this.invokeValueHook(
         plugin,
-        () => plugin.beforeRemove!(currentKey, context),
+        (pluginContext) => plugin.beforeRemove!(currentKey, pluginContext),
         'before',
         'removeItem',
         currentKey,
@@ -571,7 +617,7 @@ export class PluginManager {
       if (!plugin.afterRemove) continue;
       await this.invokeSettledObserver(
         plugin,
-        () => plugin.afterRemove!(key, context),
+        (pluginContext) => plugin.afterRemove!(key, pluginContext),
         'after',
         'removeItem',
         key,
@@ -613,7 +659,7 @@ export class PluginManager {
         const input = current.map(({ key, value }) => ({ key, value }));
         let output = await this.invokeValueHook(
           plugin,
-          () => plugin.beforeSetItems!(input, context),
+          (pluginContext) => plugin.beforeSetItems!(input, pluginContext),
           'before',
           'setItems',
           undefined,
@@ -666,7 +712,8 @@ export class PluginManager {
       for (const item of current) {
         let value = (await this.invokeValueHook(
           plugin,
-          () => plugin.beforeSet!(item.key, item.value, item.context),
+          (pluginContext) =>
+            plugin.beforeSet!(item.key, item.value, pluginContext),
           'before',
           'setItems',
           item.key,
@@ -732,7 +779,7 @@ export class PluginManager {
       if (plugin.afterSetItems) {
         current = await this.invokePostCommitValueHook(
           plugin,
-          () => plugin.afterSetItems!(current, context),
+          (pluginContext) => plugin.afterSetItems!(current, pluginContext),
           'after',
           'setItems',
           undefined,
@@ -749,7 +796,8 @@ export class PluginManager {
         const item = items[index];
         await this.invokeSettledObserver(
           plugin,
-          () => plugin.afterSet!(entry.key, entry.value as T, item.context),
+          (pluginContext) =>
+            plugin.afterSet!(entry.key, entry.value as T, pluginContext),
           'after',
           'setItems',
           entry.key,
@@ -828,10 +876,10 @@ export class PluginManager {
         const input = items.map(({ targetKey }) => targetKey);
         const output = await this.invokeValueHook(
           plugin,
-          () =>
+          (pluginContext) =>
             operation === 'getItems'
-              ? plugin.beforeGetItems!(input, context)
-              : plugin.beforeRemoveItems!(input, context),
+              ? plugin.beforeGetItems!(input, pluginContext)
+              : plugin.beforeRemoveItems!(input, pluginContext),
           'before',
           operation,
           undefined,
@@ -856,10 +904,10 @@ export class PluginManager {
       for (const item of items) {
         item.targetKey = await this.invokeValueHook(
           plugin,
-          () =>
+          (pluginContext) =>
             operation === 'getItems'
-              ? plugin.beforeGet!(item.targetKey, item.context)
-              : plugin.beforeRemove!(item.targetKey, item.context),
+              ? plugin.beforeGet!(item.targetKey, pluginContext)
+              : plugin.beforeRemove!(item.targetKey, pluginContext),
           'before',
           operation,
           item.targetKey,
@@ -916,7 +964,7 @@ export class PluginManager {
       if (plugin.afterGetItems) {
         current = await this.invokeValueHook(
           plugin,
-          () => plugin.afterGetItems!(current, context),
+          (pluginContext) => plugin.afterGetItems!(current, pluginContext),
           'after',
           operation,
           undefined,
@@ -935,8 +983,8 @@ export class PluginManager {
           key: entry.key,
           value: await this.invokeValueHook(
             plugin,
-            () =>
-              plugin.afterGet!(entry.key, entry.value, items[index].context),
+            (pluginContext) =>
+              plugin.afterGet!(entry.key, entry.value, pluginContext),
             'after',
             operation,
             entry.key,
@@ -968,7 +1016,7 @@ export class PluginManager {
       if (plugin.afterRemoveItems) {
         await this.invokeSettledObserver(
           plugin,
-          () => plugin.afterRemoveItems!(keys, context),
+          (pluginContext) => plugin.afterRemoveItems!(keys, pluginContext),
           'after',
           'removeItems',
           undefined,
@@ -993,7 +1041,7 @@ export class PluginManager {
         item.context.operationState.batchSize = keys.length;
         await this.invokeSettledObserver(
           plugin,
-          () => plugin.afterRemove!(key, item.context),
+          (pluginContext) => plugin.afterRemove!(key, pluginContext),
           'after',
           'removeItems',
           key,
@@ -1009,7 +1057,7 @@ export class PluginManager {
     context: PluginContext,
     executorFor: (
       plugin: LocalSpacePlugin
-    ) => (() => Promise<void> | void) | undefined,
+    ) => ((context: PluginContext) => Promise<void> | void) | undefined,
     key?: string
   ): Promise<void> {
     for (const plugin of this.getActivePlugins({
@@ -1045,7 +1093,9 @@ export class PluginManager {
       'before',
       context,
       (plugin) =>
-        plugin.beforeIterate ? () => plugin.beforeIterate!(context) : undefined
+        plugin.beforeIterate
+          ? (pluginContext) => plugin.beforeIterate!(pluginContext)
+          : undefined
     );
   }
 
@@ -1060,27 +1110,33 @@ export class PluginManager {
       context,
       (plugin) =>
         plugin.afterIterate
-          ? () => plugin.afterIterate!(snapshot, context)
+          ? (pluginContext) => plugin.afterIterate!(snapshot, pluginContext)
           : undefined
     );
   }
 
   beforeKeys(context: PluginContext): Promise<void> {
     return this.invokeOperationObservers('keys', 'before', context, (plugin) =>
-      plugin.beforeKeys ? () => plugin.beforeKeys!(context) : undefined
+      plugin.beforeKeys
+        ? (pluginContext) => plugin.beforeKeys!(pluginContext)
+        : undefined
     );
   }
 
   afterKeys(keys: string[], context: PluginContext): Promise<void> {
     const snapshot = Object.freeze(keys.slice());
     return this.invokeOperationObservers('keys', 'after', context, (plugin) =>
-      plugin.afterKeys ? () => plugin.afterKeys!(snapshot, context) : undefined
+      plugin.afterKeys
+        ? (pluginContext) => plugin.afterKeys!(snapshot, pluginContext)
+        : undefined
     );
   }
 
   beforeKey(keyIndex: number, context: PluginContext): Promise<void> {
     return this.invokeOperationObservers('key', 'before', context, (plugin) =>
-      plugin.beforeKey ? () => plugin.beforeKey!(keyIndex, context) : undefined
+      plugin.beforeKey
+        ? (pluginContext) => plugin.beforeKey!(keyIndex, pluginContext)
+        : undefined
     );
   }
 
@@ -1095,7 +1151,8 @@ export class PluginManager {
       context,
       (plugin) =>
         plugin.afterKey
-          ? () => plugin.afterKey!(keyIndex, key, context)
+          ? (pluginContext) =>
+              plugin.afterKey!(keyIndex, key, pluginContext)
           : undefined,
       key ?? undefined
     );
@@ -1107,7 +1164,9 @@ export class PluginManager {
       'before',
       context,
       (plugin) =>
-        plugin.beforeLength ? () => plugin.beforeLength!(context) : undefined
+        plugin.beforeLength
+          ? (pluginContext) => plugin.beforeLength!(pluginContext)
+          : undefined
     );
   }
 
@@ -1118,7 +1177,7 @@ export class PluginManager {
       context,
       (plugin) =>
         plugin.afterLength
-          ? () => plugin.afterLength!(length, context)
+          ? (pluginContext) => plugin.afterLength!(length, pluginContext)
           : undefined
     );
   }
@@ -1129,13 +1188,17 @@ export class PluginManager {
       'before',
       context,
       (plugin) =>
-        plugin.beforeClear ? () => plugin.beforeClear!(context) : undefined
+        plugin.beforeClear
+          ? (pluginContext) => plugin.beforeClear!(pluginContext)
+          : undefined
     );
   }
 
   afterClear(context: PluginContext): Promise<void> {
     return this.invokeOperationObservers('clear', 'after', context, (plugin) =>
-      plugin.afterClear ? () => plugin.afterClear!(context) : undefined
+      plugin.afterClear
+        ? (pluginContext) => plugin.afterClear!(pluginContext)
+        : undefined
     );
   }
 
@@ -1149,7 +1212,8 @@ export class PluginManager {
       context,
       (plugin) =>
         plugin.beforeDropInstance
-          ? () => plugin.beforeDropInstance!(options, context)
+          ? (pluginContext) =>
+              plugin.beforeDropInstance!(options, pluginContext)
           : undefined
     );
   }
@@ -1164,7 +1228,8 @@ export class PluginManager {
       context,
       (plugin) =>
         plugin.afterDropInstance
-          ? () => plugin.afterDropInstance!(options, context)
+          ? (pluginContext) =>
+              plugin.afterDropInstance!(options, pluginContext)
           : undefined
     );
   }
@@ -1185,7 +1250,7 @@ export class PluginManager {
       (plugin) => {
         const observer = select(plugin);
         return observer
-          ? () => observer.call(plugin, mode, context)
+          ? (pluginContext) => observer.call(plugin, mode, pluginContext)
           : undefined;
       }
     );
@@ -1207,7 +1272,8 @@ export class PluginManager {
         }
         const controller = getPluginBackgroundTaskController(plugin);
         if (controller) {
-          pauses.push(controller(this.createContext(null)));
+          const context = this.createContext(null);
+          pauses.push(controller(this.contextForPlugin(plugin, context)));
         }
       }
     } catch (error) {
@@ -1267,10 +1333,11 @@ export class PluginManager {
       }
       const lifecycle = this.lifecycleBridge.createInvocation('plugin-destroy');
       const context = this.createContext(null, lifecycle.instance);
+      const pluginContext = this.contextForPlugin(plugin, context);
       let destroyPromise!: Promise<void>;
       destroyPromise = Promise.resolve().then(async () => {
         try {
-          await lifecycle.invoke(() => plugin.onDestroy!(context));
+          await lifecycle.invoke(() => plugin.onDestroy!(pluginContext));
           this.destroyed.add(plugin);
         } catch (error) {
           await this.dispatchPluginError(
@@ -1327,12 +1394,13 @@ export class PluginManager {
     key: string | undefined,
     context: PluginContext
   ): Promise<void> {
+    const pluginContext = this.contextForPlugin(plugin, context);
     const info: PluginErrorInfo = {
       plugin: plugin.name,
       operation,
       stage,
       key,
-      context,
+      context: pluginContext,
       error,
     };
 
@@ -1353,7 +1421,7 @@ export class PluginManager {
 
   private async invokeValueHook<T>(
     plugin: LocalSpacePlugin,
-    executor: () => Promise<T> | T,
+    executor: (context: PluginContext) => Promise<T> | T,
     stage: PluginStage,
     operation: PluginOperation,
     key: string | undefined,
@@ -1361,7 +1429,7 @@ export class PluginManager {
     fallback: T
   ): Promise<T> {
     try {
-      const result = await executor();
+      const result = await executor(this.contextForPlugin(plugin, context));
       return (typeof result === 'undefined' ? fallback : result) as T;
     } catch (error) {
       const policy = this.host.config('pluginErrorPolicy') ?? 'lenient';
@@ -1382,7 +1450,7 @@ export class PluginManager {
 
   private async invokePostCommitValueHook<T>(
     plugin: LocalSpacePlugin,
-    executor: () => Promise<T> | T,
+    executor: (context: PluginContext) => Promise<T> | T,
     stage: PluginStage,
     operation: PluginOperation,
     key: string | undefined,
@@ -1390,7 +1458,7 @@ export class PluginManager {
     fallback: T
   ): Promise<T> {
     try {
-      const result = await executor();
+      const result = await executor(this.contextForPlugin(plugin, context));
       return (typeof result === 'undefined' ? fallback : result) as T;
     } catch (error) {
       await this.dispatchPluginError(
@@ -1407,14 +1475,14 @@ export class PluginManager {
 
   private async invokeSettledObserver(
     plugin: LocalSpacePlugin,
-    executor: () => Promise<void> | void,
+    executor: (context: PluginContext) => Promise<void> | void,
     stage: PluginStage,
     operation: PluginOperation,
     key: string | undefined,
     context: PluginContext
   ): Promise<void> {
     try {
-      await executor();
+      await executor(this.contextForPlugin(plugin, context));
     } catch (error) {
       await this.dispatchPluginError(
         plugin,
@@ -1429,14 +1497,14 @@ export class PluginManager {
 
   private async invokeVoidHook(
     plugin: LocalSpacePlugin,
-    executor: () => Promise<void> | void,
+    executor: (context: PluginContext) => Promise<void> | void,
     stage: PluginStage,
     operation: PluginOperation,
     key: string | undefined,
     context: PluginContext
   ): Promise<void> {
     try {
-      await executor();
+      await executor(this.contextForPlugin(plugin, context));
     } catch (error) {
       const policy = this.host.config('pluginErrorPolicy') ?? 'lenient';
       if (this.shouldPropagate(error, policy)) {

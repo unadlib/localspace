@@ -342,6 +342,11 @@ beforeSetItems(entries) {
 Mapped single hooks may still observe `operationState.isBatch` and `batchSize`
 as context, but must not use them to deduplicate execution.
 
+`metadata` is now persistent per plugin instead of shared across the plugin
+manager, and `operationState` is isolated per plugin and operation. Remove
+cross-plugin coordination through those objects; use an application-owned
+channel when plugins intentionally need to communicate.
+
 ### Add complete operation observers
 
 3.0 adds observer pairs for:

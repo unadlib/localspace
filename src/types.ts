@@ -582,8 +582,10 @@ export interface PluginContext {
   transactionScope?: TransactionScope;
   driver: string | null;
   config: LocalSpaceConfigSnapshot;
+  /** Persistent mutable state private to the currently executing plugin. */
   metadata: Record<string, unknown>;
   operation: PluginOperation | null;
+  /** Per-operation mutable state private to the currently executing plugin. */
   operationState: Record<string, unknown>;
 }
 

@@ -81,6 +81,66 @@ describe('single-pass plugin pipeline', () => {
     expect(batchStateKeys).toEqual([['batchSize', 'isBatch']]);
   });
 
+  it('isolates metadata and operation state between plugins', async () => {
+    const events: string[] = [];
+    const createStatefulPlugin = (
+      name: string,
+      priority: number
+    ): LocalSpacePlugin => ({
+      name,
+      priority,
+      onInit(context) {
+        expect(context.metadata.owner).toBeUndefined();
+        context.metadata.owner = name;
+        events.push(`init:${name}`);
+      },
+      beforeSet(_key, value, context) {
+        expect(context.metadata.owner).toBe(name);
+        expect(context.operationState.owner).toBeUndefined();
+        context.operationState.owner = name;
+        events.push(`before:${name}`);
+        return value;
+      },
+      afterSet(_key, _value, context) {
+        expect(context.metadata.owner).toBe(name);
+        expect(context.operationState.owner).toBe(name);
+        events.push(`after:${name}`);
+        if (name === 'low') {
+          throw new Error('low observer failed');
+        }
+      },
+      onError(_error, { context }) {
+        expect(context.metadata.owner).toBe(name);
+        expect(context.operationState.owner).toBe(name);
+        events.push(`error:${name}`);
+      },
+      onDestroy(context) {
+        expect(context.metadata.owner).toBe(name);
+        expect(context.operationState.owner).toBeUndefined();
+        events.push(`destroy:${name}`);
+      },
+    });
+    const store = await createStore([
+      createStatefulPlugin('high', 10),
+      createStatefulPlugin('low', 0),
+    ]);
+
+    await store.setItem('key', 'value');
+    await store.close();
+
+    expect(events).toEqual([
+      'init:high',
+      'init:low',
+      'before:high',
+      'before:low',
+      'after:low',
+      'error:low',
+      'after:high',
+      'destroy:low',
+      'destroy:high',
+    ]);
+  });
+
   it('uses a batch set hook instead of the matching single hook at its priority', async () => {
     const events: string[] = [];
     const middleSingleBefore = vi.fn(<T>(_key: string, value: T) => value);

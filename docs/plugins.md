@@ -114,11 +114,13 @@ interface PluginContext {
   driver-specific, absent for other drivers, and not part of any stable
   contract. A plugin that needs backend-specific behaviour should branch on
   `driver` and use the public API.
-- `metadata` is shared across contexts for the lifetime of the plugin manager;
-  namespace keys to avoid collisions.
+- `metadata` is private to the current plugin and shared across that plugin's
+  contexts for the lifetime of the instance. Different plugins can safely use
+  the same property names.
 - `operationState` is per operation/context and is suitable for carrying a
-  plugin's own before-hook state into its after hook. It is not a public-result
-  override channel.
+  plugin's own before-hook state into its after hook. Each plugin gets an
+  isolated object, so another plugin cannot observe or overwrite it. It is not
+  a public-result override channel.
 - mapped single hooks in a batch receive `operationState.isBatch === true` and
   `batchSize`, but these fields are informational. Do not use an `isBatch`
   guard to compensate for duplicate execution: 3.0 never invokes both matching

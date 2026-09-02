@@ -68,6 +68,9 @@
   every implementation to declare generic methods, exported `TTLPluginOptions`
   from the package root, and hid remaining operation internals from the public
   `LocalSpace` class type.
+- Isolated `PluginContext.metadata` per plugin for the instance lifetime and
+  `operationState` per plugin operation, while preserving framework-owned batch
+  metadata and internal TTL visibility without exposing shared marker state.
 
 - Replaced runtime driver-method injection and wrapper refreshes with stable
   facade dispatch. Captured/destructured operation references and spies
