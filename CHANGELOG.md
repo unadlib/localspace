@@ -72,7 +72,7 @@
 - Restricted public exports to `localspace`, `localspace/react-native`, and `localspace/package.json`.
 - Removed `src/`, TypeScript intermediate JavaScript, declaration maps, and the stale `source` package field from the tarball. Runtime maps retain embedded TypeScript `sourcesContent`.
 - Added isolated ESM, CommonJS, React Native, declaration, forbidden-deep-import, bundled-compression, and mapped-stack consumer checks.
-- Reduced the certified artifact from 138 to 61 files, from 756,538 to 454,659 packed bytes, and from 3,387,413 to 2,036,351 unpacked bytes. Final budgets are enforced mechanically.
+- Reduced the certified artifact from 108 to 59 files, from 594,376 to 466,908 packed bytes, and from 2,630,510 to 2,093,936 unpacked bytes. Final budgets are enforced mechanically.
 
 ### Migration
 
