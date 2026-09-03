@@ -4,8 +4,8 @@
     "sourceCommit": "7027bf7d102f4399c4abaf296d4c7e30e9942de6",
     "sourcePackageVersion": "2.1.1",
     "requiredPublishedVersion": "2.1.1",
-    "publishedVersion": null,
-    "publishedIntegrity": null
+    "publishedVersion": "2.1.1",
+    "publishedIntegrity": "sha512-tzxALyL6J/xKJ/RxAWYTJ0DlftJfTbV/IaWXqo1exlOX/a4bjROY+3f5IHSxPg21QIDpJOiwu5GAueFvpKTblA=="
   },
   "candidateVersion": "3.0.0",
   "fixture": {

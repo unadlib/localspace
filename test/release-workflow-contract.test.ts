@@ -28,12 +28,11 @@ const extractJob = (name: string): string => {
 };
 
 describe('release workflow contracts', () => {
-  it('fetches the pinned bridge history before the browser rollback rehearsal', () => {
+  it('uses the published bridge for the browser rollback rehearsal', () => {
     const browsersJob = extractJob('browsers');
 
-    expect(browsersJob).toContain('scripts/rehearse-data-rollback.mjs');
-    expect(browsersJob).toMatch(
-      /uses: actions\/checkout@v\d+\n\s+with:\n(?:\s+#.*\n)*\s+fetch-depth: 0/
+    expect(browsersJob).toContain(
+      'scripts/rehearse-data-rollback.mjs --require-published --skip-candidate-build'
     );
   });
 

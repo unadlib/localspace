@@ -61,10 +61,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          # The Chromium release rehearsal archives the pinned 2.1 bridge
-          # commit, so a depth-1 checkout cannot satisfy this job.
-          fetch-depth: 0
       - name: Use Node.js 24.x
         uses: actions/setup-node@v4
         with:
@@ -86,9 +82,9 @@ jobs:
         if: matrix.browser == 'chromium'
         run: node scripts/compare-v2.1-baseline.mjs --skip-build --skip-legacy-probes
 
-      - name: Rehearse 2.1 bridge to 3.0 data rollback
+      - name: Require published 2.1 bridge rollback evidence
         if: matrix.browser == 'chromium'
-        run: node scripts/rehearse-data-rollback.mjs --skip-candidate-build
+        run: node scripts/rehearse-data-rollback.mjs --require-published --skip-candidate-build
 
       - name: Upload Playwright traces
         if: failure()
