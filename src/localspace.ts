@@ -955,12 +955,15 @@ export class LocalSpace implements LocalSpaceInstance {
       operations.iterate,
       hasPlugins
     );
+    facadeOperations.dropInstance = hasPlugins
+      ? this._createDropInstanceWrapper(operations.dropInstance)
+      : async (options?: LocalSpaceConfig) =>
+          operations.dropInstance(
+            options ? normalizeConfigOptions(options) : undefined
+          );
 
     if (hasPlugins) {
       facadeOperations.clear = this._createClearWrapper(operations.clear);
-      facadeOperations.dropInstance = this._createDropInstanceWrapper(
-        operations.dropInstance
-      );
       facadeOperations.getItem = this._createGetItemWrapper(
         operations.getItem
       );
