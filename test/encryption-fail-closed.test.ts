@@ -403,6 +403,42 @@ describe('encryption plugin fail-closed behavior', () => {
     await expect(raw.getItem('new')).resolves.toBeNull();
   });
 
+  it('rejects IVs shorter than 96 bits and weak authentication tags', () => {
+    for (const ivLength of [0, 1, 8, 11, 12.5]) {
+      expect(() => encryptionPlugin({ key: VALID_KEY, ivLength })).toThrow(
+        expect.objectContaining({
+          code: 'INVALID_CONFIG',
+          details: { ivLength },
+        })
+      );
+    }
+    expect(() =>
+      encryptionPlugin({ key: VALID_KEY, ivLength: 16 })
+    ).not.toThrow();
+
+    for (const tagLength of [32, 64, 95, 136]) {
+      expect(() =>
+        encryptionPlugin({
+          key: VALID_KEY,
+          algorithm: { name: 'AES-GCM', tagLength },
+        })
+      ).toThrow(
+        expect.objectContaining({
+          code: 'INVALID_CONFIG',
+          details: { tagLength },
+        })
+      );
+    }
+    for (const tagLength of [96, 104, 112, 120, 128]) {
+      expect(() =>
+        encryptionPlugin({
+          key: VALID_KEY,
+          algorithm: { name: 'AES-GCM', tagLength },
+        })
+      ).not.toThrow();
+    }
+  });
+
   it('rejects legacy algorithms from the normal API and validates migration parameters', () => {
     expect(() =>
       encryptionPlugin({

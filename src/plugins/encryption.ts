@@ -482,11 +482,25 @@ const createEncryptionPlugin = (
       ? (options as LegacyEncryptionMigrationOptions)
       : null;
   const ivLength = normalOptions?.ivLength ?? 12;
-  if (mode === 'gcm' && (!Number.isInteger(ivLength) || ivLength <= 0)) {
+  // Shorter AES-GCM IVs make random collisions, and with them key-stream
+  // reuse, far more likely.
+  if (mode === 'gcm' && (!Number.isInteger(ivLength) || ivLength < 12)) {
     throw createLocalSpaceError(
       'INVALID_CONFIG',
-      'Encryption IV length must be a positive integer.',
+      'Encryption IV length must be an integer of at least 12 bytes.',
       { ivLength }
+    );
+  }
+  // NIST SP 800-38D: tags shorter than 96 bits weaken authentication.
+  const tagLength = normalOptions?.algorithm?.tagLength;
+  if (
+    tagLength !== undefined &&
+    ![96, 104, 112, 120, 128].includes(tagLength)
+  ) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'AES-GCM tagLength must be 96, 104, 112, 120, or 128 bits.',
+      { tagLength }
     );
   }
 

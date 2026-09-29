@@ -535,9 +535,10 @@ const plugin = encryptionPlugin({
 Raw key material must be 16, 24, or 32 bytes. A supplied `CryptoKey` must be a
 secret AES-GCM key with the usages needed by the operation. A fresh secure IV
 is generated for every write; `algorithm` configures the remaining AES-GCM
-parameters and does not accept a caller-owned `iv`. Custom `subtle`,
-`ivGenerator`, and `randomSource` implementations are available for controlled
-runtimes.
+parameters and does not accept a caller-owned `iv`. `ivLength` must be at
+least 12 bytes and `algorithm.tagLength`, when set, must be 96, 104, 112, 120,
+or 128 bits. Custom `subtle`, `ivGenerator`, and `randomSource` implementations
+are available for controlled runtimes.
 
 > **Security:** AES-GCM fails catastrophically if an IV is reused with the same
 > key. Two writes sharing an IV leak relationships between their plaintexts and
@@ -556,12 +557,18 @@ const plugin = encryptionPlugin({
   keyDerivation: {
     passphrase: userPassword,
     salt: applicationSalt,
-    iterations: 200_000,
+    iterations: 600_000,
     hash: 'SHA-256',
     length: 256,
   },
 });
 ```
+
+The default of 150,000 iterations is kept so existing derived keys stay stable;
+new deployments should set at least 600,000 iterations for PBKDF2-SHA-256
+(OWASP guidance) and use a random, per-installation salt of at least 16 bytes.
+Changing `iterations`, `hash`, `salt`, or `length` derives a different key, so
+existing data must be migrated through an instance that uses the old settings.
 
 Only one of `key` and `keyDerivation` may be supplied. Web Crypto and a secure
 random source are required. Invalid configuration, serialization, encryption,
