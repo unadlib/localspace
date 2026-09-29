@@ -248,6 +248,8 @@ const scheduleCleanup = (
       void cleanupExpired(context, metadata);
     }
   }, options.cleanupInterval);
+  // A periodic sweep must not keep a Node.js or React Native process alive.
+  (metadata.timer as { unref?: () => void }).unref?.();
 };
 
 const stopCleanupTimer = (metadata: TTLMetadata): boolean => {
