@@ -7,13 +7,13 @@
     "unpackedBytes": 2036351
   },
   "budgets": {
-    "entryCount": 59,
-    "packedBytes": 470000,
-    "unpackedBytes": 2110000,
-    "mainBundleBytes": 120000,
-    "reactNativeBundleBytes": 20000,
-    "mainSourceMapBytes": 480000,
-    "reactNativeSourceMapBytes": 80000
+    "entryCount": 61,
+    "packedBytes": 500000,
+    "unpackedBytes": 2200000,
+    "mainBundleBytes": 126000,
+    "reactNativeBundleBytes": 22000,
+    "mainSourceMapBytes": 505000,
+    "reactNativeSourceMapBytes": 88000
   },
   "files": [
     "LICENSE",
@@ -44,6 +44,8 @@
     "dist/drivers/memory.d.ts",
     "dist/drivers/react-native-async-storage.d.cts",
     "dist/drivers/react-native-async-storage.d.ts",
+    "dist/drivers/store-registry.d.cts",
+    "dist/drivers/store-registry.d.ts",
     "dist/errors.d.cts",
     "dist/errors.d.ts",
     "dist/index.cjs",

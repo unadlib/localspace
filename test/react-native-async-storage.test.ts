@@ -130,7 +130,10 @@ describe('react native async storage driver', () => {
     expect(await instance.length()).toBe(2);
     expect((await instance.keys()).sort()).toEqual(['bar', 'foo']);
     expect(
-      asyncStorage.dumpKeys().every((key) => key.includes('rn-configured/'))
+      asyncStorage
+        .dumpKeys()
+        .filter((key) => !key.startsWith('localspace:stores:'))
+        .every((key) => key.includes('rn-configured/'))
     ).toBe(true);
   });
 

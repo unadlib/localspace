@@ -15,10 +15,16 @@ import {
   chunkArray,
 } from '../utils/helpers.js';
 import serializer from '../utils/serializer.js';
+import {
+  createKeyOwnership,
+  getStoreRegistryKey,
+  parseStoreRegistry,
+} from './store-registry.js';
 
 type LocalStorageDbInfo = DbInfo & {
   keyPrefix: string;
   serializer: Serializer;
+  unregisteredStore: string | null;
 };
 
 type LocalStorageDriverContext = LocalSpaceInstance &
@@ -74,6 +80,43 @@ function getKeyPrefix(
   return keyPrefix;
 }
 
+function readRegisteredStores(name: string): string[] {
+  try {
+    return parseStoreRegistry(localStorage.getItem(getStoreRegistryKey(name)));
+  } catch {
+    return [];
+  }
+}
+
+function writeRegisteredStores(name: string, stores: string[]): void {
+  try {
+    const registryKey = getStoreRegistryKey(name);
+    if (stores.length === 0) {
+      localStorage.removeItem(registryKey);
+    } else {
+      localStorage.setItem(registryKey, JSON.stringify(stores));
+    }
+  } catch {
+    // The registry is best-effort; storage failures must not block data access.
+  }
+}
+
+function registerStore(dbInfo: LocalStorageDbInfo): void {
+  const storeName = dbInfo.unregisteredStore;
+  if (storeName === null) {
+    return;
+  }
+  dbInfo.unregisteredStore = null;
+  const stores = readRegisteredStores(dbInfo.name!);
+  if (!stores.includes(storeName)) {
+    writeRegisteredStores(dbInfo.name!, [...stores, storeName]);
+  }
+}
+
+function createOwnsKey(name: string, keyPrefix: string) {
+  return createKeyOwnership(name, keyPrefix, readRegisteredStores(name));
+}
+
 function checkIfLocalStorageThrows(): boolean {
   const localStorageTestKey = '_localforage_support_test';
 
@@ -108,6 +151,10 @@ async function _initStorage(
     ...config,
     keyPrefix: getKeyPrefix(config, this._defaultConfig),
     serializer,
+    unregisteredStore:
+      config.storeName !== this._defaultConfig.storeName
+        ? config.storeName!
+        : null,
   };
 
   if (!isLocalStorageUsable()) {
@@ -124,11 +171,11 @@ async function _initStorage(
 function clear(this: LocalStorageDriverContext): Promise<void> {
   const promise = withLocalStorageErrorContext(
     this.ready().then(() => {
-      const keyPrefix = this._dbInfo.keyPrefix;
+      const ownsKey = createOwnsKey(this._dbInfo.name!, this._dbInfo.keyPrefix);
 
       for (let i = localStorage.length - 1; i >= 0; i--) {
         const key = localStorage.key(i);
-        if (key && key.indexOf(keyPrefix) === 0) {
+        if (key && ownsKey(key)) {
           localStorage.removeItem(key);
         }
       }
@@ -172,12 +219,13 @@ function iterate<T, U>(
       const dbInfo = this._dbInfo;
       const keyPrefix = dbInfo.keyPrefix;
       const keyPrefixLength = keyPrefix.length;
+      const ownsKey = createOwnsKey(dbInfo.name!, keyPrefix);
       const length = localStorage.length;
       let iterationNumber = 1;
 
       for (let i = 0; i < length; i++) {
         const key = localStorage.key(i);
-        if (!key || key.indexOf(keyPrefix) !== 0) {
+        if (!key || !ownsKey(key)) {
           continue;
         }
 
@@ -214,12 +262,13 @@ function key(
     this.ready().then(() => {
       const dbInfo = this._dbInfo;
       const keyPrefix = dbInfo.keyPrefix;
+      const ownsKey = createOwnsKey(dbInfo.name!, keyPrefix);
       const keys: string[] = [];
 
       // Collect keys that match the prefix; keep native storage iteration order
       for (let i = 0; i < localStorage.length; i++) {
         const itemKey = localStorage.key(i);
-        if (itemKey && itemKey.indexOf(keyPrefix) === 0) {
+        if (itemKey && ownsKey(itemKey)) {
           keys.push(itemKey.substring(keyPrefix.length));
         }
       }
@@ -241,12 +290,13 @@ function keys(this: LocalStorageDriverContext): Promise<string[]> {
   const promise = withLocalStorageErrorContext(
     this.ready().then(() => {
       const dbInfo = this._dbInfo;
+      const ownsKey = createOwnsKey(dbInfo.name!, dbInfo.keyPrefix);
       const length = localStorage.length;
       const keys: string[] = [];
 
       for (let i = 0; i < length; i++) {
         const itemKey = localStorage.key(i);
-        if (itemKey && itemKey.indexOf(dbInfo.keyPrefix) === 0) {
+        if (itemKey && ownsKey(itemKey)) {
           keys.push(itemKey.substring(dbInfo.keyPrefix.length));
         }
       }
@@ -322,6 +372,7 @@ async function setItem<T>(
       const normalizedValue = (value === undefined ? null : value) as T;
       const serializedValue =
         await this._dbInfo.serializer.serialize(normalizedValue);
+      registerStore(this._dbInfo);
 
       try {
         localStorage.setItem(
@@ -370,6 +421,9 @@ function setItems<T>(
       const stored: BatchResponse<T> = [];
       const batchSize = dbInfo.maxBatchSize ?? normalized.length;
       const originals = new Map<string, string | null>();
+      if (normalized.length > 0) {
+        registerStore(dbInfo);
+      }
 
       for (const batch of chunkArray(normalized, batchSize)) {
         for (const entry of batch) {
@@ -484,15 +538,37 @@ function dropInstance(
         })
       )
     : new Promise<void>((resolve) => {
-        const keyPrefix = !effectiveOptions.storeName
-          ? `${effectiveOptions.name}/`
+        const name = effectiveOptions.name!;
+        const storeName = effectiveOptions.storeName;
+        const dropsDatabase = !storeName;
+        const keyPrefix = dropsDatabase
+          ? `${name}/`
           : getKeyPrefix(effectiveOptions, this._defaultConfig);
+        const ownsKey = dropsDatabase
+          ? (key: string) => key.indexOf(keyPrefix) === 0
+          : createOwnsKey(name, keyPrefix);
 
         for (let i = localStorage.length - 1; i >= 0; i--) {
           const key = localStorage.key(i);
-          if (key && key.indexOf(keyPrefix) === 0) {
+          if (key && ownsKey(key)) {
             localStorage.removeItem(key);
           }
+        }
+        if (dropsDatabase) {
+          writeRegisteredStores(name, []);
+        } else if (storeName !== this._defaultConfig.storeName) {
+          writeRegisteredStores(
+            name,
+            readRegisteredStores(name).filter((store) => store !== storeName)
+          );
+        }
+        const current = this._dbInfo;
+        if (
+          current.name === name &&
+          current.storeName !== this._defaultConfig.storeName &&
+          (dropsDatabase || current.storeName === storeName)
+        ) {
+          current.unregisteredStore = current.storeName!;
         }
         resolve();
       });

@@ -183,6 +183,15 @@ Removes one item. Removing a missing item resolves normally.
 Removes all values in the current `name`/`storeName` namespace. It runs the
 plugin `beforeClear` and `afterClear` observers.
 
+The localStorage and React Native drivers store the default store under the
+`name/` key prefix and named stores under `name/storeName/`. A named store
+records itself under `localspace:stores:<name>` on its first write, and
+default-store scans (`clear`, `keys`, `iterate`, `length`, `key`, and
+`dropInstance`) skip keys under a registered store prefix. Named stores written
+only by 2.x releases are not registered until a 3.x instance writes to them, and
+default-store keys that start with a registered `storeName/` prefix are treated
+as belonging to that named store.
+
 ### `length(): Promise<number>`
 
 Returns the number of logical visible items. Built-in TTL expiration is applied

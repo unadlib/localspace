@@ -77,7 +77,10 @@ describe('react native explicit adapter boundary', () => {
       await instance.ready();
       await instance.setItem('token', 'abc');
 
-      expect(configuredAdapter.setItem).toHaveBeenCalledTimes(1);
+      expect(configuredAdapter.setItem).toHaveBeenCalledWith(
+        'rn-configured-only/kv/token',
+        expect.any(String)
+      );
       expect(runtimeAdapter.setItem).not.toHaveBeenCalled();
     } finally {
       await instance.close();

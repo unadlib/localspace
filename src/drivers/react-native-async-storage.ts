@@ -16,11 +16,17 @@ import {
   chunkArray,
 } from '../utils/helpers.js';
 import serializer from '../utils/serializer.js';
+import {
+  createKeyOwnership,
+  getStoreRegistryKey,
+  parseStoreRegistry,
+} from './store-registry.js';
 
 type ReactNativeAsyncStorageDbInfo = DbInfo & {
   keyPrefix: string;
   serializer: Serializer;
   asyncStorage: ReactNativeAsyncStorage;
+  unregisteredStore: string | null;
 };
 
 type ReactNativeAsyncStorageDriverContext = LocalSpaceInstance &
@@ -130,12 +136,72 @@ async function getAllKeysFromStorage(
   return dbInfo.asyncStorage.getAllKeys();
 }
 
+async function readRegisteredStores(
+  asyncStorage: ReactNativeAsyncStorage,
+  name: string
+): Promise<string[]> {
+  try {
+    return parseStoreRegistry(
+      await asyncStorage.getItem(getStoreRegistryKey(name))
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function writeRegisteredStores(
+  asyncStorage: ReactNativeAsyncStorage,
+  name: string,
+  stores: string[]
+): Promise<void> {
+  try {
+    const registryKey = getStoreRegistryKey(name);
+    if (stores.length === 0) {
+      await asyncStorage.removeItem(registryKey);
+    } else {
+      await asyncStorage.setItem(registryKey, JSON.stringify(stores));
+    }
+  } catch {
+    // The registry is best-effort; storage failures must not block data access.
+  }
+}
+
+async function createOwnsKey(
+  dbInfo: ReactNativeAsyncStorageDbInfo,
+  name: string,
+  keyPrefix: string
+): Promise<(fullKey: string) => boolean> {
+  return createKeyOwnership(
+    name,
+    keyPrefix,
+    await readRegisteredStores(dbInfo.asyncStorage, name)
+  );
+}
+
+async function registerStore(
+  dbInfo: ReactNativeAsyncStorageDbInfo
+): Promise<void> {
+  const storeName = dbInfo.unregisteredStore;
+  if (storeName === null) {
+    return;
+  }
+  dbInfo.unregisteredStore = null;
+  const stores = await readRegisteredStores(dbInfo.asyncStorage, dbInfo.name!);
+  if (!stores.includes(storeName)) {
+    await writeRegisteredStores(dbInfo.asyncStorage, dbInfo.name!, [
+      ...stores,
+      storeName,
+    ]);
+  }
+}
+
 async function getNamespacedKeys(
   dbInfo: ReactNativeAsyncStorageDbInfo,
   operation: string
 ): Promise<string[]> {
   const allKeys = await getAllKeysFromStorage(dbInfo, operation);
-  return allKeys.filter((key) => key.indexOf(dbInfo.keyPrefix) === 0);
+  const ownsKey = await createOwnsKey(dbInfo, dbInfo.name!, dbInfo.keyPrefix);
+  return allKeys.filter(ownsKey);
 }
 
 async function removeStoredKeys(
@@ -181,6 +247,10 @@ async function _initStorage(
     keyPrefix: getKeyPrefix(config, this._defaultConfig),
     serializer,
     asyncStorage,
+    unregisteredStore:
+      config.storeName !== this._defaultConfig.storeName
+        ? config.storeName!
+        : null,
   };
 
   this._dbInfo = dbInfo;
@@ -351,6 +421,7 @@ async function setItem<T>(
       const normalizedValue = (value === undefined ? null : value) as T;
       const serializedValue =
         await this._dbInfo.serializer.serialize(normalizedValue);
+      await registerStore(this._dbInfo);
 
       try {
         await this._dbInfo.asyncStorage.setItem(
@@ -406,6 +477,9 @@ function setItems<T>(
           await dbInfo.serializer.serialize(normalizedValue);
         serializedPairs.push([dbInfo.keyPrefix + entry.key, serializedValue]);
         stored.push({ key: entry.key, value: normalizedValue });
+      }
+      if (serializedPairs.length > 0) {
+        await registerStore(dbInfo);
       }
 
       try {
@@ -515,18 +589,41 @@ function dropInstance(
         })
       )
     : this.ready().then(async () => {
-        const keyPrefix = !effectiveOptions.storeName
-          ? `${effectiveOptions.name}/`
+        const name = effectiveOptions.name!;
+        const storeName = effectiveOptions.storeName;
+        const dropsDatabase = !storeName;
+        const keyPrefix = dropsDatabase
+          ? `${name}/`
           : getKeyPrefix(effectiveOptions, this._defaultConfig);
+        const asyncStorage = this._dbInfo.asyncStorage;
 
         const allKeys = await getAllKeysFromStorage(
           this._dbInfo,
           'dropInstance'
         );
-        const targetKeys = allKeys.filter(
-          (key) => key.indexOf(keyPrefix) === 0
-        );
-        await removeStoredKeys(this._dbInfo, targetKeys);
+        const ownsKey = dropsDatabase
+          ? (key: string) => key.indexOf(keyPrefix) === 0
+          : await createOwnsKey(this._dbInfo, name, keyPrefix);
+        await removeStoredKeys(this._dbInfo, allKeys.filter(ownsKey));
+        if (dropsDatabase) {
+          await writeRegisteredStores(asyncStorage, name, []);
+        } else if (storeName !== this._defaultConfig.storeName) {
+          await writeRegisteredStores(
+            asyncStorage,
+            name,
+            (await readRegisteredStores(asyncStorage, name)).filter(
+              (store) => store !== storeName
+            )
+          );
+        }
+        const current = this._dbInfo;
+        if (
+          current.name === name &&
+          current.storeName !== this._defaultConfig.storeName &&
+          (dropsDatabase || current.storeName === storeName)
+        ) {
+          current.unregisteredStore = current.storeName!;
+        }
       });
 
   const wrapped = withAsyncStorageErrorContext(promise, 'dropInstance', {
