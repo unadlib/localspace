@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-09-29
+
+### Security
+
+- Encrypted instances now reject stored values that are not encrypted payloads with `DESERIALIZATION_FAILED` (`details.reason: 'unencrypted-value'`) instead of returning them unchanged, so values injected by anyone with storage access are no longer accepted as authentic. Set `allowPlaintext: true` on a migration instance to read plaintext written before encryption was enabled.
+- `encryptionPlugin` now requires `ivLength` of at least 12 bytes and an AES-GCM `tagLength` of 96, 104, 112, 120, or 128 bits.
+- Serialization failures no longer log the value to the console, which could expose plaintext that the encryption plugin was about to protect.
+
+### Added
+
+- Added the opt-in `bindStorageKey` encryption option. It authenticates each ciphertext against its database name, store name, and key as AES-GCM additional data, so a payload copied to another key or store fails to decrypt. Bound values cannot be read by 3.0.0 or the 2.1.x rollback bridge; existing unbound values stay readable until rewritten.
+
+### Fixed
+
+- localStorage and React Native AsyncStorage default stores no longer read, count, clear, or drop the keys of named stores that share their database name. Named stores register under `localspace:stores:<name>` on their first write; existing key prefixes are unchanged.
+- localStorage `iterate()` snapshots the namespace before invoking the iterator, so removing entries during iteration (including TTL expiry) no longer skips live entries. React Native `iterate()` now skips keys removed after its snapshot instead of passing `null`.
+- TTL removes an expired key only while it still holds the value that was read, so a fresh value written concurrently by the application, another tab, or a background sweep survives. Drivers with native transactions perform the check and removal atomically.
+- `key(index)` rejects non-safe-integer indexes with `INVALID_ARGUMENT`; IndexedDB previously never settled for `NaN`, `Infinity`, or fractional indexes. IndexedDB reads now also reject when their transaction aborts.
+- `dropInstance(options)` validates and normalizes options when no plugins are registered, matching instances with plugins.
+- The TTL cleanup timer is unref'd so it no longer keeps a Node.js process alive.
+- Removed the stale warning about the lenient error policy with compression; compression failures already propagate under every policy.
+
+### Performance
+
+- IndexedDB transaction keep-alive requests count a single probe key instead of the whole object store.
+- The TTL background sweep performs one logical scan per interval instead of reading every live entry twice.
+
+### Deprecated
+
+- `TTLPluginOptions.cleanupBatchSize` has no effect.
+
+### Documentation
+
+- Documented that `close()` rejects while storage work is pending, that the transaction scope window applies instance-wide (including background plugin work), the read-scan cost of TTL and `isValueVisible`, and PBKDF2 parameter guidance.
+
 ## [3.0.0] - 2026-09-03
 
 ### Added
