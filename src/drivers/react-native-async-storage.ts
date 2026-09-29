@@ -306,13 +306,13 @@ function iterate<T, U>(
       let iterationNumber = 1;
       for (const fullKey of namespacedKeys) {
         const rawValue = await dbInfo.asyncStorage.getItem(fullKey);
-        const value =
-          rawValue === null
-            ? null
-            : (dbInfo.serializer.deserialize(rawValue) as T);
+        // Skip keys removed after the key snapshot, like the other drivers.
+        if (rawValue === null) {
+          continue;
+        }
 
         const result = await iterator(
-          value as T,
+          dbInfo.serializer.deserialize(rawValue) as T,
           fullKey.substring(prefixLength),
           iterationNumber++
         );
