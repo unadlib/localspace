@@ -7,7 +7,7 @@
     "publishedVersion": "2.1.1",
     "publishedIntegrity": "sha512-tzxALyL6J/xKJ/RxAWYTJ0DlftJfTbV/IaWXqo1exlOX/a4bjROY+3f5IHSxPg21QIDpJOiwu5GAueFvpKTblA=="
   },
-  "candidateVersion": "3.0.0",
+  "candidateVersion": "3.0.1",
   "fixture": {
     "databaseName": "localspace-3-release-rollback",
     "coreStoreName": "rollback-core",
