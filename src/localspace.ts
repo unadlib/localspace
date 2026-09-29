@@ -1868,6 +1868,13 @@ export class LocalSpace implements LocalSpaceInstance {
   ): void {
     const readValues = new Map(entries.map(({ key, value }) => [key, value]));
     setPluginStoredValueRemover(context, async (keys) => {
+      // While a transaction holds this instance, its runner may be awaiting
+      // the read that triggered this removal; a removal transaction queued
+      // behind it would never start. Leave the value hidden for a later read
+      // or sweep, as ordinary facade removals are rejected in that window.
+      if (this._claimedTransactionWindows > 0) {
+        return [];
+      }
       const session = this._activeDriverSession;
       if (!session) {
         throw this._notInitializedError('removeItem');

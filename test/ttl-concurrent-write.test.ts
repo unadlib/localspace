@@ -110,4 +110,29 @@ describe('TTL expiry with concurrent writes', () => {
     expect(onExpire).toHaveBeenCalledWith('second', 'old');
     await store.close();
   });
+
+  for (const driver of ['asyncStorage', 'memoryStorageWrapper'] as const) {
+    it(`does not block a transaction awaiting an expired read (${driver})`, async () => {
+      const onExpire = vi.fn();
+      const store = new LocalSpace({
+        name: `ttl-expired-read-in-transaction-${driver}`,
+        driver,
+        plugins: [ttlPlugin({ defaultTTL: 5, onExpire })],
+      });
+      await store.setItem('session', 'old');
+      await new Promise((resolve) => setTimeout(resolve, 15));
+
+      const read = store.getItem('session');
+      await expect(
+        store.runTransaction('readwrite', async () => read)
+      ).resolves.toBeNull();
+      expect(onExpire).not.toHaveBeenCalled();
+
+      // The value stayed hidden; the next read removes it.
+      await expect(store.getItem('session')).resolves.toBeNull();
+      expect(onExpire).toHaveBeenCalledWith('session', 'old');
+      await expect(store.keys()).resolves.toEqual([]);
+      await store.close();
+    });
+  }
 });
