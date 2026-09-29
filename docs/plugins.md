@@ -575,6 +575,14 @@ holds plaintext, set `allowPlaintext: true` on a migration instance, read each
 value, and rewrite it through an instance without that option. Missing keys
 still read as `null`.
 
+By default a ciphertext is not tied to where it is stored, so a payload copied
+to another key or store still decrypts. Set `bindStorageKey: true` to
+authenticate each value against its database name, store name, and key as
+AES-GCM additional data; a moved payload then fails to decrypt. Values written
+before the option was enabled stay readable (and unbound) until rewritten.
+Bound values cannot be read by LocalSpace 3.0.0 or the 2.1.x rollback bridge,
+and the option cannot be combined with `algorithm.additionalData`.
+
 ### Legacy AES-CBC/AES-CTR migration
 
 `encryptionPlugin()` rejects AES-CBC and AES-CTR. Use the separate read-only

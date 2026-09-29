@@ -74,6 +74,14 @@ export type EncryptionPluginOptions = EncryptionKeySource & {
    * with storage access.
    */
   allowPlaintext?: boolean;
+  /**
+   * Authenticate each ciphertext against its database name, store name, and
+   * key (as AES-GCM additional data), so a payload copied to another key or
+   * store fails to decrypt. Values written this way cannot be read by
+   * LocalSpace 3.0.0 or the 2.1.x bridge. Existing unbound values stay
+   * readable until rewritten.
+   */
+  bindStorageKey?: boolean;
 };
 
 export type LegacyEncryptionMigrationAlgorithm =
@@ -550,13 +558,45 @@ const createEncryptionPlugin = (
     );
   };
 
-  const encryptionAlgorithm = (iv: Uint8Array): AesGcmParams => ({
+  const bindStorageKey = normalOptions?.bindStorageKey === true;
+  if (
+    bindStorageKey &&
+    normalOptions?.algorithm?.additionalData !== undefined
+  ) {
+    throw createLocalSpaceError(
+      'INVALID_CONFIG',
+      'bindStorageKey derives AES-GCM additionalData; do not also set algorithm.additionalData.',
+      { configKey: 'bindStorageKey', reason: 'conflicting-additional-data' }
+    );
+  }
+  const storageKeyData = (
+    key: string,
+    context: PluginContext
+  ): Uint8Array | undefined =>
+    bindStorageKey
+      ? new TextEncoder().encode(
+          JSON.stringify([
+            'localspace.encryption.v1',
+            context.config.name ?? null,
+            context.config.storeName ?? null,
+            String(key),
+          ])
+        )
+      : undefined;
+
+  const encryptionAlgorithm = (
+    iv: Uint8Array,
+    additionalData?: Uint8Array
+  ): AesGcmParams => ({
     ...(normalOptions?.algorithm ?? {
       name: AES_GCM,
       iv: iv as BufferSource,
     }),
     name: AES_GCM,
     iv: iv as BufferSource,
+    ...(additionalData
+      ? { additionalData: additionalData as BufferSource }
+      : {}),
   });
 
   const serializeValue = async (
@@ -587,7 +627,8 @@ const createEncryptionPlugin = (
 
   const encryptValue = async (
     value: unknown,
-    itemKey?: string
+    itemKey?: string,
+    additionalData?: Uint8Array
   ): Promise<VersionedEncryptedPayload> => {
     try {
       if (mode !== 'gcm' || !normalOptions) {
@@ -601,7 +642,7 @@ const createEncryptionPlugin = (
       const payloadBytes = await serializeValue(value, itemKey);
       const iv = fillRandom(ivLength, normalOptions);
       const encrypted = await subtle.encrypt(
-        encryptionAlgorithm(iv),
+        encryptionAlgorithm(iv, additionalData),
         cryptoKey,
         payloadBytes as BufferSource
       );
@@ -625,7 +666,8 @@ const createEncryptionPlugin = (
 
   const decryptValue = async <T>(
     payload: EncryptedPayloadBody,
-    itemKey?: string
+    itemKey?: string,
+    additionalData?: Uint8Array
   ): Promise<T> => {
     try {
       if (payload.algorithm !== algorithmName) {
@@ -656,11 +698,13 @@ const createEncryptionPlugin = (
       } else {
         decryptAlgorithm = encryptionAlgorithm(iv);
       }
-      const plainBuffer = await subtle.decrypt(
-        decryptAlgorithm,
-        cryptoKey,
-        data
-      );
+      // Values written before bindStorageKey was enabled carry no additional
+      // data; they remain readable (and unbound) until rewritten.
+      const plainBuffer = additionalData
+        ? await subtle
+            .decrypt(encryptionAlgorithm(iv, additionalData), cryptoKey, data)
+            .catch(() => subtle.decrypt(decryptAlgorithm, cryptoKey, data))
+        : await subtle.decrypt(decryptAlgorithm, cryptoKey, data);
       const decoded = new TextDecoder('utf-8', { fatal: true }).decode(
         plainBuffer
       );
@@ -682,35 +726,56 @@ const createEncryptionPlugin = (
     // accidentally with the normal encryption transform on one instance.
     name: 'encryption',
     priority: 0,
-    beforeSet: async <T>(_key: string, value: T): Promise<T> =>
-      (await encryptValue(value)) as unknown as T,
+    beforeSet: async <T>(
+      key: string,
+      value: T,
+      context: PluginContext
+    ): Promise<T> =>
+      (await encryptValue(
+        value,
+        undefined,
+        storageKeyData(key, context)
+      )) as unknown as T,
     afterGet: async <T>(
       key: string,
       value: T | null,
-      _context: PluginContext
+      context: PluginContext
     ): Promise<T | null> => {
       const payload = readPayload(value, key);
-      return payload ? decryptValue<T>(payload) : value;
+      return payload
+        ? decryptValue<T>(payload, undefined, storageKeyData(key, context))
+        : value;
     },
     beforeSetItems: async <T>(
       entries: BatchItems<T>,
-      _context: PluginContext
+      context: PluginContext
     ): Promise<BatchItems<T>> =>
       Promise.all(
         normalizeBatchEntries(entries).map(async ({ key: itemKey, value }) => ({
           key: itemKey,
-          value: (await encryptValue(value, itemKey)) as unknown as T,
+          value: (await encryptValue(
+            value,
+            itemKey,
+            storageKeyData(itemKey, context)
+          )) as unknown as T,
         }))
       ),
     afterGetItems: async <T>(
       entries: BatchResponse<T>,
-      _context: PluginContext
+      context: PluginContext
     ): Promise<BatchResponse<T>> =>
       Promise.all(
         entries.map(async ({ key: itemKey, value }) => {
           const payload = readPayload(value, itemKey);
           return payload
-            ? { key: itemKey, value: await decryptValue<T>(payload, itemKey) }
+            ? {
+                key: itemKey,
+                value: await decryptValue<T>(
+                  payload,
+                  itemKey,
+                  storageKeyData(itemKey, context)
+                ),
+              }
             : { key: itemKey, value };
         })
       ),
