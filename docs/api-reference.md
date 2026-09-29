@@ -309,6 +309,12 @@ Contract:
   or invalid transaction attempt does not reject unrelated ordinary work;
 - start independent same-instance transactions sequentially with `await`, not
   together with `Promise.all()`;
+- the window is instance-wide: unrelated application code (another component,
+  a request handler) and background plugin work such as a TTL sweep that call
+  the same instance during a transaction are rejected too, not queued. The TTL
+  sweep ignores the rejection and retries on its next interval. Give
+  independent workloads their own instance for the same `name`/`storeName`, or
+  serialize them with the transaction;
 - a retained scope rejects after the runner settles;
 - `readonly` scopes reject `set`, `remove`, and `clear` with
   `TRANSACTION_READONLY`;
