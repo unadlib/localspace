@@ -251,6 +251,20 @@ export function normalizeConfigOptions(
   return normalized;
 }
 
+const asyncStorageAdapterSources = new WeakMap<
+  ReactNativeAsyncStorage,
+  ReactNativeAsyncStorage
+>();
+
+/**
+ * Returns the caller-supplied adapter behind an instance's frozen snapshot, so
+ * instances configured with the same AsyncStorage can share driver state.
+ */
+export const getAsyncStorageAdapterSource = (
+  adapter: ReactNativeAsyncStorage
+): ReactNativeAsyncStorage =>
+  asyncStorageAdapterSources.get(adapter) ?? adapter;
+
 const snapshotAsyncStorageAdapter = (
   adapter: ReactNativeAsyncStorage
 ): ReactNativeAsyncStorage => {
@@ -272,7 +286,9 @@ const snapshotAsyncStorageAdapter = (
       });
     }
   }
-  return Object.freeze(snapshot) as ReactNativeAsyncStorage;
+  const frozen = Object.freeze(snapshot) as ReactNativeAsyncStorage;
+  asyncStorageAdapterSources.set(frozen, getAsyncStorageAdapterSource(adapter));
+  return frozen;
 };
 
 export function createConfigSnapshot(

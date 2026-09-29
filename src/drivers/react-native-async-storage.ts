@@ -16,6 +16,7 @@ import {
   chunkArray,
 } from '../utils/helpers.js';
 import serializer from '../utils/serializer.js';
+import { getAsyncStorageAdapterSource } from '../core/config.js';
 import {
   createKeyOwnership,
   getStoreRegistryKey,
@@ -26,7 +27,7 @@ type ReactNativeAsyncStorageDbInfo = DbInfo & {
   keyPrefix: string;
   serializer: Serializer;
   asyncStorage: ReactNativeAsyncStorage;
-  unregisteredStore: string | null;
+  namedStore: string | null;
 };
 
 type ReactNativeAsyncStorageDriverContext = LocalSpaceInstance &
@@ -178,20 +179,64 @@ async function createOwnsKey(
   );
 }
 
+// Named stores known to be registered, shared by every instance using the same
+// adapter so that a registry drop through any instance forces re-registration.
+const registeredStoreCache = new WeakMap<
+  ReactNativeAsyncStorage,
+  Set<string>
+>();
+
+const registeredStoreCacheKey = (name: string, storeName: string): string =>
+  JSON.stringify([name, storeName]);
+
+const getRegisteredStoreCache = (
+  asyncStorage: ReactNativeAsyncStorage
+): Set<string> => {
+  const source = getAsyncStorageAdapterSource(asyncStorage);
+  let cache = registeredStoreCache.get(source);
+  if (!cache) {
+    cache = new Set();
+    registeredStoreCache.set(source, cache);
+  }
+  return cache;
+};
+
 async function registerStore(
   dbInfo: ReactNativeAsyncStorageDbInfo
 ): Promise<void> {
-  const storeName = dbInfo.unregisteredStore;
+  const storeName = dbInfo.namedStore;
   if (storeName === null) {
     return;
   }
-  dbInfo.unregisteredStore = null;
+  const cache = getRegisteredStoreCache(dbInfo.asyncStorage);
+  const cacheKey = registeredStoreCacheKey(dbInfo.name!, storeName);
+  if (cache.has(cacheKey)) {
+    return;
+  }
   const stores = await readRegisteredStores(dbInfo.asyncStorage, dbInfo.name!);
   if (!stores.includes(storeName)) {
     await writeRegisteredStores(dbInfo.asyncStorage, dbInfo.name!, [
       ...stores,
       storeName,
     ]);
+  }
+  cache.add(cacheKey);
+}
+
+function forgetRegisteredStores(
+  asyncStorage: ReactNativeAsyncStorage,
+  name: string,
+  storeName?: string
+): void {
+  const cache = getRegisteredStoreCache(asyncStorage);
+  for (const cacheKey of cache) {
+    const [cachedName, cachedStore] = JSON.parse(cacheKey) as [string, string];
+    if (
+      cachedName === name &&
+      (storeName === undefined || cachedStore === storeName)
+    ) {
+      cache.delete(cacheKey);
+    }
   }
 }
 
@@ -247,7 +292,7 @@ async function _initStorage(
     keyPrefix: getKeyPrefix(config, this._defaultConfig),
     serializer,
     asyncStorage,
-    unregisteredStore:
+    namedStore:
       config.storeName !== this._defaultConfig.storeName
         ? config.storeName!
         : null,
@@ -606,8 +651,10 @@ function dropInstance(
           : await createOwnsKey(this._dbInfo, name, keyPrefix);
         await removeStoredKeys(this._dbInfo, allKeys.filter(ownsKey));
         if (dropsDatabase) {
+          forgetRegisteredStores(asyncStorage, name);
           await writeRegisteredStores(asyncStorage, name, []);
         } else if (storeName !== this._defaultConfig.storeName) {
+          forgetRegisteredStores(asyncStorage, name, storeName);
           await writeRegisteredStores(
             asyncStorage,
             name,
@@ -615,14 +662,6 @@ function dropInstance(
               (store) => store !== storeName
             )
           );
-        }
-        const current = this._dbInfo;
-        if (
-          current.name === name &&
-          current.storeName !== this._defaultConfig.storeName &&
-          (dropsDatabase || current.storeName === storeName)
-        ) {
-          current.unregisteredStore = current.storeName!;
         }
       });
 

@@ -24,7 +24,7 @@ import {
 type LocalStorageDbInfo = DbInfo & {
   keyPrefix: string;
   serializer: Serializer;
-  unregisteredStore: string | null;
+  namedStore: string | null;
 };
 
 type LocalStorageDriverContext = LocalSpaceInstance &
@@ -101,12 +101,13 @@ function writeRegisteredStores(name: string, stores: string[]): void {
   }
 }
 
+// Checked on every write rather than cached: another instance or tab may have
+// dropped the registry since this store last wrote.
 function registerStore(dbInfo: LocalStorageDbInfo): void {
-  const storeName = dbInfo.unregisteredStore;
+  const storeName = dbInfo.namedStore;
   if (storeName === null) {
     return;
   }
-  dbInfo.unregisteredStore = null;
   const stores = readRegisteredStores(dbInfo.name!);
   if (!stores.includes(storeName)) {
     writeRegisteredStores(dbInfo.name!, [...stores, storeName]);
@@ -151,7 +152,7 @@ async function _initStorage(
     ...config,
     keyPrefix: getKeyPrefix(config, this._defaultConfig),
     serializer,
-    unregisteredStore:
+    namedStore:
       config.storeName !== this._defaultConfig.storeName
         ? config.storeName!
         : null,
@@ -563,14 +564,6 @@ function dropInstance(
             name,
             readRegisteredStores(name).filter((store) => store !== storeName)
           );
-        }
-        const current = this._dbInfo;
-        if (
-          current.name === name &&
-          current.storeName !== this._defaultConfig.storeName &&
-          (dropsDatabase || current.storeName === storeName)
-        ) {
-          current.unregisteredStore = current.storeName!;
         }
         resolve();
       });

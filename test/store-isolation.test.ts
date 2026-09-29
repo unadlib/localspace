@@ -68,6 +68,20 @@ describe('localStorage store isolation', () => {
     expect(await users.getItem('u1')).toBe('alice');
   });
 
+  it('re-registers a named store after another instance drops the registry', async () => {
+    const defaults = create();
+    const users = create('users');
+    await users.setItem('u1', 'alice');
+
+    await defaults.dropInstance({ name: 'isolation' });
+    await users.setItem('u2', 'bob');
+    await defaults.setItem('a', 1);
+
+    expect(await defaults.keys()).toEqual(['a']);
+    await defaults.clear();
+    expect(await users.getItem('u2')).toBe('bob');
+  });
+
   it('releases the registry when a store or database is dropped', async () => {
     const defaults = create();
     const users = create('users');
@@ -110,5 +124,26 @@ describe('React Native store isolation', () => {
 
     await users.dropInstance({ name: 'rn-isolation', storeName: 'users' });
     expect(Array.from(asyncStorage.data.keys())).toEqual([]);
+  });
+
+  it('re-registers a named store after another instance drops the registry', async () => {
+    const asyncStorage = new MemoryAsyncStorage();
+    const create = (storeName?: string) =>
+      createReactNativeInstance(localspace, {
+        name: 'rn-reregister',
+        ...(storeName ? { storeName } : {}),
+        reactNativeAsyncStorage: asyncStorage,
+      });
+    const defaults = await create();
+    const users = await create('users');
+    await users.setItem('u1', 'alice');
+
+    await defaults.dropInstance({ name: 'rn-reregister' });
+    await users.setItem('u2', 'bob');
+    await defaults.setItem('a', 1);
+
+    expect(await defaults.keys()).toEqual(['a']);
+    await defaults.clear();
+    expect(await users.getItem('u2')).toBe('bob');
   });
 });
