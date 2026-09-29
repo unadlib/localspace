@@ -885,6 +885,12 @@ function getItem<T>(
               };
 
               req.onerror = () => reject(req.error);
+              transaction!.onabort = () =>
+                reject(
+                  req.error ||
+                    transaction!.error ||
+                    new Error('IndexedDB transaction was aborted')
+                );
             } catch (e) {
               reject(e);
             }
@@ -1974,6 +1980,12 @@ function length(this: IndexedDBDriverContext): Promise<number> {
 
               req.onsuccess = () => resolve(req.result);
               req.onerror = () => reject(req.error);
+              transaction!.onabort = () =>
+                reject(
+                  req.error ||
+                    transaction!.error ||
+                    new Error('IndexedDB transaction was aborted')
+                );
             } catch (e) {
               reject(e);
             }
@@ -1992,7 +2004,8 @@ function key(this: IndexedDBDriverContext, n: number): Promise<string | null> {
   const self = this;
 
   const promise = new Promise<string | null>((resolve, reject) => {
-    if (n < 0) {
+    // IDBCursor.advance() accepts an unsigned long; no store holds more keys.
+    if (!Number.isSafeInteger(n) || n < 0 || n > 0xffffffff) {
       resolve(null);
       return;
     }
@@ -2032,6 +2045,12 @@ function key(this: IndexedDBDriverContext, n: number): Promise<string | null> {
               };
 
               req.onerror = () => reject(req.error);
+              transaction!.onabort = () =>
+                reject(
+                  req.error ||
+                    transaction!.error ||
+                    new Error('IndexedDB transaction was aborted')
+                );
             } catch (e) {
               reject(e);
             }
@@ -2076,6 +2095,12 @@ function keys(this: IndexedDBDriverContext): Promise<string[]> {
               };
 
               req.onerror = () => reject(req.error);
+              transaction!.onabort = () =>
+                reject(
+                  req.error ||
+                    transaction!.error ||
+                    new Error('IndexedDB transaction was aborted')
+                );
             } catch (e) {
               reject(e);
             }

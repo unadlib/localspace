@@ -358,7 +358,15 @@ export class LocalSpace implements LocalSpaceInstance {
     )) as LocalSpaceInstance['iterate'];
 
   key = (keyIndex: number): Promise<string | null> =>
-    this._dispatchOperation<string | null>('key', [keyIndex]);
+    Number.isSafeInteger(keyIndex)
+      ? this._dispatchOperation<string | null>('key', [keyIndex])
+      : Promise.reject(
+          createLocalSpaceError(
+            'INVALID_ARGUMENT',
+            'key() index must be a safe integer.',
+            { operation: 'key', reason: 'invalid-key-index', keyIndex }
+          )
+        );
 
   keys: LocalSpaceInstance['keys'] = ((
     internalOperation?: PluginInternalOperation

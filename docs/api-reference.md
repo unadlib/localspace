@@ -206,7 +206,8 @@ Returns logical visible keys in driver iteration order.
 ### `key(index): Promise<string | null>`
 
 Returns the logical visible key at a zero-based index, or `null` when the index
-is outside the current key list.
+is outside the current key list. Indexes that are not safe integers (`NaN`,
+`Infinity`, fractions) reject with `INVALID_ARGUMENT`.
 
 ### `iterate<T, U>(iterator): Promise<U | undefined>`
 
