@@ -1,10 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import localspace from '../src/index';
 import { LocalSpaceError } from '../src/errors';
 import compressionPlugin from '../src/plugins/compression';
 
 describe('Compression plugin decompression failures', () => {
   it('should surface decompression errors as LocalSpaceError', async () => {
+    const warn = vi.spyOn(console, 'warn');
     const codec = {
       compress: (_data: Uint8Array) => new Uint8Array([1]),
       decompress: () => {
@@ -32,5 +33,9 @@ describe('Compression plugin decompression failures', () => {
     await expect(store.getItem('key')).rejects.toThrow(
       /Failed to decompress payload/
     );
+    // Decompression failures propagate under the default lenient policy, so
+    // compression no longer warns about that combination.
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

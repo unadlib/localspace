@@ -225,19 +225,6 @@ const snapshotPlugin = (input: LocalSpacePlugin): LocalSpacePlugin => {
  * Plugin combination warnings to help users avoid problematic configurations.
  */
 const PLUGIN_WARNINGS = {
-  LENIENT_WITH_COMPRESSION: {
-    condition: (
-      plugins: LocalSpacePlugin[],
-      config: LocalSpaceConfigSnapshot
-    ): boolean => {
-      const hasCompression = plugins.some(
-        (plugin) => getBuiltInStorageTransformKind(plugin) === 'compression'
-      );
-      return hasCompression && config.pluginErrorPolicy === 'lenient';
-    },
-    message:
-      '[localspace] Warning: Using lenient error policy with compression plugin may cause data corruption if decompression fails.',
-  },
   ENCRYPTION_BEFORE_COMPRESSION: {
     condition: (plugins: LocalSpacePlugin[]): boolean => {
       const encIdx = plugins.findIndex(
@@ -321,11 +308,10 @@ export class PluginManager {
    */
   private validatePluginCombinations(): void {
     const plugins = this.pluginRegistry.map((r) => r.plugin);
-    const config = this.host.config();
 
     for (const [key, warning] of Object.entries(PLUGIN_WARNINGS)) {
       if (this.warningsEmitted.has(key)) continue;
-      if (warning.condition(plugins, config)) {
+      if (warning.condition(plugins)) {
         console.warn(warning.message);
         this.warningsEmitted.add(key);
       }
