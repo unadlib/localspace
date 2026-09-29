@@ -31,8 +31,8 @@ export interface TTLPluginOptions {
   /** Optional cleanup interval in milliseconds */
   cleanupInterval?: number;
   /**
-   * Batch size for cleanup operations (default: 100).
-   * Larger batches are more efficient but may cause longer pauses.
+   * @deprecated Has no effect since 3.0.1: each sweep is a single logical
+   * scan of the store.
    */
   cleanupBatchSize?: number;
   /**
@@ -245,7 +245,7 @@ const scheduleCleanup = (
   }
   metadata.timer = setInterval(() => {
     if (!metadata.paused && !metadata.stopped) {
-      void cleanupExpired(context, options, metadata);
+      void cleanupExpired(context, metadata);
     }
   }, options.cleanupInterval);
 };
@@ -288,61 +288,22 @@ const pauseCleanup = (
   };
 };
 
-/**
- * Chunk an array into batches of a given size.
- */
-const chunkArray = <T>(arr: T[], size: number): T[][] => {
-  if (size <= 0 || arr.length === 0) return [arr];
-  const chunks: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) {
-    chunks.push(arr.slice(i, i + size));
-  }
-  return chunks;
-};
-
 const cleanupExpired = (
   context: PluginContext,
-  options: TTLPluginOptions,
   metadata: TTLMetadata
 ): Promise<void> => {
   if (metadata.cleanupPromise) {
     return metadata.cleanupPromise;
   }
   const cleanupPromise = (async () => {
-    const batchSize = options.cleanupBatchSize ?? 100;
-    const keys = await (
+    // While TTL is active, keys() is a logical scan: every entry passes
+    // through afterGetItems, which removes expired values, so the sweep needs
+    // no second read pass.
+    await (
       context.instance.keys as (
         internalOperation: typeof TTL_BACKGROUND_CLEANUP_OPERATION
       ) => Promise<string[]>
     )(TTL_BACKGROUND_CLEANUP_OPERATION);
-    const batches = chunkArray(keys, batchSize);
-
-    for (const batch of batches) {
-      try {
-        // Use batch getItems for efficient cleanup.
-        // The TTL afterGetItems hook will handle expiration and removal.
-        await (
-          context.instance.getItems as <T>(
-            keys: string[],
-            internalOperation: typeof TTL_BACKGROUND_CLEANUP_OPERATION
-          ) => Promise<BatchResponse<T>>
-        )(batch, TTL_BACKGROUND_CLEANUP_OPERATION);
-      } catch {
-        // If batch fails, fall back to individual gets
-        for (const key of batch) {
-          try {
-            await (
-              context.instance.getItem as <T>(
-                itemKey: string,
-                internalOperation: typeof TTL_BACKGROUND_CLEANUP_OPERATION
-              ) => Promise<T | null>
-            )(key, TTL_BACKGROUND_CLEANUP_OPERATION);
-          } catch {
-            // Ignore individual key failures during cleanup.
-          }
-        }
-      }
-    }
   })();
 
   metadata.cleanupPromise = cleanupPromise;

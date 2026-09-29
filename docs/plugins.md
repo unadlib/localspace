@@ -450,7 +450,6 @@ const plugin = ttlPlugin({
     session: 15 * 60_000,
   },
   cleanupInterval: 30_000,
-  cleanupBatchSize: 100,
   onExpire: async (key, value) => {
     await reportExpiration(key, value);
   },
@@ -464,7 +463,7 @@ Options:
 | `defaultTTL`       | default lifetime in milliseconds; missing/non-positive/non-finite means no wrapper |
 | `keyTTL`           | per-key lifetime overrides                                                         |
 | `cleanupInterval`  | optional background scan interval                                                  |
-| `cleanupBatchSize` | background scan chunk size, default 100                                            |
+| `cleanupBatchSize` | deprecated; no effect since 3.0.1 (each sweep is one logical scan)                 |
 | `onExpire`         | notification after an expired key is successfully removed                          |
 
 Foreground reads await `onExpire` and follow `pluginErrorPolicy`. Background
@@ -474,6 +473,14 @@ stops the timer and waits for the storage sweep itself.
 
 Expired values are hidden even when no periodic sweep is configured. Item,
 batch, iteration, key, and length operations agree on the logical view.
+
+That agreement has a cost. While TTL (or any plugin defining `isValueVisible`)
+is active, `keys()`, `length()`, and `key(index)` read and transform every
+stored value, including decryption and decompression, instead of asking the
+driver for keys or a count. Each call is O(n) in the store size, so a loop such
+as `for (let i = 0; i < (await store.length()); i++) await store.key(i)` is
+O(n²); call `keys()` once, or use `iterate()`, instead. A background sweep is
+one such scan per `cleanupInterval`.
 
 Outside `runTransaction`, TTL removes an expired key only while it still holds
 the stored value that was read, so a fresh value written concurrently (for

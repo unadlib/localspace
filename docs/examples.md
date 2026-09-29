@@ -206,7 +206,6 @@ const apiCache = localspace.createInstance({
         'api:/api/feed/home': 2 * 60 * 1000, // 2 minutes
       },
       cleanupInterval: 5 * 60 * 1000, // Cleanup every 5 minutes
-      cleanupBatchSize: 200,
     }),
 
     // Compress large responses

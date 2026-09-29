@@ -230,12 +230,11 @@ describe('LocalSpace.close', () => {
       ...memoryDriver,
       _driver: uniqueName('slow-ttl-sweep-driver'),
       _support: true,
-      getItems: async function <T>(keys: string[]) {
+      // The sweep is a logical scan, which reads through iterate().
+      iterate: async function (...args: Parameters<Driver['iterate']>) {
         markSweepStarted();
         await sweepGate;
-        return memoryDriver.getItems!.call(this, keys) as Promise<
-          Array<{ key: string; value: T | null }>
-        >;
+        return memoryDriver.iterate.apply(this, args);
       },
     };
     const instance = localspace.createInstance({
