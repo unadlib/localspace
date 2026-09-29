@@ -67,6 +67,13 @@ export type EncryptionPluginOptions = EncryptionKeySource & {
   ivGenerator?: () => Uint8Array;
   /** Custom secure random filler, useful for non-standard runtimes */
   randomSource?: (buffer: Uint8Array) => Uint8Array;
+  /**
+   * Return stored values that are not encrypted payloads unchanged instead of
+   * rejecting them. Enable only while migrating existing plaintext data: an
+   * unencrypted value is not authenticated and may have been written by anyone
+   * with storage access.
+   */
+  allowPlaintext?: boolean;
 };
 
 export type LegacyEncryptionMigrationAlgorithm =
@@ -84,6 +91,8 @@ export type LegacyEncryptionMigrationOptions = EncryptionKeySource & {
   subtle?: SubtleCrypto;
   /** Legacy read algorithm. This API never encrypts new values. */
   algorithm: LegacyEncryptionMigrationAlgorithm;
+  /** Return stored values that are not encrypted payloads unchanged. */
+  allowPlaintext?: boolean;
 };
 
 type EncryptedPayloadBody = {
@@ -521,6 +530,26 @@ const createEncryptionPlugin = (
     return validateCryptoKey(key, algorithmName as string, [requiredUsage]);
   };
 
+  const allowPlaintext =
+    (options as { allowPlaintext?: unknown }).allowPlaintext === true;
+  const readPayload = (
+    value: unknown,
+    itemKey?: string
+  ): EncryptedPayloadBody | null => {
+    const payload = parseEncryptedPayload(value);
+    if (payload || value === null || value === undefined || allowPlaintext) {
+      return payload;
+    }
+    throw createLocalSpaceError(
+      'DESERIALIZATION_FAILED',
+      'Stored value is not encrypted; enable allowPlaintext to read unencrypted data.',
+      {
+        reason: 'unencrypted-value',
+        ...(itemKey ? { key: itemKey } : {}),
+      }
+    );
+  };
+
   const encryptionAlgorithm = (iv: Uint8Array): AesGcmParams => ({
     ...(normalOptions?.algorithm ?? {
       name: AES_GCM,
@@ -656,11 +685,11 @@ const createEncryptionPlugin = (
     beforeSet: async <T>(_key: string, value: T): Promise<T> =>
       (await encryptValue(value)) as unknown as T,
     afterGet: async <T>(
-      _key: string,
+      key: string,
       value: T | null,
       _context: PluginContext
     ): Promise<T | null> => {
-      const payload = parseEncryptedPayload(value);
+      const payload = readPayload(value, key);
       return payload ? decryptValue<T>(payload) : value;
     },
     beforeSetItems: async <T>(
@@ -679,7 +708,7 @@ const createEncryptionPlugin = (
     ): Promise<BatchResponse<T>> =>
       Promise.all(
         entries.map(async ({ key: itemKey, value }) => {
-          const payload = parseEncryptedPayload(value);
+          const payload = readPayload(value, itemKey);
           return payload
             ? { key: itemKey, value: await decryptValue<T>(payload, itemKey) }
             : { key: itemKey, value };

@@ -567,6 +567,14 @@ Only one of `key` and `keyDerivation` may be supplied. Web Crypto and a secure
 random source are required. Invalid configuration, serialization, encryption,
 decryption, malformed envelopes, and algorithm mismatches all fail closed.
 
+Reads also fail closed on stored values that are not encrypted payloads: they
+reject with `DESERIALIZATION_FAILED` (`details.reason: 'unencrypted-value'`),
+because an unencrypted value is not authenticated and may have been written by
+anyone with storage access. When adding encryption to a store that already
+holds plaintext, set `allowPlaintext: true` on a migration instance, read each
+value, and rewrite it through an instance without that option. Missing keys
+still read as `null`.
+
 ### Legacy AES-CBC/AES-CTR migration
 
 `encryptionPlugin()` rejects AES-CBC and AES-CTR. Use the separate read-only

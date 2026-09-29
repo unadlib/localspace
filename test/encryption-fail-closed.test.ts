@@ -62,6 +62,33 @@ afterEach(() => {
 });
 
 describe('encryption plugin fail-closed behavior', () => {
+  it('rejects unencrypted stored values unless plaintext reads are allowed', async () => {
+    const { secure, raw, config } = await createMemoryStores(
+      'encryption-plaintext-read',
+      encryptionPlugin({ key: VALID_KEY })
+    );
+    await secure.setItem('encrypted', 'secret');
+    await raw.setItem('role', 'admin');
+
+    await expect(secure.getItem('role')).rejects.toMatchObject({
+      code: 'DESERIALIZATION_FAILED',
+      details: { reason: 'unencrypted-value', key: 'role' },
+    });
+    await expect(secure.getItems(['encrypted', 'role'])).rejects.toMatchObject({
+      code: 'DESERIALIZATION_FAILED',
+      details: { reason: 'unencrypted-value', key: 'role' },
+    });
+    await expect(secure.getItem('missing')).resolves.toBeNull();
+
+    const migrating = localspace.createInstance({
+      ...config,
+      plugins: [encryptionPlugin({ key: VALID_KEY, allowPlaintext: true })],
+    });
+    await migrating.setDriver([migrating.MEMORY]);
+    await expect(migrating.getItem('role')).resolves.toBe('admin');
+    await expect(migrating.getItem('encrypted')).resolves.toBe('secret');
+  });
+
   it('rejects an invalid raw key without writing the plaintext value', async () => {
     const { secure, raw } = await createMemoryStores(
       'encryption-invalid-key',

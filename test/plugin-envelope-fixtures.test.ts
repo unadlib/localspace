@@ -49,11 +49,12 @@ const kinds: PluginEnvelopeKind[] = ['encryption', 'compression', 'ttl'];
 
 const createPlugin = (
   kind: PluginEnvelopeKind,
-  encryptionKey = fixtures.keys.encryption
+  encryptionKey = fixtures.keys.encryption,
+  allowPlaintext = false
 ): LocalSpacePlugin => {
   switch (kind) {
     case 'encryption':
-      return encryptionPlugin({ key: encryptionKey });
+      return encryptionPlugin({ key: encryptionKey, allowPlaintext });
     case 'compression':
       return compressionPlugin();
     case 'ttl':
@@ -64,13 +65,14 @@ const createPlugin = (
 const createStorePair = async (
   label: string,
   kind: PluginEnvelopeKind,
-  encryptionKey?: string
+  encryptionKey?: string,
+  allowPlaintext?: boolean
 ) => {
   const name = `${label}-${kind}-${Math.random().toString(36).slice(2)}`;
   const options = { name, storeName: 'store' };
   const store = localspace.createInstance({
     ...options,
-    plugins: [createPlugin(kind, encryptionKey)],
+    plugins: [createPlugin(kind, encryptionKey, allowPlaintext)],
   });
   await store.setDriver([store.MEMORY]);
   const raw = {
@@ -123,11 +125,29 @@ describe('static cross-version plugin fixtures', () => {
   it('preserves static marker-collision user objects', async () => {
     for (const kind of kinds) {
       const collision = fixtures.markerCollisions[kind];
-      const { store, raw } = await createStorePair('collision-fixture', kind);
+      const { store, raw } = await createStorePair(
+        'collision-fixture',
+        kind,
+        undefined,
+        true
+      );
       await raw.setItem('fixture', collision);
 
       await expect(store.getItem('fixture'), kind).resolves.toEqual(collision);
     }
+
+    const encrypted = await createStorePair(
+      'collision-fixture-fail-closed',
+      'encryption'
+    );
+    await encrypted.raw.setItem(
+      'fixture',
+      fixtures.markerCollisions.encryption
+    );
+    await expect(encrypted.store.getItem('fixture')).rejects.toMatchObject({
+      code: 'DESERIALIZATION_FAILED',
+      details: { reason: 'unencrypted-value' },
+    });
 
     const { store, raw } = await createStorePair(
       'namespace-lookalike-fixture',

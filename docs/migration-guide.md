@@ -466,6 +466,12 @@ the returned byte length, not uniqueness; omit the hooks to use its default
 CSPRNG unless the runtime can enforce that stronger coordination contract. See
 [the encryption plugin guide](plugins.md#encryption-plugin) for details.
 
+Since 3.0.1, encrypted instances reject stored values that are not encrypted
+payloads with `DESERIALIZATION_FAILED` (`details.reason: 'unencrypted-value'`)
+instead of returning them unchanged. If a store mixes plaintext written before
+encryption was enabled, read it through an instance created with
+`allowPlaintext: true` and rewrite each value.
+
 For AES-CBC or AES-CTR data, open the old namespace with
 `legacyEncryptionMigrationPlugin`, read each value, and write it into a
 separate AES-GCM instance. The migration reader rejects every write and cannot

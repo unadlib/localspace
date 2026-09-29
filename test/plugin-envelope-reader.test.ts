@@ -458,6 +458,7 @@ describe('versioned plugin envelope reader', () => {
         prefix: 'encryption-marker-collision',
         plugin: encryptionPlugin({
           key: '0123456789abcdef0123456789abcdef',
+          allowPlaintext: true,
         }),
         value: { __ls_encrypted: true, applicationValue: 'encryption' },
       },
