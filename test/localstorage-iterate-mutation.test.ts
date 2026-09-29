@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LocalSpace } from '../src/localspace';
 import { ttlPlugin } from '../src/index';
 
@@ -68,4 +68,58 @@ describe('localStorage iterate with concurrent mutation', () => {
     expect(visited.sort()).toEqual(['b', 'd']);
     expect((await store.keys()).sort()).toEqual(['b', 'd']);
   });
+});
+
+describe('localStorage removal with unstable native key order', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Chromium may reorder localStorage keys after a removal; reverse the
+  // native order on every removal to model that.
+  const reorderKeysAfterRemoval = () => {
+    let removals = 0;
+    const removeItem = Storage.prototype.removeItem;
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (
+      this: Storage,
+      key: string
+    ) {
+      removals += 1;
+      removeItem.call(this, key);
+    });
+    vi.spyOn(Storage.prototype, 'key').mockImplementation(function (
+      this: Storage,
+      index: number
+    ) {
+      const keys = Object.keys(this).sort();
+      if (removals % 2 === 1) keys.reverse();
+      return keys[index] ?? null;
+    });
+  };
+
+  for (const operation of ['clear', 'dropInstance'] as const) {
+    it(`${operation}() removes every entry`, async () => {
+      const store = new LocalSpace({
+        name: `unstable-order-${operation}`,
+        storeName: 'items',
+        driver: 'localStorageWrapper',
+      });
+      for (const key of ['a', 'b', 'c', 'd', 'e']) {
+        await store.setItem(key, key);
+      }
+      reorderKeysAfterRemoval();
+
+      await store[operation]();
+
+      expect(
+        Object.keys(localStorage).filter((key) =>
+          key.startsWith(`unstable-order-${operation}/`)
+        )
+      ).toEqual([]);
+    });
+  }
 });

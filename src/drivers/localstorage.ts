@@ -118,6 +118,20 @@ function createOwnsKey(name: string, keyPrefix: string) {
   return createKeyOwnership(name, keyPrefix, readRegisteredStores(name));
 }
 
+// Native key order is not stable across mutations (Chromium reorders keys
+// after a removal), so callers that mutate must snapshot matching keys first
+// instead of walking indexes while removing.
+function listKeys(ownsKey: (key: string) => boolean): string[] {
+  const keys: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && ownsKey(key)) {
+      keys.push(key);
+    }
+  }
+  return keys;
+}
+
 function checkIfLocalStorageThrows(): boolean {
   const localStorageTestKey = '_localforage_support_test';
 
@@ -173,12 +187,8 @@ function clear(this: LocalStorageDriverContext): Promise<void> {
   const promise = withLocalStorageErrorContext(
     this.ready().then(() => {
       const ownsKey = createOwnsKey(this._dbInfo.name!, this._dbInfo.keyPrefix);
-
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const key = localStorage.key(i);
-        if (key && ownsKey(key)) {
-          localStorage.removeItem(key);
-        }
+      for (const key of listKeys(ownsKey)) {
+        localStorage.removeItem(key);
       }
     }),
     'clear'
@@ -220,16 +230,9 @@ function iterate<T, U>(
       const dbInfo = this._dbInfo;
       const keyPrefix = dbInfo.keyPrefix;
       const keyPrefixLength = keyPrefix.length;
-      const ownsKey = createOwnsKey(dbInfo.name!, keyPrefix);
       // Snapshot the namespace first: the awaited iterator may remove or add
       // entries, which shifts native localStorage indexes.
-      const fullKeys: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && ownsKey(key)) {
-          fullKeys.push(key);
-        }
-      }
+      const fullKeys = listKeys(createOwnsKey(dbInfo.name!, keyPrefix));
       let iterationNumber = 1;
 
       for (const key of fullKeys) {
@@ -551,11 +554,8 @@ function dropInstance(
           ? (key: string) => key.indexOf(keyPrefix) === 0
           : createOwnsKey(name, keyPrefix);
 
-        for (let i = localStorage.length - 1; i >= 0; i--) {
-          const key = localStorage.key(i);
-          if (key && ownsKey(key)) {
-            localStorage.removeItem(key);
-          }
+        for (const key of listKeys(ownsKey)) {
+          localStorage.removeItem(key);
         }
         if (dropsDatabase) {
           writeRegisteredStores(name, []);
