@@ -220,23 +220,25 @@ function iterate<T, U>(
       const keyPrefix = dbInfo.keyPrefix;
       const keyPrefixLength = keyPrefix.length;
       const ownsKey = createOwnsKey(dbInfo.name!, keyPrefix);
-      const length = localStorage.length;
+      // Snapshot the namespace first: the awaited iterator may remove or add
+      // entries, which shifts native localStorage indexes.
+      const fullKeys: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && ownsKey(key)) {
+          fullKeys.push(key);
+        }
+      }
       let iterationNumber = 1;
 
-      for (let i = 0; i < length; i++) {
-        const key = localStorage.key(i);
-        if (!key || !ownsKey(key)) {
+      for (const key of fullKeys) {
+        const rawValue = localStorage.getItem(key);
+        if (rawValue === null) {
           continue;
         }
 
-        const rawValue = localStorage.getItem(key);
-        let value: T | null = null;
-        if (rawValue !== null) {
-          value = dbInfo.serializer.deserialize(rawValue) as T;
-        }
-
         const result = await iterator(
-          value as T,
+          dbInfo.serializer.deserialize(rawValue) as T,
           key.substring(keyPrefixLength),
           iterationNumber++
         );
