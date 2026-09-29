@@ -380,30 +380,27 @@ async function serialize(value: unknown): Promise<string> {
     return SERIALIZED_MARKER + TYPE_BLOB + str;
   }
 
-  try {
-    let containsNestedBinary = false;
-    const json = JSON.stringify(value, (_key, nestedValue) => {
-      if (getStorageBinaryTag(nestedValue)) {
-        containsNestedBinary = true;
-        return null;
-      }
-      return nestedValue;
-    });
-    if (!containsNestedBinary) {
-      return json;
+  // Failures propagate without logging the value: it may be plaintext that an
+  // encryption plugin was about to protect.
+  let containsNestedBinary = false;
+  const json = JSON.stringify(value, (_key, nestedValue) => {
+    if (getStorageBinaryTag(nestedValue)) {
+      containsNestedBinary = true;
+      return null;
     }
-    const portable = encodePortableNode(value, new WeakSet());
-    if (portable === undefined) {
-      throw createLocalSpaceError(
-        'SERIALIZATION_FAILED',
-        'Failed to encode a nested binary value.'
-      );
-    }
-    return PORTABLE_CODEC_PREFIX + JSON.stringify(portable);
-  } catch (error) {
-    console.error("Couldn't convert value into a JSON string: ", value);
-    throw error;
+    return nestedValue;
+  });
+  if (!containsNestedBinary) {
+    return json;
   }
+  const portable = encodePortableNode(value, new WeakSet());
+  if (portable === undefined) {
+    throw createLocalSpaceError(
+      'SERIALIZATION_FAILED',
+      'Failed to encode a nested binary value.'
+    );
+  }
+  return PORTABLE_CODEC_PREFIX + JSON.stringify(portable);
 }
 
 function deserialize(value: string): unknown {

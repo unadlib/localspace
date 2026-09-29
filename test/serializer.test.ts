@@ -2,6 +2,16 @@ import { describe, it, expect, vi } from 'vitest';
 import serializer from '../src/utils/serializer';
 
 describe('serializer round-trip behaviour', () => {
+  it('does not log the value when serialization fails', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const secret: Record<string, unknown> = { token: 'secret-token' };
+    secret.self = secret;
+
+    await expect(serializer.serialize(secret)).rejects.toThrow(TypeError);
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
   it('serializes and deserializes plain objects via JSON', async () => {
     const payload = { foo: 'bar', nested: { answer: 42 } };
     const encoded = await serializer.serialize(payload);
