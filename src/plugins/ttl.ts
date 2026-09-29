@@ -14,6 +14,7 @@ import {
   readPluginEnvelope,
 } from '../core/plugin-envelope.js';
 import {
+  getPluginStoredValueRemover,
   hasPluginInternalOperation,
   markBuiltInStorageTransformPlugin,
   markPluginBackgroundTaskController,
@@ -204,26 +205,28 @@ const notifyExpiredInBackground = (
   void notifyExpired(key, value, context, options).catch(() => undefined);
 };
 
-const removeExpiredKey = (
-  key: string,
-  context: PluginContext
-): Promise<void> =>
-  context.transactionScope
-    ? context.transactionScope.remove(key)
-    : context.instance.removeItem(key);
-
+/**
+ * Removes expired keys and resolves to the keys actually removed. Outside a
+ * transaction, a key is only removed while it still holds the expired value
+ * that was read, so a concurrent write of a fresh value survives.
+ */
 const removeExpiredKeys = async (
   keys: string[],
   context: PluginContext
-): Promise<void> => {
-  if (!context.transactionScope) {
-    await context.instance.removeItems(keys);
-    return;
+): Promise<string[]> => {
+  if (context.transactionScope) {
+    for (const key of keys) {
+      await context.transactionScope.remove(key);
+    }
+    return keys;
   }
 
-  for (const key of keys) {
-    await context.transactionScope.remove(key);
+  const removeStoredValues = getPluginStoredValueRemover(context);
+  if (removeStoredValues) {
+    return removeStoredValues(keys);
   }
+  await context.instance.removeItems(keys);
+  return keys;
 };
 
 const scheduleCleanup = (
@@ -391,8 +394,8 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
 
     if (payload.expiresAt <= Date.now()) {
       markPluginValueHidden(context, key);
-      const removed = await removeExpiredKey(key, context).then(
-        () => true,
+      const removed = await removeExpiredKeys([key], context).then(
+        (removedKeys) => removedKeys.length > 0,
         () => false
       );
       if (removed) {
@@ -457,13 +460,12 @@ const createTtlPlugin = (options: TTLPluginOptions = {}): LocalSpacePlugin => ({
 
     // Remove expired keys in batch
     if (expiredKeys.length > 0) {
-      const removed = await removeExpiredKeys(expiredKeys, context).then(
-        () => true,
-        () => false
+      const removedKeys = new Set(
+        await removeExpiredKeys(expiredKeys, context).catch(() => [])
       );
-      if (removed) {
-        // Notify only after every expired key has been removed.
-        for (const entry of expiredEntries) {
+      // Notify only after every expired key has been removed.
+      for (const entry of expiredEntries) {
+        if (removedKeys.has(entry.key)) {
           if (
             hasPluginInternalOperation(
               context,

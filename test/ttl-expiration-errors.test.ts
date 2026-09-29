@@ -15,6 +15,8 @@ const createRemovalFailingStore = async (
     ...memoryDriver,
     _driver: uniqueName('ttl-removal-failure-driver'),
     _support: true,
+    // Without transactions, expired values are removed through removeItem.
+    _capabilities: { ...memoryDriver._capabilities, transactions: false },
     removeItem,
     removeItems,
   };
@@ -190,10 +192,10 @@ describe('TTL expiration callback errors', () => {
 
   it('does not notify when an expired batch cannot be removed', async () => {
     const expire = expireAfterWrite();
-    const removeItem = vi.fn(memoryDriver.removeItem);
-    const removeItems = vi.fn(async () => {
+    const removeItem = vi.fn(async () => {
       throw new Error('batch removal failed');
     });
+    const removeItems = vi.fn(memoryDriver.removeItems!);
     const onExpire = vi.fn();
     const store = await createRemovalFailingStore(
       removeItem,
@@ -212,7 +214,7 @@ describe('TTL expiration callback errors', () => {
     ];
     await expect(store.getItems(['first', 'second'])).resolves.toEqual(expired);
     await expect(store.getItems(['first', 'second'])).resolves.toEqual(expired);
-    expect(removeItems).toHaveBeenCalledTimes(2);
+    expect(removeItem).toHaveBeenCalledTimes(2);
     expect(onExpire).not.toHaveBeenCalled();
     await store.close();
   });

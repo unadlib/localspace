@@ -475,6 +475,13 @@ stops the timer and waits for the storage sweep itself.
 Expired values are hidden even when no periodic sweep is configured. Item,
 batch, iteration, key, and length operations agree on the logical view.
 
+Outside `runTransaction`, TTL removes an expired key only while it still holds
+the stored value that was read, so a fresh value written concurrently (for
+example by another tab or by the application while a sweep runs) survives.
+Drivers with native transactions perform the check and removal atomically;
+localStorage and React Native AsyncStorage re-read the key immediately before
+removing it.
+
 ## Compression plugin
 
 ```ts

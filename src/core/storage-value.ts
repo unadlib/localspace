@@ -393,3 +393,54 @@ export const normalizeStorageValue = (value: StorageValue): StorageValue => {
   }
   return normalizeValidatedStorageValue(value);
 };
+
+/**
+ * Compares two values read back from a driver. Blobs compare by size and type
+ * because their bytes are only readable asynchronously; stored plugin
+ * envelopes carry per-write IVs or expiry timestamps that distinguish writes.
+ */
+export const storedValuesEqual = (left: unknown, right: unknown): boolean => {
+  if (Object.is(left, right)) {
+    return true;
+  }
+  if (
+    !left ||
+    !right ||
+    typeof left !== 'object' ||
+    typeof right !== 'object' ||
+    Object.prototype.toString.call(left) !==
+      Object.prototype.toString.call(right)
+  ) {
+    return false;
+  }
+  if (isBlobValue(left) || isBlobValue(right)) {
+    return (
+      isBlobValue(left) &&
+      isBlobValue(right) &&
+      left.size === right.size &&
+      left.type === right.type
+    );
+  }
+  const leftBytes = copyBufferSourceBytes(left);
+  if (leftBytes) {
+    const rightBytes = copyBufferSourceBytes(right);
+    return (
+      !!rightBytes &&
+      leftBytes.byteLength === rightBytes.byteLength &&
+      leftBytes.every((byte, index) => byte === rightBytes[index])
+    );
+  }
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(right, key) &&
+        storedValuesEqual(
+          (left as Record<string, unknown>)[key],
+          (right as Record<string, unknown>)[key]
+        )
+    )
+  );
+};

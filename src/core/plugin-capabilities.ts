@@ -32,9 +32,16 @@ type PluginBackgroundTaskController = (
   context: PluginContext
 ) => PluginBackgroundTaskPause;
 
+/**
+ * Removes the given stored keys only while each still holds the value read by
+ * the current operation, and resolves to the keys it removed.
+ */
+export type PluginStoredValueRemover = (keys: string[]) => Promise<string[]>;
+
 type PluginContextInternalState = {
   operation?: PluginInternalOperation;
   hiddenKeys?: Set<string>;
+  removeStoredValues?: PluginStoredValueRemover;
 };
 
 const pluginContextInternalStates = new WeakMap<
@@ -97,6 +104,18 @@ export const isPluginValueHidden = (
   key: string
 ): boolean =>
   getPluginContextInternalState(context).hiddenKeys?.has(key) ?? false;
+
+export const setPluginStoredValueRemover = (
+  context: PluginContext,
+  remover: PluginStoredValueRemover
+): void => {
+  getPluginContextInternalState(context).removeStoredValues = remover;
+};
+
+export const getPluginStoredValueRemover = (
+  context: PluginContext
+): PluginStoredValueRemover | null =>
+  getPluginContextInternalState(context).removeStoredValues ?? null;
 
 export const markBuiltInStorageTransformPlugin = <T extends LocalSpacePlugin>(
   plugin: T,

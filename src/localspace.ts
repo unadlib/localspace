@@ -10,6 +10,7 @@ import type {
   BatchResponse,
   TransactionMode,
   TransactionScope,
+  PluginContext,
   PluginOperation,
   LocalSpaceCapabilities,
   LocalSpaceConfigSnapshot,
@@ -32,11 +33,13 @@ import { createConfigSnapshot, normalizeConfigOptions } from './core/config.js';
 import {
   isPluginValueHidden,
   markPluginInternalOperation,
+  setPluginStoredValueRemover,
   type PluginBackgroundTaskPause,
   type PluginInternalOperation,
 } from './core/plugin-capabilities.js';
 import {
   normalizeStorageValue,
+  storedValuesEqual,
   validateStorageValueWrite,
 } from './core/storage-value.js';
 import {
@@ -1226,6 +1229,11 @@ export class LocalSpace implements LocalSpaceInstance {
       markPluginInternalOperation(context, internalOperation);
       const targetKey = await this._pluginManager.beforeGet(key, context);
       const driverValue = await original(targetKey);
+      if (!transactionScope) {
+        this._trackStoredValues(context, [
+          { key: targetKey, value: driverValue },
+        ]);
+      }
       const logicalValue = await this._pluginManager.afterGet(
         targetKey,
         driverValue as unknown,
@@ -1376,6 +1384,7 @@ export class LocalSpace implements LocalSpaceInstance {
       const driverResponse = (await original(
         prepared.keys
       )) as BatchResponse<unknown>;
+      this._trackStoredValues(batchContext, driverResponse);
       const storageResult = await this._pluginManager.afterGetItems(
         driverResponse,
         batchContext,
@@ -1489,6 +1498,9 @@ export class LocalSpace implements LocalSpaceInstance {
       context.transactionScope
     );
     markPluginInternalOperation(readContext, internalOperation);
+    if (!readContext.transactionScope) {
+      this._trackStoredValues(readContext, storedEntries);
+    }
     const prepared = this._pluginManager.prepareReadItems(
       storedEntries.map(({ key }) => key),
       readContext
@@ -1636,6 +1648,11 @@ export class LocalSpace implements LocalSpaceInstance {
             undefined,
             transactionScope
           );
+          if (!transactionScope) {
+            this._trackStoredValues(entryContext, [
+              { key, value: storedValue },
+            ]);
+          }
           const storageValue = await this._pluginManager.afterGet(
             key,
             storedValue,
@@ -1826,6 +1843,59 @@ export class LocalSpace implements LocalSpaceInstance {
       }
       return result;
     };
+  }
+
+  /**
+   * Lets plugins that hide a value they just read (such as TTL expiry) delete
+   * it without clobbering a write that landed after the read: each key is only
+   * removed while it still holds the value this operation read, atomically
+   * when the driver supports transactions.
+   */
+  private _trackStoredValues(
+    context: PluginContext,
+    entries: ReadonlyArray<{ key: string; value: unknown }>
+  ): void {
+    const readValues = new Map(entries.map(({ key, value }) => [key, value]));
+    setPluginStoredValueRemover(context, async (keys) => {
+      const session = this._activeDriverSession;
+      if (!session) {
+        throw this._notInitializedError('removeItem');
+      }
+      const removeUnchanged = async (
+        read: (key: string) => Promise<unknown>,
+        remove: (key: string) => Promise<unknown>
+      ): Promise<string[]> => {
+        const removed: string[] = [];
+        for (const key of keys) {
+          if (
+            readValues.has(key) &&
+            !storedValuesEqual(await read(key), readValues.get(key))
+          ) {
+            continue;
+          }
+          await remove(key);
+          removed.push(key);
+        }
+        return removed;
+      };
+
+      if (this._capabilitiesSnapshot?.transactions) {
+        return (await session.operations.runTransaction(
+          'readwrite',
+          (scope: TransactionScope) =>
+            runDriverTransactionScopeOperation(scope, 'remove', () =>
+              removeUnchanged(
+                (key) => scope.get(key),
+                (key) => scope.remove(key)
+              )
+            )
+        )) as string[];
+      }
+      return removeUnchanged(
+        (key) => session.operations.getItem(key),
+        (key) => session.operations.removeItem(key)
+      );
+    });
   }
 
   private async _ensurePluginsInitialized(
