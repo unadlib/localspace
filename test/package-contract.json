@@ -7,7 +7,7 @@
     "unpackedBytes": 2036351
   },
   "budgets": {
-    "entryCount": 61,
+    "entryCount": 63,
     "packedBytes": 500000,
     "unpackedBytes": 2200000,
     "mainBundleBytes": 126000,
@@ -18,6 +18,8 @@
   "files": [
     "LICENSE",
     "README.md",
+    "dist/core/async-storage-adapter.d.cts",
+    "dist/core/async-storage-adapter.d.ts",
     "dist/core/config.d.cts",
     "dist/core/config.d.ts",
     "dist/core/driver-capabilities.d.cts",

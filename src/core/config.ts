@@ -4,6 +4,7 @@ import type {
   ReactNativeAsyncStorage,
 } from '../types.js';
 import { createLocalSpaceError } from '../errors.js';
+import { setAsyncStorageAdapterSource } from './async-storage-adapter.js';
 
 export type InternalConfigOptions = Partial<LocalSpaceConfig> & {
   size?: unknown;
@@ -251,20 +252,6 @@ export function normalizeConfigOptions(
   return normalized;
 }
 
-const asyncStorageAdapterSources = new WeakMap<
-  ReactNativeAsyncStorage,
-  ReactNativeAsyncStorage
->();
-
-/**
- * Returns the caller-supplied adapter behind an instance's frozen snapshot, so
- * instances configured with the same AsyncStorage can share driver state.
- */
-export const getAsyncStorageAdapterSource = (
-  adapter: ReactNativeAsyncStorage
-): ReactNativeAsyncStorage =>
-  asyncStorageAdapterSources.get(adapter) ?? adapter;
-
 const snapshotAsyncStorageAdapter = (
   adapter: ReactNativeAsyncStorage
 ): ReactNativeAsyncStorage => {
@@ -287,7 +274,7 @@ const snapshotAsyncStorageAdapter = (
     }
   }
   const frozen = Object.freeze(snapshot) as ReactNativeAsyncStorage;
-  asyncStorageAdapterSources.set(frozen, getAsyncStorageAdapterSource(adapter));
+  setAsyncStorageAdapterSource(frozen, adapter);
   return frozen;
 };
 

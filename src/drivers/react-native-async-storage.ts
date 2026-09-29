@@ -16,7 +16,7 @@ import {
   chunkArray,
 } from '../utils/helpers.js';
 import serializer from '../utils/serializer.js';
-import { getAsyncStorageAdapterSource } from '../core/config.js';
+import { getAsyncStorageAdapterSource } from '../core/async-storage-adapter.js';
 import {
   createKeyOwnership,
   getStoreRegistryKey,
