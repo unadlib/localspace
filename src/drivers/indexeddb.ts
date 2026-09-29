@@ -43,6 +43,10 @@ const DRIVER_NAME = 'asyncStorage';
 const READ_ONLY = 'readonly';
 const READ_WRITE = 'readwrite';
 const ITERATE_PAGE_SIZE = 64;
+// Transaction keep-alive requests count this array key. LocalSpace keys are
+// strings, so the count is always zero and costs a single key lookup instead
+// of a scan of the whole store.
+const KEEP_ALIVE_PROBE_KEY: IDBValidKey = ['localspace.keep-alive'];
 let detectBlobSupportPromise: Promise<boolean> | null = null;
 
 const isPromiseLike = <T>(value: T | Promise<T>): value is Promise<T> =>
@@ -1553,7 +1557,7 @@ function runTransaction<T>(
 
               try {
                 keepAliveRequestPending = true;
-                const request = store.count();
+                const request = store.count(KEEP_ALIVE_PROBE_KEY);
                 const continueKeepAlive = (): void => {
                   keepAliveRequestPending = false;
                   for (const task of pendingActiveRequestTasks.splice(0)) {
