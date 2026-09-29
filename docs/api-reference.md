@@ -614,6 +614,12 @@ runs `onDestroy` for initialized plugins, and releases the selected driver
 session. It is idempotent; later storage/lifecycle operations reject with
 `INSTANCE_CLOSED`.
 
+`close()` does not drain storage work. While an operation or transaction on the
+instance is pending, it rejects with `OPERATION_FAILED`
+(`details.reason: 'active-operations'`) and the instance stays open, so await
+outstanding operations before closing. Background plugin work, such as a TTL
+sweep, is paused and awaited instead.
+
 If cleanup rejects, the instance remains closed and a later `close()` retries
 only unfinished cleanup. `destroy()` was removed; use `close()` for disposal,
 `clear()` for current-store deletion, or `dropInstance()` for namespace

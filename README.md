@@ -391,6 +391,13 @@ deleted.
 await cache.close();
 ```
 
+`close()` does not wait for storage work: while any operation or transaction on
+the instance is still pending, it rejects with `OPERATION_FAILED`
+(`details.reason: 'active-operations'`) and leaves the instance open. Await
+outstanding operations first, then close. Waiting instead would deadlock when
+`close()` is awaited from inside an iterator, transaction runner, or plugin
+hook of the pending operation.
+
 `destroy()` was removed in 3.0. If custom-driver cleanup rejects, the closed
 instance retains that cleanup and a later `close()` retries it. Calls that
 would re-enter a pending plugin or driver lifecycle callback are rejected
