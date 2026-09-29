@@ -40,14 +40,16 @@ retain the same-run JSON evidence.
 
 ## Release evidence workflow
 
-`benchmark-results/release-3.0.0.json`, when present, is the authoritative
-same-run evidence for the release candidate. Do not duplicate its current
+`benchmark-results/release-3.0.1.json`, when present, is the authoritative
+same-run evidence for the release candidate. Evidence files for earlier
+releases, such as `release-3.0.0.json`, are kept as a record of what those tags
+shipped. Do not duplicate its current
 measurements in prose: those copies become stale after the next source or
 package change. Generate the report with:
 
 ```sh
 node scripts/compare-v2.1-baseline.mjs --skip-legacy-probes \
-  --output benchmark-results/release-3.0.0.json
+  --output benchmark-results/release-3.0.1.json
 ```
 
 Run it only after the last source change, from a clean worktree at the candidate
@@ -92,7 +94,7 @@ Neither file can be regenerated: `prewarmTransactions`, `connectionIdleMs`, and
 `maxConcurrentTransactions` no longer exist in the source, so the "before"
 configuration is unreachable from the current tree. They are retained only as
 the raw backing for the removal decision below. Current 3.0 performance claims
-must come from a freshly generated `benchmark-results/release-3.0.0.json`.
+must come from a freshly generated `benchmark-results/release-3.0.1.json`.
 
 Before removal, the candidate's prewarm-on and prewarm-off ready medians were
 both 0.4 ms. The pinned 2.1.0 artifact measured 0.4 ms with prewarm and 0.5 ms
