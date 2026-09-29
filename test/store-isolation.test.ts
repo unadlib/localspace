@@ -101,6 +101,36 @@ describe('localStorage store isolation', () => {
 });
 
 describe('React Native store isolation', () => {
+  it('registers named stores whose first writes run concurrently', async () => {
+    const asyncStorage = new MemoryAsyncStorage();
+    // Yield between registry reads and writes so the updates interleave.
+    const getItem = asyncStorage.getItem.bind(asyncStorage);
+    asyncStorage.getItem = async (key) => {
+      const value = await getItem(key);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      return value;
+    };
+    const [defaults, users, orders] = await Promise.all(
+      [undefined, 'users', 'orders'].map((storeName) =>
+        createReactNativeInstance(localspace, {
+          name: 'rn-concurrent-registration',
+          ...(storeName ? { storeName } : {}),
+          reactNativeAsyncStorage: asyncStorage,
+        })
+      )
+    );
+
+    await Promise.all([users.setItem('u1', 'alice'), orders.setItem('o1', 1)]);
+    await defaults.setItem('a', 1);
+
+    expect(await defaults.keys()).toEqual(['a']);
+    expect(
+      JSON.parse(
+        asyncStorage.data.get('localspace:stores:rn-concurrent-registration')!
+      ).sort()
+    ).toEqual(['orders', 'users']);
+  });
+
   it('keeps named stores out of default-store scans', async () => {
     const asyncStorage = new MemoryAsyncStorage();
     const defaults = await createReactNativeInstance(localspace, {

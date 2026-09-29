@@ -201,6 +201,24 @@ const getRegisteredStoreCache = (
   return cache;
 };
 
+const registryUpdates = new WeakMap<ReactNativeAsyncStorage, Promise<void>>();
+
+// AsyncStorage has no atomic read-modify-write, so registry updates through the
+// same adapter run one at a time; concurrent first writes to two named stores
+// would otherwise each overwrite the other's registration.
+function updateRegistry(
+  asyncStorage: ReactNativeAsyncStorage,
+  update: () => Promise<void>
+): Promise<void> {
+  const source = getAsyncStorageAdapterSource(asyncStorage);
+  const next = (registryUpdates.get(source) ?? Promise.resolve()).then(update);
+  registryUpdates.set(
+    source,
+    next.catch(() => undefined)
+  );
+  return next;
+}
+
 async function registerStore(
   dbInfo: ReactNativeAsyncStorageDbInfo
 ): Promise<void> {
@@ -213,14 +231,19 @@ async function registerStore(
   if (cache.has(cacheKey)) {
     return;
   }
-  const stores = await readRegisteredStores(dbInfo.asyncStorage, dbInfo.name!);
-  if (!stores.includes(storeName)) {
-    await writeRegisteredStores(dbInfo.asyncStorage, dbInfo.name!, [
-      ...stores,
-      storeName,
-    ]);
-  }
-  cache.add(cacheKey);
+  await updateRegistry(dbInfo.asyncStorage, async () => {
+    const stores = await readRegisteredStores(
+      dbInfo.asyncStorage,
+      dbInfo.name!
+    );
+    if (!stores.includes(storeName)) {
+      await writeRegisteredStores(dbInfo.asyncStorage, dbInfo.name!, [
+        ...stores,
+        storeName,
+      ]);
+    }
+    cache.add(cacheKey);
+  });
 }
 
 function forgetRegisteredStores(
@@ -651,17 +674,21 @@ function dropInstance(
           : await createOwnsKey(this._dbInfo, name, keyPrefix);
         await removeStoredKeys(this._dbInfo, allKeys.filter(ownsKey));
         if (dropsDatabase) {
-          forgetRegisteredStores(asyncStorage, name);
-          await writeRegisteredStores(asyncStorage, name, []);
+          await updateRegistry(asyncStorage, async () => {
+            forgetRegisteredStores(asyncStorage, name);
+            await writeRegisteredStores(asyncStorage, name, []);
+          });
         } else if (storeName !== this._defaultConfig.storeName) {
-          forgetRegisteredStores(asyncStorage, name, storeName);
-          await writeRegisteredStores(
-            asyncStorage,
-            name,
-            (await readRegisteredStores(asyncStorage, name)).filter(
-              (store) => store !== storeName
-            )
-          );
+          await updateRegistry(asyncStorage, async () => {
+            forgetRegisteredStores(asyncStorage, name, storeName);
+            await writeRegisteredStores(
+              asyncStorage,
+              name,
+              (await readRegisteredStores(asyncStorage, name)).filter(
+                (store) => store !== storeName
+              )
+            );
+          });
         }
       });
 
