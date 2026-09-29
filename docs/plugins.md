@@ -487,7 +487,9 @@ the stored value that was read, so a fresh value written concurrently (for
 example by another tab or by the application while a sweep runs) survives.
 Drivers with native transactions perform the check and removal atomically;
 localStorage and React Native AsyncStorage re-read the key immediately before
-removing it.
+removing it. While a transaction is active on the same instance, removal is
+deferred: the expired value stays hidden and a later read or sweep removes it
+(and then calls `onExpire`).
 
 ## Compression plugin
 

@@ -18,7 +18,7 @@
 
 - localStorage and React Native AsyncStorage default stores no longer read, count, clear, or drop the keys of named stores that share their database name. Named stores register under `localspace:stores:<name>` on their first write; existing key prefixes are unchanged.
 - localStorage `iterate()` snapshots the namespace before invoking the iterator, so removing entries during iteration (including TTL expiry) no longer skips live entries. React Native `iterate()` now skips keys removed after its snapshot instead of passing `null`.
-- TTL removes an expired key only while it still holds the value that was read, so a fresh value written concurrently by the application, another tab, or a background sweep survives. Drivers with native transactions perform the check and removal atomically.
+- TTL removes an expired key only while it still holds the value that was read, so a fresh value written concurrently by the application, another tab, or a background sweep survives. Drivers with native transactions perform the check and removal atomically; while a same-instance transaction is active, removal is deferred to a later read or sweep.
 - `key(index)` rejects non-safe-integer indexes with `INVALID_ARGUMENT`; IndexedDB previously never settled for `NaN`, `Infinity`, or fractional indexes. IndexedDB reads now also reject when their transaction aborts.
 - `dropInstance(options)` validates and normalizes options when no plugins are registered, matching instances with plugins.
 - The TTL cleanup timer is unref'd so it no longer keeps a Node.js process alive.
